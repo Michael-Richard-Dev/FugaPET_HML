@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="FugaPET_HML.csproj" />
+  <Project Path="FugaPET_HML.Tests/FugaPET_HML.Tests.csproj" />
+</Solution>

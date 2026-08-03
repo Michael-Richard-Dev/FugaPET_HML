@@ -1,0 +1,75 @@
+﻿using System.Globalization;
+using FugaPET_HML.Modelo;
+using FugaPET_HML.Modelo.Entrada;
+
+namespace FugaPET_HML.Servicos.Operacao;
+
+/// <summary>
+/// Servico de impressao da Entrada de Produto (H9 Etapa 4). Centraliza o disparo de impressao/
+/// reimpressao de etiqueta de materia-prima e a montagem da etiqueta a partir do item persistido,
+/// para que a tela nao fale direto com o servico de impressora nem monte modelo de etiqueta.
+/// </summary>
+public sealed class ImpressaoEntradaServico
+{
+    private static readonly CultureInfo CulturaPtBr = CultureInfo.GetCultureInfo("pt-BR");
+
+    private readonly ImpressoraEtiquetaServico _impressora;
+
+    public ImpressaoEntradaServico(ImpressoraEtiquetaServico impressora)
+    {
+        _impressora = impressora ?? throw new ArgumentNullException(nameof(impressora));
+    }
+
+    public Task AquecerAsync() => _impressora.AquecerAsync();
+
+    public Task AquecerSeImpressoraDisponivelAsync() => _impressora.AquecerSeDisponivelAsync();
+
+    public Task GarantirImpressoraDisponivelAsync() => _impressora.GarantirImpressoraDisponivelAsync();
+
+    public Task<string> DescreverImpressoraAtualAsync() => _impressora.DescreverImpressoraAtualAsync();
+
+    public Task ImprimirEtiquetaMateriaPrimaAsync(DadosEtiquetaMateriaPrima etiqueta)
+        => _impressora.ImprimirEtiquetaMateriaPrimaAsync(etiqueta);
+
+    public Task ReimprimirEtiquetaMateriaPrimaAsync(DadosEtiquetaMateriaPrima etiqueta)
+        => _impressora.ReimprimirEtiquetaMateriaPrimaAsync(etiqueta);
+
+    /// <summary>
+    /// Monta a etiqueta de materia-prima a partir do item ja persistido usando o TOTAL do item.
+    /// Uso interno/legado — NAO deve ser conectado a impressao/reimpressao operacional (cada etiqueta e por
+    /// pesagem individual). Preservado para consultas internas; a impressao operacional usa MontarEtiquetaPorPesagem.
+    /// </summary>
+    public static DadosEtiquetaMateriaPrima MontarEtiqueta(EntradaProdutoItemPersistido item, string dataVencimento)
+        => MontarEtiquetaBase(item, dataVencimento, item.PesoLiquidoTotalKg);
+
+    /// <summary>
+    /// Monta a etiqueta de UMA pesagem individual (regra definitiva: uma etiqueta por pesagem). O peso impresso
+    /// e o LIQUIDO da pesagem (pesagem.PesoLiquidoKg), NUNCA o total do item. Demais campos vem do item.
+    /// </summary>
+    public static DadosEtiquetaMateriaPrima MontarEtiquetaPorPesagem(
+        EntradaProdutoItemPersistido item,
+        EntradaProdutoPesagem pesagem,
+        string dataVencimento)
+        => MontarEtiquetaBase(item, dataVencimento, pesagem.PesoLiquidoKg);
+
+    private static DadosEtiquetaMateriaPrima MontarEtiquetaBase(
+        EntradaProdutoItemPersistido item,
+        string dataVencimento,
+        decimal pesoKg)
+        => new()
+        {
+            CodigoProduto = item.Material,
+            DescricaoProduto = item.DescricaoMaterial,
+            LoteOrigem = item.NumeroPedido,
+            LoteInterno = item.NumeroItem,
+            DataFabricacao = item.DataPedido?.ToString("dd/MM/yyyy", CulturaPtBr) ?? string.Empty,
+            DataVencimento = dataVencimento,
+            CertificadoSanitario = string.Empty,
+            Sif = string.Empty,
+            Fornecedor = item.Fornecedor,
+            NumeroNotaFiscal = string.Empty,
+            Peso = pesoKg.ToString("0.###", CulturaPtBr),
+            NumeroPedido = item.NumeroPedido,
+            NumeroItem = item.NumeroItem
+        };
+}

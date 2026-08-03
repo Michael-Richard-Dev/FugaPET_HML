@@ -1,0 +1,45 @@
+﻿using FugaPET_HML.Modelo.IntegracaoSap;
+using FugaPET_HML.Servicos.Cadastro;
+
+namespace FugaPET_HML.Servicos.IntegracaoSap;
+
+/// <summary>
+/// Entrada unica da integracao de pedidos de compra SAP usada pela aplicacao.
+/// A selecao entre implementacao real e demonstracao pertence exclusivamente
+/// a composicao em <see cref="FabricaPedidoCompraSapServico"/>.
+/// </summary>
+public interface IPedidoCompraSapServico
+{
+    bool EhSimulado { get; }
+    bool SapConfigurado { get; }
+    bool EscritaSapHabilitada { get; }
+
+    Task<ResultadoOperacao> SincronizarPedidoAsync(
+        string numeroPedido,
+        CancellationToken cancellationToken = default);
+    Task<PedidoCompraSapAgregado?> ObterPedidoAgregadoAsync(
+        string numeroPedido,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Tarefa Entrada 23.1: cabeçalho FRESCO do pedido no SAP (com PurchasingProcessingStatus/ReleaseIsNotCompleted),
+    /// usado para validar aprovação/liberação ANTES de liberar a operação de Entrada. Null quando não configurado/
+    /// indisponível/não encontrado — nesse caso o validador bloqueia por segurança. NÃO usa cache de aprovação.
+    /// </summary>
+    Task<PedidoCompraSap?> ObterCabecalhoSapParaValidacaoAsync(
+        string numeroPedido,
+        CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<string>> ListarNumerosAsync(CancellationToken cancellationToken = default);
+    Task<string> ObterFornecedorPorPedidoAsync(string numeroPedido, CancellationToken cancellationToken = default);
+    Task<DateOnly?> ObterDataPorPedidoAsync(string numeroPedido, CancellationToken cancellationToken = default);
+    Task<string> ObterTipoPorPedidoAsync(string numeroPedido, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<PedidoCompraSapItem>> ListarItensPorPedidoAsync(
+        string numeroPedido,
+        CancellationToken cancellationToken = default);
+    Task<ResultadoOperacao> AtualizarPesoItemSapAsync(
+        string numeroPedido,
+        string numeroItem,
+        decimal pesoLiquido,
+        decimal pesoBruto,
+        CancellationToken cancellationToken = default);
+}
