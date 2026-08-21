@@ -5,15 +5,24 @@ namespace FugaPET_HML.Tests.IntegracaoSap;
 public sealed class PublicacaoHmlConfiguracaoSapTests
 {
     [Fact]
-    public void Csproj_DevePublicarConfiguracaoSapExemploELocalQuandoExistir()
+    public void Csproj_DevePublicarSomenteModelosEProtegerConfiguracaoRealDaMaquina()
     {
         string csproj = LerArquivoProjeto("FugaPET_HML.csproj");
 
+        // Modelos (.exemplo.json) vao para o publish como referencia da 1a configuracao.
         Assert.Contains("<None Include=\"configuracao.sap.exemplo.json\">", csproj, StringComparison.Ordinal);
+        Assert.Contains("<Content Include=\"configuracao.banco.exemplo.json\">", csproj, StringComparison.Ordinal);
+        Assert.Contains("<Content Include=\"configuracao.terminal.exemplo.json\">", csproj, StringComparison.Ordinal);
+
+        // Configuracoes REAIS existem no bin (execucao local) mas NUNCA no publish,
+        // para que o pacote de atualizacao nao sobrescreva os configuracao.*.json da maquina.
         Assert.Contains("<None Update=\"configuracao.sap.json\" Condition=\"Exists('configuracao.sap.json')\">", csproj, StringComparison.Ordinal);
         Assert.Contains("<Content Include=\"configuracao.banco.json\" Condition=\"Exists('configuracao.banco.json')\">", csproj, StringComparison.Ordinal);
         Assert.Contains("<Content Include=\"configuracao.terminal.json\" Condition=\"Exists('configuracao.terminal.json')\">", csproj, StringComparison.Ordinal);
-        Assert.True(csproj.Split("<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>").Length >= 5);
+
+        // Exatamente os tres modelos vao para o publish; nenhum arquivo real vai.
+        Assert.Equal(4, csproj.Split("<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>").Length);
+        Assert.Equal(4, csproj.Split("<CopyToPublishDirectory>Never</CopyToPublishDirectory>").Length);
     }
 
     [Fact]
@@ -29,6 +38,13 @@ public sealed class PublicacaoHmlConfiguracaoSapTests
         Assert.Contains("API_PRODUCT_SRV", sap.GetProperty("product_base_url").GetString(), StringComparison.Ordinal);
         Assert.Equal("DEFINIR_USUARIO_OU_USAR_VARIAVEL_AMBIENTE", sap.GetProperty("usuario").GetString());
         Assert.Equal("DEFINIR_SENHA_OU_USAR_VARIAVEL_AMBIENTE", sap.GetProperty("senha").GetString());
+
+        // API de embalagem (Integration Suite): endpoint + allowlist própria no exemplo; NUNCA credencial.
+        Assert.Contains("GetPackagingSet", sap.GetProperty("packaging_base_url").GetString(), StringComparison.Ordinal);
+        Assert.True(sap.TryGetProperty("packaging_hosts_permitidos", out _));
+        Assert.False(sap.TryGetProperty("packaging_usuario", out _));
+        Assert.False(sap.TryGetProperty("packaging_senha", out _));
+
         Assert.DoesNotContain("Authorization", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Basic ", json, StringComparison.OrdinalIgnoreCase);
     }
@@ -53,6 +69,12 @@ public sealed class PublicacaoHmlConfiguracaoSapTests
         Assert.Contains("product_base_url", checklist, StringComparison.Ordinal);
         Assert.Contains("Test-NetConnection", checklist, StringComparison.Ordinal);
         Assert.Contains("$metadata", checklist, StringComparison.Ordinal);
+
+        // API de embalagem (Integration Suite): URL/host próprios + variáveis específicas + GET de validação 200.
+        Assert.Contains("packaging_base_url", checklist, StringComparison.Ordinal);
+        Assert.Contains("FUGAPET_SAP_PACKAGING_USERNAME", checklist, StringComparison.Ordinal);
+        Assert.Contains("FUGAPET_SAP_PACKAGING_PASSWORD", checklist, StringComparison.Ordinal);
+        Assert.Contains("GetPackagingSet", checklist, StringComparison.Ordinal);
     }
 
     private static string LerArquivoProjeto(params string[] partes)

@@ -582,7 +582,45 @@ public sealed class ControleApontamentosCorrecoesFinaisTests
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Pacote039_ExigeResultadoValidoTambemEmConcluida()
+    {
+        string proposta = LerArquivoProjeto(
+            "BancoDados", "001_incrementais", "039_controle_apontamentos_producao_GAIA",
+            "039_controle_apontamentos_HML_PROPOSTA_GAIA.sql");
+
+        Assert.Contains("status NOT IN ('AGUARDANDO_FINALIZACAO', 'CONCLUIDA')", proposta, StringComparison.Ordinal);
+        Assert.Contains(
+            "resultado_operacional IN ('ConcluidoLocalmente', 'ConfirmadoSap')", proposta, StringComparison.Ordinal);
+        Assert.Contains("concluido_operacional_em IS NOT NULL", proposta, StringComparison.Ordinal);
+    }
+
     // ================= §7 Pacote 039 MVP de permissões =================
+
+    [Fact]
+    public void Pacote039_DeveCriarSomenteAsTresAcoesComEfeitoFuncional()
+    {
+        string proposta = LerArquivoProjeto(
+            "BancoDados", "001_incrementais", "039_controle_apontamentos_producao_GAIA",
+            "039_controle_apontamentos_HML_PROPOSTA_GAIA.sql");
+        string validacao = LerArquivoProjeto(
+            "BancoDados", "001_incrementais", "039_controle_apontamentos_producao_GAIA",
+            "039_controle_apontamentos_HML_VALIDACAO_GAIA.sql");
+
+        Assert.Contains("('VISUALIZAR'", proposta, StringComparison.Ordinal);
+        Assert.Contains("('INICIAR'", proposta, StringComparison.Ordinal);
+        Assert.Contains("('FINALIZAR'", proposta, StringComparison.Ordinal);
+
+        // Ações sem efeito funcional NÃO são criadas nesta versão.
+        foreach (string acao in new[] { "CONSULTAR_HISTORICO", "CANCELAR", "REABRIR", "IGNORAR_SEQUENCIA" })
+        {
+            Assert.DoesNotContain($"('{acao}'", proposta, StringComparison.Ordinal);
+        }
+
+        // E a validação recusa se alguém criar ações fora do MVP.
+        Assert.Contains(
+            "acao_permissao NOT IN ('VISUALIZAR','INICIAR','FINALIZAR')", validacao, StringComparison.Ordinal);
+    }
 
     // ================= §6 Fechamento durante leitura =================
 
@@ -614,7 +652,7 @@ public sealed class ControleApontamentosCorrecoesFinaisTests
 
     private static ProcessoControleApontamentosServico Criar(
         SapFake sap, RepositorioFake repo, IControleApontamentosAutorizacaoServico autorizacao)
-        => new(sap, () => repo, null, autorizacao);
+        => new(sap, () => repo, null, autorizacao, new RoteiroManualFake());
 
     private static bool SempreConfirma(ConfirmacaoApontamento c) => true;
 
@@ -670,7 +708,34 @@ public sealed class ControleApontamentosCorrecoesFinaisTests
         };
 
     private static string LerArquivoProjeto(params string[] partes)
-        => File.ReadAllText(Path.Combine(RaizProjeto(), Path.Combine(partes)));
+            {
+        string caminho = Path.Combine(RaizProjeto(), Path.Combine(partes));
+        if (File.Exists(caminho))
+        {
+            return File.ReadAllText(caminho);
+        }
+
+        if (partes.Length >= 4
+            && partes[0] == "BancoDados"
+            && partes[1] == "001_incrementais"
+            && partes[2] == "039_controle_apontamentos_producao_GAIA")
+        {
+            string zip = Path.Combine(
+                RaizProjeto(),
+                "BancoDados",
+                "001_incrementais",
+                "039_controle_apontamentos_producao_HML_GAIA_CORRIGIDO_FINAL.zip");
+            using System.IO.Compression.ZipArchive arquivo = System.IO.Compression.ZipFile.OpenRead(zip);
+            System.IO.Compression.ZipArchiveEntry? entrada = arquivo.GetEntry(partes[3]);
+            if (entrada is not null)
+            {
+                using StreamReader leitor = new(entrada.Open());
+                return leitor.ReadToEnd();
+            }
+        }
+
+        return File.ReadAllText(caminho);
+    }
 
     private static string ExtrairMetodo(string fonte, string assinatura)
     {
@@ -728,6 +793,24 @@ public sealed class ControleApontamentosCorrecoesFinaisTests
         public bool PodeFinalizar() => _finalizar;
     }
 
+    private sealed class RoteiroManualFake : IProductionRoutingSapServico
+    {
+        public Task<RoteiroProducaoSap?> ResolverRoteiroDaOrdemAsync(
+            OrdemProducaoSap ordem, CancellationToken cancellationToken = default)
+            => Task.FromResult<RoteiroProducaoSap?>(new RoteiroProducaoSap
+            {
+                BillOfOperationsGroup = "TESTE",
+                BillOfOperationsVariant = "1",
+                Operacoes = ordem.Operacoes
+                    .Select(o => new OperacaoRoteiroSap
+                    {
+                        Operacao = o.Operacao,
+                        CodigoTextoPadrao = "PP_FORM",
+                        TextoPadraoObtido = true
+                    })
+                    .ToList()
+            });
+    }
     private sealed class SapFake : IProductionOrderSapServico
     {
         private readonly OrdemProducaoSap? _ordem;
@@ -832,3 +915,6 @@ public sealed class ControleApontamentosCorrecoesFinaisTests
         }
     }
 }
+
+
+

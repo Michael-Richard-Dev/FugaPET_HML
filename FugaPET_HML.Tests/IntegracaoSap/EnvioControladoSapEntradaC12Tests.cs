@@ -714,32 +714,21 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
     }
 
     // Regex que cobre as formas de habilitar a escrita SAP em .cmd/.bat/.ps1 (com/sem aspas, $env:,
-    // SetEnvironmentVariable). Espelha Testar-ScriptHabilitaEscritaSap do GerarPacoteLimpo.ps1.
+    // SetEnvironmentVariable), preservando a varredura de scripts locais perigosos.
     private const string PadraoHabilitaEscritaSap =
         @"(FUGAPET_SAP_WRITE_ENABLED\s*=\s*[""']?\s*true)"
         + @"|(SetEnvironmentVariable\s*\(\s*[""']FUGAPET_SAP_WRITE_ENABLED[""']\s*,\s*[""']?\s*true)";
+
+    // Detecta somente comandos efetivos. Literais de regex, comentarios e mensagens do gerador nao contam.
+    private const string PadraoExecucaoEfetivaEscritaSap =
+        @"^\s*(?:set\s+|\$env:)?FUGAPET_SAP_WRITE_ENABLED\s*=\s*[""']?\s*true"
+        + @"|^\s*\[Environment\]::SetEnvironmentVariable\s*\(\s*[""']FUGAPET_SAP_WRITE_ENABLED[""']\s*,\s*[""']?\s*true";
 
     [Fact]
     public void Projeto_NaoDeveConterScriptQueHabilitaEscritaSap()
     {
         string raiz = RaizProjeto();
-        string[] dirsIgnoradas = ["bin", "obj", "pacotes_limpos", ".git", ".vs", "_backup"];
-        string[] extensoes = [".cmd", ".bat", ".ps1"];
-
-        List<string> scriptsPerigosos = Directory
-            .EnumerateFiles(raiz, "*.*", SearchOption.AllDirectories)
-            .Where(arquivo => extensoes.Any(ext =>
-                arquivo.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
-            .Where(arquivo => !string.Equals(
-                Path.GetFileName(arquivo), "GerarPacoteLimpo.ps1", StringComparison.OrdinalIgnoreCase))
-            .Where(arquivo => dirsIgnoradas.All(dir =>
-                !arquivo.Contains($"{Path.DirectorySeparatorChar}{dir}{Path.DirectorySeparatorChar}",
-                    StringComparison.OrdinalIgnoreCase)))
-            .Where(arquivo => System.Text.RegularExpressions.Regex.IsMatch(
-                File.ReadAllText(arquivo),
-                PadraoHabilitaEscritaSap,
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase))
-            .ToList();
+        List<string> scriptsPerigosos = ObterScriptsPerigosos(raiz);
 
         Assert.True(
             scriptsPerigosos.Count == 0,
@@ -748,40 +737,86 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
     }
 
     [Fact]
-    public void GerarPacoteLimpo_DeveBloquearScriptsQueHabilitamEscritaSap()
+    public void GerarPacoteLimpo_DeveSerPreservadoESomenteSeuCaminhoCanonicoPodeSerIgnorado()
     {
-        string script = File.ReadAllText(Path.Combine(RaizProjeto(), "Scripts", "GerarPacoteLimpo.ps1"));
+        string raiz = RaizProjeto();
+        string caminhoGerador = Path.Combine(raiz, "Scripts", "GerarPacoteLimpo.ps1");
 
-        Assert.Contains("function Testar-ScriptHabilitaEscritaSap", script, StringComparison.Ordinal);
-        // Cobre as formas alem do '=' direto: $env: e SetEnvironmentVariable.
-        Assert.Contains("$env:FUGAPET_SAP_WRITE_ENABLED", script, StringComparison.Ordinal);
-        Assert.Contains("SetEnvironmentVariable", script, StringComparison.Ordinal);
-        // Aplica a .cmd, .bat e .ps1.
-        Assert.Contains("'.cmd', '.bat', '.ps1'", script, StringComparison.Ordinal);
+        Assert.True(File.Exists(caminhoGerador), "Scripts/GerarPacoteLimpo.ps1 deve existir localmente.");
 
-        // A regex de deteccao realmente casa as variacoes pedidas.
-        string[] exemplosBloqueados =
-        [
-            "set FUGAPET_SAP_WRITE_ENABLED=true",
-            "$env:FUGAPET_SAP_WRITE_ENABLED = \"true\"",
-            "$env:FUGAPET_SAP_WRITE_ENABLED='true'",
-            "[Environment]::SetEnvironmentVariable(\"FUGAPET_SAP_WRITE_ENABLED\", \"true\", \"User\")"
-        ];
-        foreach (string exemplo in exemplosBloqueados)
-        {
-            Assert.True(
-                System.Text.RegularExpressions.Regex.IsMatch(
-                    exemplo, PadraoHabilitaEscritaSap,
-                    System.Text.RegularExpressions.RegexOptions.IgnoreCase),
-                $"Deveria bloquear: {exemplo}");
-        }
-
-        // Conteudo inofensivo nao e bloqueado.
+        string conteudoGerador = File.ReadAllText(caminhoGerador);
         Assert.False(System.Text.RegularExpressions.Regex.IsMatch(
-            "Write-Host 'build ok'", PadraoHabilitaEscritaSap,
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+            conteudoGerador,
+            PadraoExecucaoEfetivaEscritaSap,
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                | System.Text.RegularExpressions.RegexOptions.Multiline));
+        Assert.Contains("function Testar-ScriptHabilitaEscritaSap", conteudoGerador, StringComparison.Ordinal);
+        Assert.Contains("FUGAPET_SAP_WRITE_ENABLED", conteudoGerador, StringComparison.Ordinal);
+        Assert.Contains("SetEnvironmentVariable", conteudoGerador, StringComparison.Ordinal);
+        Assert.Contains("'.cmd', '.bat', '.ps1'", conteudoGerador, StringComparison.Ordinal);
+
+        string raizTemporaria = Path.Combine(
+            Path.GetTempPath(),
+            $"fugapet-governanca-{Guid.NewGuid():N}");
+
+        try
+        {
+            string diretorioCanonico = Path.Combine(raizTemporaria, "Scripts");
+            string diretorioMalicioso = Path.Combine(raizTemporaria, "Outro");
+            Directory.CreateDirectory(diretorioCanonico);
+            Directory.CreateDirectory(diretorioMalicioso);
+
+            File.WriteAllText(
+                Path.Combine(diretorioCanonico, "GerarPacoteLimpo.ps1"),
+                "$env:FUGAPET_SAP_WRITE_ENABLED = 'true'");
+            string scriptMalicioso = Path.Combine(diretorioMalicioso, "GerarPacoteLimpo.ps1");
+            File.WriteAllText(scriptMalicioso, "$env:FUGAPET_SAP_WRITE_ENABLED = 'true'");
+
+            List<string> scriptsPerigosos = ObterScriptsPerigosos(raizTemporaria);
+
+            Assert.Single(scriptsPerigosos);
+            Assert.Equal(Path.GetFullPath(scriptMalicioso), Path.GetFullPath(scriptsPerigosos[0]));
+        }
+        finally
+        {
+            if (Directory.Exists(raizTemporaria))
+            {
+                Directory.Delete(raizTemporaria, recursive: true);
+            }
+        }
     }
 
+    private static List<string> ObterScriptsPerigosos(string raiz)
+    {
+        string[] dirsIgnoradas = ["bin", "obj", "pacotes_limpos", ".git", ".vs", "_backup"];
+        string[] extensoes = [".cmd", ".bat", ".ps1"];
+
+        return Directory
+            .EnumerateFiles(raiz, "*.*", SearchOption.AllDirectories)
+            .Where(arquivo => extensoes.Any(ext =>
+                arquivo.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
+            .Where(arquivo => !EhGeradorPacoteLimpoCanonico(raiz, arquivo))
+            .Where(arquivo => dirsIgnoradas.All(dir =>
+                !arquivo.Contains($"{Path.DirectorySeparatorChar}{dir}{Path.DirectorySeparatorChar}",
+                    StringComparison.OrdinalIgnoreCase)))
+            .Where(arquivo => System.Text.RegularExpressions.Regex.IsMatch(
+                File.ReadAllText(arquivo),
+                PadraoHabilitaEscritaSap,
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            .ToList();
+    }
+
+    private static bool EhGeradorPacoteLimpoCanonico(string raiz, string arquivo)
+    {
+        string caminhoRelativo = Path
+            .GetRelativePath(raiz, arquivo)
+            .Replace(Path.DirectorySeparatorChar, '/');
+
+        return string.Equals(
+            caminhoRelativo,
+            "Scripts/GerarPacoteLimpo.ps1",
+            StringComparison.OrdinalIgnoreCase);
+    }
     [Fact]
     public void Controller_DeveDiagnosticarUnidadeOriginalEPesoSapKgSemBloqueioAntigo()
     {
@@ -1234,3 +1269,5 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
             => Task.FromResult<IReadOnlyList<PedidoCompraSapItem>>([]);
     }
 }
+
+

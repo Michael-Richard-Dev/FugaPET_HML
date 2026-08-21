@@ -1,4 +1,4 @@
-﻿namespace FugaPET_HML.Tela.Processo;
+namespace FugaPET_HML.Tela.Processo;
 
 partial class ProcessoProdutoAcabadoForm
 {

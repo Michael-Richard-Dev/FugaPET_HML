@@ -1,0 +1,14 @@
+{
+    "sap":  {
+                "base_url":  "https://vhfufds4ci.sap.fugacouros.com.br:44300/sap/opu/odata4/sap/api_purchaseorder_2/srvd_a2x/sap/purchaseorder/0001",
+                "usuario":  "PETPRODUCAO",
+                "senha":  "}6@O!^EOGv@rfD!B",
+                "sap_client":  "110",
+                "timeout_segundos":  30,
+                "packaging_base_url":  "https://fuga-sub-integration-suite-3k7anqzs.it-cpi008-rt.cfapps.br10.hana.ondemand.com/http/pesagem/handling_unit/ZC_PP_PACKINGINSTRUCTION",
+                "packaging_hosts_permitidos":  [
+                                                   "fuga-sub-integration-suite-3k7anqzs.it-cpi008-rt.cfapps.br10.hana.ondemand.com"
+                                               ],
+                "packaging_sap_client":  "110"
+            }
+}

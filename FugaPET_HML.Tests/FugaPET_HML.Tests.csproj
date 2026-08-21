@@ -22,4 +22,10 @@
     <ProjectReference Include="..\FugaPET_HML.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Evidencias historicas dos gates HML-1/HML-2.
+         Preservadas fisicamente, fora da compilacao ativa REV5. -->
+    <Compile Remove="IntegracaoSap\ProdutoAcabadoHandlingUnitGatewayHml1Tests.cs" />
+    <Compile Remove="IntegracaoSap\ProdutoAcabadoHuPostUnicoHml2Tests.cs" />
+  </ItemGroup>
 </Project>

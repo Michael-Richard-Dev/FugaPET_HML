@@ -97,26 +97,31 @@
     <Content Include="Servicos\icone\ATTRIBUTION.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <!-- Configuracoes REAIS: copiadas para o bin (execucao local no dev), porem NUNCA para o publish.
+         Assim o pacote de atualizacao NAO sobrescreve os configuracao.*.json da maquina do usuario. -->
     <Content Include="configuracao.banco.json" Condition="Exists('configuracao.banco.json')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
-    <None Include="configuracao.banco.exemplo.json">
-      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
       <CopyToPublishDirectory>Never</CopyToPublishDirectory>
-    </None>
+    </Content>
     <Content Include="configuracao.terminal.json" Condition="Exists('configuracao.terminal.json')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
-    <None Include="configuracao.terminal.exemplo.json">
-      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
       <CopyToPublishDirectory>Never</CopyToPublishDirectory>
-    </None>
+    </Content>
     <None Update="configuracao.sap.json" Condition="Exists('configuracao.sap.json')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
     </None>
+
+    <!-- MODELOS (.exemplo.json): vao para o publish como referencia para a 1a configuracao da maquina.
+         Nunca contem segredo; o operador copia para configuracao.*.json e preenche uma unica vez. -->
+    <Content Include="configuracao.banco.exemplo.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+    <Content Include="configuracao.terminal.exemplo.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
     <None Include="configuracao.sap.exemplo.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>

@@ -1,0 +1,111 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="82f3a383-9de6-4526-b89e-4c16c21df962" name="TI@NT-TI-256 2026-08-13 09:42:55" runUser="NT-TI-256\TI" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-08-13T09:42:55.4429178-03:00" queuing="2026-08-13T09:42:55.4429221-03:00" start="2026-08-13T09:42:34.1049478-03:00" finish="2026-08-13T09:42:55.5189726-03:00" />
+  <TestSettings name="default" id="e1ae3a12-d9c8-4730-8040-e6adcf5f8914">
+    <Deployment runDeploymentRoot="TI_NT-TI-256_2026-08-13_09_42_55" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="28e46b3c-74ce-4c98-8ed6-b21fe0bfeb64" testId="a69d06e7-55f8-b6c8-716f-a69b8d7e22fc" testName="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.Pronta_NaoAutorizaNovamente_Envia" computerName="NT-TI-256" duration="00:00:00.0010072" startTime="2026-08-13T09:42:55.3930129-03:00" endTime="2026-08-13T09:42:55.3930923-03:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="28e46b3c-74ce-4c98-8ed6-b21fe0bfeb64" />
+    <UnitTestResult executionId="8bb3168c-9538-4a1a-97b4-cadc7bd8bc50" testId="44b1e5d8-5207-3e68-0228-46af9a101fb5" testName="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.Form_RecarregaSnapshot_AposPipeline_EBloqueiaSeRecargaFalhar" computerName="NT-TI-256" duration="00:00:00.0070143" startTime="2026-08-13T09:42:55.3935551-03:00" endTime="2026-08-13T09:42:55.3951953-03:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="8bb3168c-9538-4a1a-97b4-cadc7bd8bc50">
+      <Output>
+        <ErrorInfo>
+          <Message>Assert.Contains() Failure: Sub-string not found&#xD;
+String:    "private async Task SolicitarEnvioCaixaPip"···&#xD;
+Not found: "await _controller.ObterCaixaPorCodigoAsyn"···</Message>
+          <StackTrace>   at FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.Form_RecarregaSnapshot_AposPipeline_EBloqueiaSeRecargaFalhar() in C:\Visual Studio 2026\Projetos\Fuga\Fuga_Couros_HML\FugaPet_HML\FugaPET_HML.Tests\Processo\ProdutoAcabadoHuBridge044045Tests.cs:line 107&#xD;
+   at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)&#xD;
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="8a668309-4fd4-42b7-b31f-1390b3f99325" testId="a8d8f784-048d-b28a-9a4a-ebf0b489a22c" testName="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.Aguardando_AutorizacaoNaoComprovaPronta_ZeroPost" computerName="NT-TI-256" duration="00:00:00.0008784" startTime="2026-08-13T09:42:55.3926373-03:00" endTime="2026-08-13T09:42:55.3927250-03:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="8a668309-4fd4-42b7-b31f-1390b3f99325" />
+    <UnitTestResult executionId="70ff6d42-8d95-473a-8d82-b4543ba0d8a2" testId="0627ed84-d983-1f1f-c4cb-5a0eb3b67aae" testName="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.CaixaAusente_FailClosed_ZeroPost" computerName="NT-TI-256" duration="00:00:00.0005455" startTime="2026-08-13T09:42:55.3932804-03:00" endTime="2026-08-13T09:42:55.3933637-03:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="70ff6d42-8d95-473a-8d82-b4543ba0d8a2" />
+    <UnitTestResult executionId="5a33778e-2355-40c8-b201-1756a8760924" testId="bd37f460-135f-0927-0df7-74f272f80f10" testName="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.OutroEstado_ZeroPostHu(estado: Bloqueada)" computerName="NT-TI-256" duration="00:00:00.0000077" startTime="2026-08-13T09:42:55.3842169-03:00" endTime="2026-08-13T09:42:55.3842961-03:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="5a33778e-2355-40c8-b201-1756a8760924" />
+    <UnitTestResult executionId="5c49eeb6-84df-4bc8-9c13-a4d6a7761f23" testId="1a15bf19-b468-fb71-2a2a-d52acf3c70ba" testName="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.OutroEstado_ZeroPostHu(estado: IndeterminadoTimeout)" computerName="NT-TI-256" duration="00:00:00.0000163" startTime="2026-08-13T09:42:55.3839786-03:00" endTime="2026-08-13T09:42:55.3840620-03:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="5c49eeb6-84df-4bc8-9c13-a4d6a7761f23" />
+    <UnitTestResult executionId="47e0a66c-8980-413f-80b1-234cd1e16398" testId="515e5b12-4b98-3d35-fae3-7f9afea1bba4" testName="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.OutroEstado_ZeroPostHu(estado: ConfirmadaSap)" computerName="NT-TI-256" duration="00:00:00.0228307" startTime="2026-08-13T09:42:55.3640234-03:00" endTime="2026-08-13T09:42:55.3674199-03:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="47e0a66c-8980-413f-80b1-234cd1e16398" />
+    <UnitTestResult executionId="93a4eb09-5c95-40b7-bd11-a309b0a6433d" testId="7e23991c-cfe7-2138-c791-72a1e5b2edd5" testName="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.OutroEstado_ZeroPostHu(estado: EnviandoSap)" computerName="NT-TI-256" duration="00:00:00.0000076" startTime="2026-08-13T09:42:55.3844314-03:00" endTime="2026-08-13T09:42:55.3845072-03:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="93a4eb09-5c95-40b7-bd11-a309b0a6433d" />
+    <UnitTestResult executionId="320e405e-3b3a-433e-82ef-6c6bbb6ac905" testId="4a9530f0-b888-a065-39b6-ebbb3046b5ef" testName="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.OutroEstado_ZeroPostHu(estado: ErroSap)" computerName="NT-TI-256" duration="00:00:00.0004750" startTime="2026-08-13T09:42:55.3829306-03:00" endTime="2026-08-13T09:42:55.3830857-03:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="320e405e-3b3a-433e-82ef-6c6bbb6ac905" />
+    <UnitTestResult executionId="b78644c6-51f7-4e08-8866-41fa781b7c20" testId="a83c793b-cb3f-e0cd-35fb-a8ce30794c81" testName="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.Aguardando_AutorizaUmaVez_ComprovaPronta_Envia" computerName="NT-TI-256" duration="00:00:00.0006269" startTime="2026-08-13T09:42:55.4167801-03:00" endTime="2026-08-13T09:42:55.4168825-03:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b78644c6-51f7-4e08-8866-41fa781b7c20" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.OutroEstado_ZeroPostHu(estado: ErroSap)" storage="c:\visual studio 2026\projetos\fuga\fuga_couros_hml\fugapet_hml\fugapet_hml.tests\bin\release\net10.0-windows\fugapet_hml.tests.dll" id="4a9530f0-b888-a065-39b6-ebbb3046b5ef">
+      <Execution id="320e405e-3b3a-433e-82ef-6c6bbb6ac905" />
+      <TestMethod codeBase="C:\Visual Studio 2026\Projetos\Fuga\Fuga_Couros_HML\FugaPet_HML\FugaPET_HML.Tests\bin\Release\net10.0-windows\FugaPET_HML.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests" name="OutroEstado_ZeroPostHu" />
+    </UnitTest>
+    <UnitTest name="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.OutroEstado_ZeroPostHu(estado: EnviandoSap)" storage="c:\visual studio 2026\projetos\fuga\fuga_couros_hml\fugapet_hml\fugapet_hml.tests\bin\release\net10.0-windows\fugapet_hml.tests.dll" id="7e23991c-cfe7-2138-c791-72a1e5b2edd5">
+      <Execution id="93a4eb09-5c95-40b7-bd11-a309b0a6433d" />
+      <TestMethod codeBase="C:\Visual Studio 2026\Projetos\Fuga\Fuga_Couros_HML\FugaPet_HML\FugaPET_HML.Tests\bin\Release\net10.0-windows\FugaPET_HML.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests" name="OutroEstado_ZeroPostHu" />
+    </UnitTest>
+    <UnitTest name="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.Aguardando_AutorizaUmaVez_ComprovaPronta_Envia" storage="c:\visual studio 2026\projetos\fuga\fuga_couros_hml\fugapet_hml\fugapet_hml.tests\bin\release\net10.0-windows\fugapet_hml.tests.dll" id="a83c793b-cb3f-e0cd-35fb-a8ce30794c81">
+      <Execution id="b78644c6-51f7-4e08-8866-41fa781b7c20" />
+      <TestMethod codeBase="C:\Visual Studio 2026\Projetos\Fuga\Fuga_Couros_HML\FugaPet_HML\FugaPET_HML.Tests\bin\Release\net10.0-windows\FugaPET_HML.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests" name="Aguardando_AutorizaUmaVez_ComprovaPronta_Envia" />
+    </UnitTest>
+    <UnitTest name="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.OutroEstado_ZeroPostHu(estado: IndeterminadoTimeout)" storage="c:\visual studio 2026\projetos\fuga\fuga_couros_hml\fugapet_hml\fugapet_hml.tests\bin\release\net10.0-windows\fugapet_hml.tests.dll" id="1a15bf19-b468-fb71-2a2a-d52acf3c70ba">
+      <Execution id="5c49eeb6-84df-4bc8-9c13-a4d6a7761f23" />
+      <TestMethod codeBase="C:\Visual Studio 2026\Projetos\Fuga\Fuga_Couros_HML\FugaPet_HML\FugaPET_HML.Tests\bin\Release\net10.0-windows\FugaPET_HML.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests" name="OutroEstado_ZeroPostHu" />
+    </UnitTest>
+    <UnitTest name="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.OutroEstado_ZeroPostHu(estado: Bloqueada)" storage="c:\visual studio 2026\projetos\fuga\fuga_couros_hml\fugapet_hml\fugapet_hml.tests\bin\release\net10.0-windows\fugapet_hml.tests.dll" id="bd37f460-135f-0927-0df7-74f272f80f10">
+      <Execution id="5a33778e-2355-40c8-b201-1756a8760924" />
+      <TestMethod codeBase="C:\Visual Studio 2026\Projetos\Fuga\Fuga_Couros_HML\FugaPet_HML\FugaPET_HML.Tests\bin\Release\net10.0-windows\FugaPET_HML.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests" name="OutroEstado_ZeroPostHu" />
+    </UnitTest>
+    <UnitTest name="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.Aguardando_AutorizacaoNaoComprovaPronta_ZeroPost" storage="c:\visual studio 2026\projetos\fuga\fuga_couros_hml\fugapet_hml\fugapet_hml.tests\bin\release\net10.0-windows\fugapet_hml.tests.dll" id="a8d8f784-048d-b28a-9a4a-ebf0b489a22c">
+      <Execution id="8a668309-4fd4-42b7-b31f-1390b3f99325" />
+      <TestMethod codeBase="C:\Visual Studio 2026\Projetos\Fuga\Fuga_Couros_HML\FugaPet_HML\FugaPET_HML.Tests\bin\Release\net10.0-windows\FugaPET_HML.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests" name="Aguardando_AutorizacaoNaoComprovaPronta_ZeroPost" />
+    </UnitTest>
+    <UnitTest name="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.Form_RecarregaSnapshot_AposPipeline_EBloqueiaSeRecargaFalhar" storage="c:\visual studio 2026\projetos\fuga\fuga_couros_hml\fugapet_hml\fugapet_hml.tests\bin\release\net10.0-windows\fugapet_hml.tests.dll" id="44b1e5d8-5207-3e68-0228-46af9a101fb5">
+      <Execution id="8bb3168c-9538-4a1a-97b4-cadc7bd8bc50" />
+      <TestMethod codeBase="C:\Visual Studio 2026\Projetos\Fuga\Fuga_Couros_HML\FugaPet_HML\FugaPET_HML.Tests\bin\Release\net10.0-windows\FugaPET_HML.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests" name="Form_RecarregaSnapshot_AposPipeline_EBloqueiaSeRecargaFalhar" />
+    </UnitTest>
+    <UnitTest name="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.Pronta_NaoAutorizaNovamente_Envia" storage="c:\visual studio 2026\projetos\fuga\fuga_couros_hml\fugapet_hml\fugapet_hml.tests\bin\release\net10.0-windows\fugapet_hml.tests.dll" id="a69d06e7-55f8-b6c8-716f-a69b8d7e22fc">
+      <Execution id="28e46b3c-74ce-4c98-8ed6-b21fe0bfeb64" />
+      <TestMethod codeBase="C:\Visual Studio 2026\Projetos\Fuga\Fuga_Couros_HML\FugaPet_HML\FugaPET_HML.Tests\bin\Release\net10.0-windows\FugaPET_HML.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests" name="Pronta_NaoAutorizaNovamente_Envia" />
+    </UnitTest>
+    <UnitTest name="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.OutroEstado_ZeroPostHu(estado: ConfirmadaSap)" storage="c:\visual studio 2026\projetos\fuga\fuga_couros_hml\fugapet_hml\fugapet_hml.tests\bin\release\net10.0-windows\fugapet_hml.tests.dll" id="515e5b12-4b98-3d35-fae3-7f9afea1bba4">
+      <Execution id="47e0a66c-8980-413f-80b1-234cd1e16398" />
+      <TestMethod codeBase="C:\Visual Studio 2026\Projetos\Fuga\Fuga_Couros_HML\FugaPet_HML\FugaPET_HML.Tests\bin\Release\net10.0-windows\FugaPET_HML.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests" name="OutroEstado_ZeroPostHu" />
+    </UnitTest>
+    <UnitTest name="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.CaixaAusente_FailClosed_ZeroPost" storage="c:\visual studio 2026\projetos\fuga\fuga_couros_hml\fugapet_hml\fugapet_hml.tests\bin\release\net10.0-windows\fugapet_hml.tests.dll" id="0627ed84-d983-1f1f-c4cb-5a0eb3b67aae">
+      <Execution id="70ff6d42-8d95-473a-8d82-b4543ba0d8a2" />
+      <TestMethod codeBase="C:\Visual Studio 2026\Projetos\Fuga\Fuga_Couros_HML\FugaPet_HML\FugaPET_HML.Tests\bin\Release\net10.0-windows\FugaPET_HML.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests" name="CaixaAusente_FailClosed_ZeroPost" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="a69d06e7-55f8-b6c8-716f-a69b8d7e22fc" executionId="28e46b3c-74ce-4c98-8ed6-b21fe0bfeb64" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="44b1e5d8-5207-3e68-0228-46af9a101fb5" executionId="8bb3168c-9538-4a1a-97b4-cadc7bd8bc50" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="a8d8f784-048d-b28a-9a4a-ebf0b489a22c" executionId="8a668309-4fd4-42b7-b31f-1390b3f99325" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="0627ed84-d983-1f1f-c4cb-5a0eb3b67aae" executionId="70ff6d42-8d95-473a-8d82-b4543ba0d8a2" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="bd37f460-135f-0927-0df7-74f272f80f10" executionId="5a33778e-2355-40c8-b201-1756a8760924" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="1a15bf19-b468-fb71-2a2a-d52acf3c70ba" executionId="5c49eeb6-84df-4bc8-9c13-a4d6a7761f23" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="515e5b12-4b98-3d35-fae3-7f9afea1bba4" executionId="47e0a66c-8980-413f-80b1-234cd1e16398" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="7e23991c-cfe7-2138-c791-72a1e5b2edd5" executionId="93a4eb09-5c95-40b7-bd11-a309b0a6433d" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="4a9530f0-b888-a065-39b6-ebbb3046b5ef" executionId="320e405e-3b3a-433e-82ef-6c6bbb6ac905" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="a83c793b-cb3f-e0cd-35fb-a8ce30794c81" executionId="b78644c6-51f7-4e08-8866-41fa781b7c20" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Resultados que não estão em uma lista" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="Todos os resultados carregados" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Failed">
+    <Counters total="10" executed="10" passed="9" failed="1" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v3.1.4+50e68bbb8b (64-bit .NET 10.0.9)&#xD;
+[xUnit.net 00:00:19.66]   Discovering: FugaPET_HML.Tests&#xD;
+[xUnit.net 00:00:20.29]   Discovered:  FugaPET_HML.Tests&#xD;
+[xUnit.net 00:00:20.35]   Starting:    FugaPET_HML.Tests&#xD;
+[xUnit.net 00:00:20.47]       Assert.Contains() Failure: Sub-string not found&#xD;
+[xUnit.net 00:00:20.47]       String:    "private async Task SolicitarEnvioCaixaPip"···&#xD;
+[xUnit.net 00:00:20.47]       Not found: "await _controller.ObterCaixaPorCodigoAsyn"···&#xD;
+[xUnit.net 00:00:20.47]       Stack Trace:&#xD;
+[xUnit.net 00:00:20.47]         C:\Visual Studio 2026\Projetos\Fuga\Fuga_Couros_HML\FugaPet_HML\FugaPET_HML.Tests\Processo\ProdutoAcabadoHuBridge044045Tests.cs(107,0): at FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.Form_RecarregaSnapshot_AposPipeline_EBloqueiaSeRecargaFalhar()&#xD;
+[xUnit.net 00:00:20.47]            at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)&#xD;
+[xUnit.net 00:00:20.47]            at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)&#xD;
+[xUnit.net 00:00:20.49]   Finished:    FugaPET_HML.Tests&#xD;
+</StdOut>
+    </Output>
+    <RunInfos>
+      <RunInfo computerName="NT-TI-256" outcome="Error" timestamp="2026-08-13T09:42:55.3998453-03:00">
+        <Text>[xUnit.net 00:00:20.47]     FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.Form_RecarregaSnapshot_AposPipeline_EBloqueiaSeRecargaFalhar [FAIL]</Text>
+      </RunInfo>
+    </RunInfos>
+  </ResultSummary>
+</TestRun>

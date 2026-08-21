@@ -1,0 +1,69 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="c6ea5530-4985-4bea-8f5b-7f47603c5a3a" name="TI@NT-TI-256 2026-08-13 09:43:06" runUser="NT-TI-256\TI" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-08-13T09:43:06.7293934-03:00" queuing="2026-08-13T09:43:06.7293939-03:00" start="2026-08-13T09:43:05.6928960-03:00" finish="2026-08-13T09:43:06.7351463-03:00" />
+  <TestSettings name="default" id="f53890be-5df7-4f9f-87dc-bcbac7acf75c">
+    <Deployment runDeploymentRoot="TI_NT-TI-256_2026-08-13_09_43_06" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="818a03da-a1e6-4a9f-a886-da34d2c8116a" testId="44b1e5d8-5207-3e68-0228-46af9a101fb5" testName="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.Form_RecarregaSnapshot_AposPipeline_EBloqueiaSeRecargaFalhar" computerName="NT-TI-256" duration="00:00:00.0049293" startTime="2026-08-13T09:43:06.5717956-03:00" endTime="2026-08-13T09:43:06.5932574-03:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="818a03da-a1e6-4a9f-a886-da34d2c8116a">
+      <Output>
+        <ErrorInfo>
+          <Message>Assert.Contains() Failure: Sub-string not found&#xD;
+String:    "private async Task SolicitarEnvioCaixaPip"···&#xD;
+Not found: "await _controller.ObterCaixaPorCodigoAsyn"···</Message>
+          <StackTrace>   at FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.Form_RecarregaSnapshot_AposPipeline_EBloqueiaSeRecargaFalhar() in C:\Visual Studio 2026\Projetos\Fuga\Fuga_Couros_HML\FugaPet_HML\FugaPET_HML.Tests\Processo\ProdutoAcabadoHuBridge044045Tests.cs:line 107&#xD;
+   at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)&#xD;
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="5d858f7a-7d4b-45be-9c5b-9cdfa6adcc8c" testId="83b939f5-96bd-408a-ccc1-5d683838003a" testName="FugaPET_HML.Tests.Processo.ProdutoAcabadoPipeline045OrquestradorTests.Orquestrador_NaoUsaSalvarSnapshotComoAutoridade" computerName="NT-TI-256" duration="00:00:00.0015524" startTime="2026-08-13T09:43:06.6095924-03:00" endTime="2026-08-13T09:43:06.6098514-03:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="5d858f7a-7d4b-45be-9c5b-9cdfa6adcc8c" />
+    <UnitTestResult executionId="3846f1e3-ba73-41a5-b2dd-5998490359be" testId="e06e71fa-7dbd-2d2c-970f-1c21f6eee33d" testName="FugaPET_HML.Tests.Processo.ProdutoAcabadoPipeline045OrquestradorTests.GuardHu_NuncaChamadoPeloOrquestrador" computerName="NT-TI-256" duration="00:00:00.0003914" startTime="2026-08-13T09:43:06.6108661-03:00" endTime="2026-08-13T09:43:06.6109049-03:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="3846f1e3-ba73-41a5-b2dd-5998490359be" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="FugaPET_HML.Tests.Processo.ProdutoAcabadoPipeline045OrquestradorTests.Orquestrador_NaoUsaSalvarSnapshotComoAutoridade" storage="c:\visual studio 2026\projetos\fuga\fuga_couros_hml\fugapet_hml\fugapet_hml.tests\bin\release\net10.0-windows\fugapet_hml.tests.dll" id="83b939f5-96bd-408a-ccc1-5d683838003a">
+      <Execution id="5d858f7a-7d4b-45be-9c5b-9cdfa6adcc8c" />
+      <TestMethod codeBase="C:\Visual Studio 2026\Projetos\Fuga\Fuga_Couros_HML\FugaPet_HML\FugaPET_HML.Tests\bin\Release\net10.0-windows\FugaPET_HML.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="FugaPET_HML.Tests.Processo.ProdutoAcabadoPipeline045OrquestradorTests" name="Orquestrador_NaoUsaSalvarSnapshotComoAutoridade" />
+    </UnitTest>
+    <UnitTest name="FugaPET_HML.Tests.Processo.ProdutoAcabadoPipeline045OrquestradorTests.GuardHu_NuncaChamadoPeloOrquestrador" storage="c:\visual studio 2026\projetos\fuga\fuga_couros_hml\fugapet_hml\fugapet_hml.tests\bin\release\net10.0-windows\fugapet_hml.tests.dll" id="e06e71fa-7dbd-2d2c-970f-1c21f6eee33d">
+      <Execution id="3846f1e3-ba73-41a5-b2dd-5998490359be" />
+      <TestMethod codeBase="C:\Visual Studio 2026\Projetos\Fuga\Fuga_Couros_HML\FugaPet_HML\FugaPET_HML.Tests\bin\Release\net10.0-windows\FugaPET_HML.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="FugaPET_HML.Tests.Processo.ProdutoAcabadoPipeline045OrquestradorTests" name="GuardHu_NuncaChamadoPeloOrquestrador" />
+    </UnitTest>
+    <UnitTest name="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.Form_RecarregaSnapshot_AposPipeline_EBloqueiaSeRecargaFalhar" storage="c:\visual studio 2026\projetos\fuga\fuga_couros_hml\fugapet_hml\fugapet_hml.tests\bin\release\net10.0-windows\fugapet_hml.tests.dll" id="44b1e5d8-5207-3e68-0228-46af9a101fb5">
+      <Execution id="818a03da-a1e6-4a9f-a886-da34d2c8116a" />
+      <TestMethod codeBase="C:\Visual Studio 2026\Projetos\Fuga\Fuga_Couros_HML\FugaPet_HML\FugaPET_HML.Tests\bin\Release\net10.0-windows\FugaPET_HML.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests" name="Form_RecarregaSnapshot_AposPipeline_EBloqueiaSeRecargaFalhar" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="44b1e5d8-5207-3e68-0228-46af9a101fb5" executionId="818a03da-a1e6-4a9f-a886-da34d2c8116a" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="83b939f5-96bd-408a-ccc1-5d683838003a" executionId="5d858f7a-7d4b-45be-9c5b-9cdfa6adcc8c" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="e06e71fa-7dbd-2d2c-970f-1c21f6eee33d" executionId="3846f1e3-ba73-41a5-b2dd-5998490359be" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Resultados que não estão em uma lista" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="Todos os resultados carregados" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Failed">
+    <Counters total="3" executed="3" passed="2" failed="1" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v3.1.4+50e68bbb8b (64-bit .NET 10.0.9)&#xD;
+[xUnit.net 00:00:00.13]   Discovering: FugaPET_HML.Tests&#xD;
+[xUnit.net 00:00:00.39]   Discovered:  FugaPET_HML.Tests&#xD;
+[xUnit.net 00:00:00.41]   Starting:    FugaPET_HML.Tests&#xD;
+[xUnit.net 00:00:00.46]       Assert.Contains() Failure: Sub-string not found&#xD;
+[xUnit.net 00:00:00.46]       String:    "private async Task SolicitarEnvioCaixaPip"···&#xD;
+[xUnit.net 00:00:00.46]       Not found: "await _controller.ObterCaixaPorCodigoAsyn"···&#xD;
+[xUnit.net 00:00:00.46]       Stack Trace:&#xD;
+[xUnit.net 00:00:00.46]         C:\Visual Studio 2026\Projetos\Fuga\Fuga_Couros_HML\FugaPet_HML\FugaPET_HML.Tests\Processo\ProdutoAcabadoHuBridge044045Tests.cs(107,0): at FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.Form_RecarregaSnapshot_AposPipeline_EBloqueiaSeRecargaFalhar()&#xD;
+[xUnit.net 00:00:00.46]            at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)&#xD;
+[xUnit.net 00:00:00.46]            at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)&#xD;
+[xUnit.net 00:00:00.47]   Finished:    FugaPET_HML.Tests&#xD;
+</StdOut>
+    </Output>
+    <RunInfos>
+      <RunInfo computerName="NT-TI-256" outcome="Error" timestamp="2026-08-13T09:43:06.5958199-03:00">
+        <Text>[xUnit.net 00:00:00.46]     FugaPET_HML.Tests.Processo.ProdutoAcabadoHuBridge044045Tests.Form_RecarregaSnapshot_AposPipeline_EBloqueiaSeRecargaFalhar [FAIL]</Text>
+      </RunInfo>
+    </RunInfos>
+  </ResultSummary>
+</TestRun>

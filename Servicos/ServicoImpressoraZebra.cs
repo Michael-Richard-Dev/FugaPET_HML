@@ -1,4 +1,4 @@
-﻿    using System.ComponentModel;
+    using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Drawing.Printing;
 using System.Drawing.Drawing2D;
@@ -73,6 +73,14 @@ public sealed class ServicoImpressoraZebra
         ArgumentException.ThrowIfNullOrWhiteSpace(nomeImpressora);
         RawPrinterHelper.EnsurePrinterReady(nomeImpressora);
         string zpl = ConstruirZplEtiquetaMateriaPrimaGrafica(etiqueta);
+        return RawPrinterHelper.SendStringToPrinter(nomeImpressora, zpl);
+    }
+
+    public ResultadoEnvioZebra ImprimirEtiquetaCaixaProdutoAcabado(string nomeImpressora, DadosEtiquetaCaixaProdutoAcabado etiqueta)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(nomeImpressora);
+        RawPrinterHelper.EnsurePrinterReady(nomeImpressora);
+        string zpl = ConstruirZplEtiquetaCaixaProdutoAcabado(etiqueta);
         return RawPrinterHelper.SendStringToPrinter(nomeImpressora, zpl);
     }
 
@@ -167,6 +175,41 @@ public sealed class ServicoImpressoraZebra
                "^XZ";
     }
 
+
+    /// <summary>
+    /// ZPL específico da CAIXA de Produto Acabado (HU individual). Layout próprio com rótulos corretos
+    /// (OP/ITEM/MATERIAL/LOTE/CAIXA/COD.CAIXA/BRUTO-TARA-LIQUIDO/QTDE/HU SAP/DATA-TERMINAL) + código de barras
+    /// Code128 do <c>codigo_caixa_local</c> para rastreabilidade. NÃO altera Entrada nem Semi-Acabado.
+    /// </summary>
+    public string ConstruirZplEtiquetaCaixaProdutoAcabado(DadosEtiquetaCaixaProdutoAcabado etiqueta)
+    {
+        string hu = string.IsNullOrWhiteSpace(etiqueta.HandlingUnitSap) ? "PENDENTE" : etiqueta.HandlingUnitSap;
+        string codigoBarras = string.IsNullOrWhiteSpace(etiqueta.CodigoCaixaLocal)
+            ? "SEM-CODIGO"
+            : etiqueta.CodigoCaixaLocal;
+
+        return "^XA\n" +
+               "^CI28\n" +
+               $"^PW{LabelWidthDots}\n" +
+               $"^LL{LabelHeightDots}\n" +
+               "^FWN\n" +
+               "^LH0,0\n" +
+               "^FO30,30^A0N,42,42^FDPRODUTO ACABADO - CAIXA^FS\n" +
+               "^FO30,84^GB779,0,3^FS\n" +
+               $"^FO30,104^A0N,28,28^FDOP: {Z(etiqueta.OrdemProducao)}    ITEM: {Z(etiqueta.ItemOrdem)}^FS\n" +
+               $"^FO30,150^A0N,28,28^FDMATERIAL: {Z(etiqueta.Material)}^FS\n" +
+               $"^FO30,192^A0N,24,24^FB779,2,0,L^FD{Z(etiqueta.DescricaoMaterial)}^FS\n" +
+               $"^FO30,258^A0N,28,28^FDLOTE: {Z(etiqueta.Lote)}^FS\n" +
+               $"^FO30,302^A0N,34,34^FDCAIXA No: {Z(etiqueta.NumeroCaixa)}^FS\n" +
+               $"^FO30,348^A0N,28,28^FDCOD. CAIXA: {Z(etiqueta.CodigoCaixaLocal)}^FS\n" +
+               "^FO30,392^GB779,0,2^FS\n" +
+               $"^FO30,404^A0N,28,28^FDBRUTO: {Z(etiqueta.PesoBruto)}   TARA: {Z(etiqueta.Tara)}   LIQ: {Z(etiqueta.PesoLiquido)}^FS\n" +
+               $"^FO30,446^A0N,28,28^FDQTDE: {Z(etiqueta.Quantidade)}^FS\n" +
+               $"^FO30,494^A0N,36,36^FDHU SAP: {Z(hu)}^FS\n" +
+               $"^FO30,544^A0N,22,22^FD{Z(etiqueta.DataHora)}    TERMINAL: {Z(etiqueta.Terminal)}^FS\n" +
+               $"^FO60,600^BY3^BCB,120,Y,N,N^FD{Z(codigoBarras)}^FS\n" +
+               "^XZ";
+    }
 
     public string ConstruirZplEtiquetaMateriaPrimaGrafica(DadosEtiquetaMateriaPrima etiqueta)
     {
@@ -772,7 +815,6 @@ public sealed class ErroImpressaoZebraException : Exception
     public CategoriaErroImpressaoZebra Categoria { get; }
     public int? CodigoWin32 { get; }
 }
-
 
 
 

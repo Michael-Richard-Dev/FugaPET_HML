@@ -5,6 +5,12 @@
     "production_order_base_url": "https://vhfufds4ci.sap.fugacouros.com.br:44300/sap/opu/odata/sap/API_PRODUCTION_ORDER_2_SRV/",
     "production_order_confirmation_base_url": "https://vhfufds4ci.sap.fugacouros.com.br:44300/sap/opu/odata/sap/API_PROD_ORDER_CONFIRMATION_2_SRV/",
     "product_base_url": "https://vhfufds4ci.sap.fugacouros.com.br:44300/sap/opu/odata/sap/API_PRODUCT_SRV/",
+    "handling_unit_base_url": "https://vhfufds4ci.sap.fugacouros.com.br:44300/sap/opu/odata4/sap/api_handlingunit/srvd_a2x/sap/handlingunit/0001",
+    "packaging_base_url": "https://DEFINIR-INTEGRATION-SUITE.cfapps.br10.hana.ondemand.com/http/packaging/ZAPI_PACKAGING_SRV/GetPackagingSet",
+    "packaging_hosts_permitidos": [
+      "DEFINIR-INTEGRATION-SUITE.cfapps.br10.hana.ondemand.com"
+    ],
+    "packaging_sap_client": "",
     "sap_client": "110",
     "hosts_permitidos": [
       "vhfufds4ci.sap.fugacouros.com.br"
@@ -13,6 +19,7 @@
     "senha": "DEFINIR_SENHA_OU_USAR_VARIAVEL_AMBIENTE",
     "timeout_segundos": 30,
     "escrita_habilitada": false,
-    "_seguranca": "Nao versionar senha real. Em producao/HML, prefira FUGAPET_SAP_USERNAME e FUGAPET_SAP_PASSWORD."
+    "_seguranca": "Nao versionar senha real. Em producao/HML, prefira FUGAPET_SAP_USERNAME e FUGAPET_SAP_PASSWORD.",
+    "_seguranca_packaging": "A API de embalagem (Integration Suite) usa credenciais PROPRIAS, NUNCA as standard. Defina SOMENTE por variavel de ambiente: FUGAPET_SAP_PACKAGING_USERNAME e FUGAPET_SAP_PACKAGING_PASSWORD. O host do Integration Suite deve estar em packaging_hosts_permitidos. Endpoint = rota exata consultavel (.../GetPackagingSet); a consulta e por $filter=Material eq '...'. Nunca colocar usuario nem senha nem cabecalho de credencial aqui."
   }
 }

@@ -381,6 +381,7 @@ public sealed class ProductionOrderSapApiClient
             Liberada = LerFlagX(raiz, "OrderIsReleased"),
             Confirmada = LerFlagX(raiz, "OrderIsConfirmed"),
             Excluida = LerFlagX(raiz, "OrderIsDeleted"),
+            VersaoProducao = LerTexto(raiz, "ProductionVersion"),
             DataOrdem = dataOrdem,
             OrigemDataOrdem = origemData,
             Componentes = LerColecao(raiz, "to_ProductionOrderComponent", MapearComponente),
@@ -460,6 +461,7 @@ public sealed class ProductionOrderSapApiClient
             Liberada = LerFlagX(raiz, "OrderIsReleased"),
             Confirmada = LerFlagX(raiz, "OrderIsConfirmed"),
             Excluida = LerFlagX(raiz, "OrderIsDeleted"),
+            VersaoProducao = LerTexto(raiz, "ProductionVersion"),
             DataOrdem = dataOrdem,
             OrigemDataOrdem = origemData
         };
@@ -481,6 +483,7 @@ public sealed class ProductionOrderSapApiClient
             Liberada = LerXmlFlagX(props, "OrderIsReleased"),
             Confirmada = LerXmlFlagX(props, "OrderIsConfirmed"),
             Excluida = LerXmlFlagX(props, "OrderIsDeleted"),
+            VersaoProducao = LerXmlTexto(props, "ProductionVersion"),
             DataOrdem = dataOrdem,
             OrigemDataOrdem = origemData
         };
@@ -532,6 +535,7 @@ public sealed class ProductionOrderSapApiClient
             Liberada = LerXmlFlagX(props, "OrderIsReleased"),
             Confirmada = LerXmlFlagX(props, "OrderIsConfirmed"),
             Excluida = LerXmlFlagX(props, "OrderIsDeleted"),
+            VersaoProducao = LerXmlTexto(props, "ProductionVersion"),
             DataOrdem = dataOrdem,
             OrigemDataOrdem = origemData,
             Componentes = LerColecaoXml(entry, "to_ProductionOrderComponent", MapearComponenteXml),
@@ -799,4 +803,5 @@ public sealed class ProductionOrderSapConsultaException : Exception
     public string Etapa { get; }
     public int? StatusHttp { get; }
 }
+
 

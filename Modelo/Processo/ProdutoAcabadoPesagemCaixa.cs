@@ -1,4 +1,4 @@
-﻿namespace FugaPET_HML.Modelo.Processo;
+namespace FugaPET_HML.Modelo.Processo;
 
 public sealed class ProdutoAcabadoPesagemCaixa
 {
