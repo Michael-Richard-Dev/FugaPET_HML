@@ -361,27 +361,17 @@ BEGIN
             '052_VALIDACAO_FAIL audit_security_definer';
     END IF;
 
-    IF (
-        SELECT p.proconfig
+    IF NOT EXISTS (
+        SELECT 1
         FROM pg_proc p
-        JOIN pg_namespace n ON n.oid = p.pronamespace
+        JOIN pg_namespace n
+          ON n.oid = p.pronamespace
         WHERE n.nspname = 'homologacao'
           AND p.proname =
               'fn_registrar_log_alteracao_cadastral'
           AND p.prokind = 'f'
-    ) IS NULL
-    OR NOT (
-        'search_path=pg_catalog' = ANY(
-            (
-                SELECT p.proconfig
-                FROM pg_proc p
-                JOIN pg_namespace n ON n.oid = p.pronamespace
-                WHERE n.nspname = 'homologacao'
-                  AND p.proname =
-                      'fn_registrar_log_alteracao_cadastral'
-                  AND p.prokind = 'f'
-            )
-        )
+          AND p.proconfig IS NOT NULL
+          AND 'search_path=pg_catalog' = ANY(p.proconfig)
     ) THEN
         RAISE EXCEPTION
             '052_VALIDACAO_FAIL audit_search_path';
