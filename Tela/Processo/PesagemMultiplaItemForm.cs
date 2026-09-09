@@ -32,6 +32,8 @@ public sealed class PesagemMultiplaItemForm : Form
     private readonly Func<EntradaProdutoPesagem, Task<bool>>? _reimprimirPesagemAsync;
     // 054: EXCLUIR PESAGEM persistida (cancelamento lógico local). true = excluída → fecha e o pai recarrega.
     private readonly Func<EntradaProdutoPesagem, Task<bool>>? _excluirPesagemAsync;
+    private ToolStripMenuItem? _itemExcluirPesagem;
+    private bool _exclusaoPesagemEmAndamento;
 
     // Modo somente consulta/reimpressão (lançamento já persistido): bloqueia incluir/cancelar.
     private readonly bool _somenteConsulta;
@@ -198,9 +200,9 @@ public sealed class PesagemMultiplaItemForm : Form
         if (_excluirPesagemAsync is not null)
         {
             ContextMenuStrip menu = new();
-            ToolStripMenuItem itemExcluir = new("Excluir pesagem");
-            itemExcluir.Click += async (_, _) => await ExcluirPesagemSelecionadaAsync();
-            menu.Items.Add(itemExcluir);
+            _itemExcluirPesagem = new ToolStripMenuItem("Excluir pesagem");
+            _itemExcluirPesagem.Click += async (_, _) => await ExcluirPesagemSelecionadaAsync();
+            menu.Items.Add(_itemExcluirPesagem);
             _pesagensGrid.ContextMenuStrip = menu;
             _pesagensGrid.CellMouseDown += (_, e) =>
             {
@@ -217,7 +219,9 @@ public sealed class PesagemMultiplaItemForm : Form
     // valida permissão, executa a transação e recarrega). Sucesso => fecha a janela para o pai reidratar.
     private async Task ExcluirPesagemSelecionadaAsync()
     {
-        if (_excluirPesagemAsync is null || _pesagensGrid.CurrentRow is not DataGridViewRow linha)
+        if (_exclusaoPesagemEmAndamento ||
+            _excluirPesagemAsync is null ||
+            _pesagensGrid.CurrentRow is not DataGridViewRow linha)
         {
             return;
         }
@@ -234,12 +238,41 @@ public sealed class PesagemMultiplaItemForm : Form
             return; // pesagem em memória (sem PK persistida) não é excluível por este fluxo.
         }
 
-        bool excluida = await _excluirPesagemAsync(pesagem);
-        if (excluida)
+        _exclusaoPesagemEmAndamento = true;
+        AtualizarEstadoAcaoExcluirPesagem();
+        try
         {
-            DialogResult = DialogResult.OK;
-            Close();
+            bool excluida = await _excluirPesagemAsync(pesagem);
+            if (excluida)
+            {
+                DialogResult = DialogResult.OK;
+                Close();
+            }
         }
+        finally
+        {
+            _exclusaoPesagemEmAndamento = false;
+            if (!IsDisposed && !Disposing)
+            {
+                AtualizarEstadoAcaoExcluirPesagem();
+            }
+        }
+    }
+
+    private void AtualizarEstadoAcaoExcluirPesagem()
+    {
+        if (_itemExcluirPesagem is null)
+        {
+            return;
+        }
+
+        bool pesagemPersistidaSelecionada =
+            _pesagensGrid.CurrentRow is DataGridViewRow linha &&
+            linha.Index >= 0 &&
+            linha.Index < _pesagens.Count &&
+            _pesagens[linha.Index].CodigoEntradaProdutoPesagem is > 0;
+
+        _itemExcluirPesagem.Enabled = !_exclusaoPesagemEmAndamento && pesagemPersistidaSelecionada;
     }
 
     private void ConfigurarEntradaManual()

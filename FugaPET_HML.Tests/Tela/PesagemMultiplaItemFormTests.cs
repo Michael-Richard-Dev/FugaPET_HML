@@ -16,6 +16,68 @@ namespace FugaPET_HML.Tests.Tela;
 public sealed class PesagemMultiplaItemFormTests
 {
     [Fact]
+    public async Task ExcluirPesagem_DurantePrimeiroAwait_BloqueiaSegundoDisparo()
+    {
+        TaskCompletionSource<bool> operacaoPendente = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource primeiroDisparo = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        int chamadas = 0;
+        using PesagemMultiplaItemForm form = CriarFormComPesagemPersistida(async _ =>
+        {
+            Interlocked.Increment(ref chamadas);
+            primeiroDisparo.TrySetResult();
+            return await operacaoPendente.Task;
+        });
+
+        Task primeira = ExcluirPesagemSelecionadaAsync(form);
+        await primeiroDisparo.Task;
+        Task segunda = ExcluirPesagemSelecionadaAsync(form);
+
+        int chamadasDuranteEspera = Volatile.Read(ref chamadas);
+        bool itemHabilitadoDuranteEspera = ObterItemExcluir(form).Enabled;
+        operacaoPendente.SetResult(false);
+        await Task.WhenAll(primeira, segunda);
+
+        Assert.Equal(1, chamadasDuranteEspera);
+        Assert.False(itemHabilitadoDuranteEspera);
+        Assert.True(ObterItemExcluir(form).Enabled);
+        await ExcluirPesagemSelecionadaAsync(form);
+        Assert.Equal(2, Volatile.Read(ref chamadas));
+    }
+
+    [Fact]
+    public async Task ExcluirPesagem_CallbackLanca_LiberaGateNoFinally()
+    {
+        int chamadas = 0;
+        using PesagemMultiplaItemForm form = CriarFormComPesagemPersistida(_ =>
+        {
+            Interlocked.Increment(ref chamadas);
+            throw new InvalidOperationException("falha focal");
+        });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => ExcluirPesagemSelecionadaAsync(form));
+        Assert.True(ObterItemExcluir(form).Enabled);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => ExcluirPesagemSelecionadaAsync(form));
+        Assert.Equal(2, chamadas);
+    }
+
+    [Fact]
+    public async Task ExcluirPesagem_CallbackRetornaFalse_NaoDeixaGateTravado()
+    {
+        int chamadas = 0;
+        using PesagemMultiplaItemForm form = CriarFormComPesagemPersistida(_ =>
+        {
+            chamadas++;
+            return Task.FromResult(false);
+        });
+
+        await ExcluirPesagemSelecionadaAsync(form);
+        await ExcluirPesagemSelecionadaAsync(form);
+
+        Assert.Equal(2, chamadas);
+        Assert.True(ObterItemExcluir(form).Enabled);
+    }
+
+    [Fact]
     public void Concluir_IncorporaPesoManualPendente_SemImprimirConsolidado()
     {
         string conteudo = LerArquivo("Tela", "Processo", "PesagemMultiplaItemForm.cs");
@@ -740,6 +802,38 @@ public sealed class PesagemMultiplaItemFormTests
         => (DataGridView)typeof(PesagemMultiplaItemForm)
             .GetField("_pesagensGrid", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(form)!;
+
+    private static PesagemMultiplaItemForm CriarFormComPesagemPersistida(
+        Func<EntradaProdutoPesagem, Task<bool>> excluirPesagemAsync)
+    {
+        PesagemMultiplaItemForm form = new(
+            CriarBalanca(),
+            "4500001/10",
+            CriarTara(),
+            null,
+            [new EntradaProdutoPesagem
+            {
+                CodigoEntradaProdutoPesagem = 55,
+                Sequencia = 1,
+                PesoBrutoKg = 2m,
+                PesoLiquidoKg = 2m,
+                StatusPesagem = EntradaProdutoPesagemCalculos.StatusValida
+            }],
+            excluirPesagemAsync: excluirPesagemAsync);
+        DataGridView grid = ObterGrid(form);
+        grid.CurrentCell = grid.Rows[0].Cells[0];
+        return form;
+    }
+
+    private static async Task ExcluirPesagemSelecionadaAsync(PesagemMultiplaItemForm form)
+    {
+        MethodInfo metodo = typeof(PesagemMultiplaItemForm)
+            .GetMethod("ExcluirPesagemSelecionadaAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        await (Task)metodo.Invoke(form, null)!;
+    }
+
+    private static ToolStripMenuItem ObterItemExcluir(PesagemMultiplaItemForm form)
+        => (ToolStripMenuItem)ObterGrid(form).ContextMenuStrip!.Items[0];
 
     private static Button ObterBotao(PesagemMultiplaItemForm form, string nomeCampo)
         => (Button)typeof(PesagemMultiplaItemForm)
