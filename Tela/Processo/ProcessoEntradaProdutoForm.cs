@@ -3074,7 +3074,18 @@ public partial class ProcessoEntradaProdutoForm : Form
         IReadOnlyList<EntradaProdutoPesagemEmMemoria> pesagensAtuais =
             _controller.ObterPesagensLoteAtivoOperacaoComLotes(codigoItem);
 
-        using PesagemMultiplaItemForm form = new(
+        // 058: EXCLUIR PESAGEM também no fluxo do lote ativo em memória. As pesagens recuperadas já estão
+        // persistidas (carregam PK); o callback só é criado com a permissão EXATA EXCLUIR_PESAGEM. A janela
+        // ignora automaticamente pesagens sem PK (em memória pura). Sucesso => reidrata sem restart.
+        bool excluiuAlguma = false;
+        Func<EntradaProdutoPesagem, Task<bool>>? excluirPesagem = null;
+        if (PossuiPermissaoEntrada(PermissoesSistema.Acoes.ExcluirPesagem))
+        {
+            excluirPesagem = pesagem => ConfirmarEExcluirPesagemPersistidaAsync(
+                pesagem, itemPedido, sucesso => excluiuAlguma = excluiuAlguma || sucesso);
+        }
+
+        using (PesagemMultiplaItemForm form = new(
             _balancaLeituraServico,
             itemPedido,
             tara,
@@ -3093,9 +3104,17 @@ public partial class ProcessoEntradaProdutoForm : Form
                 DateTimeOffset.Now)),
             codigoLocalPesagem => Task.FromResult(_controller.CancelarPesagemOperacaoComLotes(codigoItem, codigoLocalPesagem)),
             imprimirPesagemAsync: null,
-            reimprimirPesagemAsync: null);
+            reimprimirPesagemAsync: null,
+            excluirPesagemAsync: excluirPesagem))
+        {
+            form.ShowDialog(this);
+        }
 
-        form.ShowDialog(this);
+        if (excluiuAlguma)
+        {
+            await ReidratarAposExclusaoPesagemAsync();
+            return;
+        }
 
         DataGridViewRow linhaAlvo = LocalizarLinhaProducaoPorItemId(itemId) ?? linhaItem;
         linhaAlvo.Tag = tara;

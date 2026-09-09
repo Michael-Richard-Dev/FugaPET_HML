@@ -145,7 +145,8 @@ public sealed class PesagemMultiplaItemForm : Form
         Func<decimal, string, string, Task<EntradaProdutoPesagemEmMemoria>> registrarPesagemAsync,
         Func<Guid, Task<EntradaProdutoPesagemEmMemoria>> cancelarPesagemAsync,
         Func<EntradaProdutoPesagem, Task<bool>>? imprimirPesagemAsync = null,
-        Func<EntradaProdutoPesagem, Task<bool>>? reimprimirPesagemAsync = null)
+        Func<EntradaProdutoPesagem, Task<bool>>? reimprimirPesagemAsync = null,
+        Func<EntradaProdutoPesagem, Task<bool>>? excluirPesagemAsync = null)
         : this(
             balancaLeituraServico,
             itemPedido,
@@ -156,7 +157,11 @@ public sealed class PesagemMultiplaItemForm : Form
                 .Select(p => p.Pesagem)
                 .ToList(),
             imprimirPesagemAsync,
-            reimprimirPesagemAsync)
+            reimprimirPesagemAsync,
+            // 058: encaminha o callback de exclusão também no fluxo do lote ativo em memória (pesagens
+            // recuperadas já persistidas). O menu só aparece quando o pai fornece o callback = permissão presente.
+            somenteConsulta: false,
+            excluirPesagemAsync: excluirPesagemAsync)
     {
         _modoCanonico = true;
         _registrarPesagemCanonicaAsync = registrarPesagemAsync ?? throw new ArgumentNullException(nameof(registrarPesagemAsync));
