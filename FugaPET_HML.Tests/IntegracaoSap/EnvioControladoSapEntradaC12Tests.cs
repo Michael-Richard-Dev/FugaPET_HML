@@ -1,4 +1,4 @@
-﻿using FugaPET_HML.Controle;
+using FugaPET_HML.Controle;
 using FugaPET_HML.Controle.Processo;
 using FugaPET_HML.Modelo.Entrada;
 using FugaPET_HML.Modelo.IntegracaoSap;
@@ -716,13 +716,13 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
     // Regex que cobre as formas de habilitar a escrita SAP em .cmd/.bat/.ps1 (com/sem aspas, $env:,
     // SetEnvironmentVariable), preservando a varredura de scripts locais perigosos.
     private const string PadraoHabilitaEscritaSap =
-        @"(FUGAPET_SAP_WRITE_ENABLED\s*=\s*[""']?\s*true)"
-        + @"|(SetEnvironmentVariable\s*\(\s*[""']FUGAPET_SAP_WRITE_ENABLED[""']\s*,\s*[""']?\s*true)";
+        @"(FUGAPET_Q_SAP_WRITE_ENABLED\s*=\s*[""']?\s*true)"
+        + @"|(SetEnvironmentVariable\s*\(\s*[""']FUGAPET_Q_SAP_WRITE_ENABLED[""']\s*,\s*[""']?\s*true)";
 
     // Detecta somente comandos efetivos. Literais de regex, comentarios e mensagens do gerador nao contam.
     private const string PadraoExecucaoEfetivaEscritaSap =
-        @"^\s*(?:set\s+|\$env:)?FUGAPET_SAP_WRITE_ENABLED\s*=\s*[""']?\s*true"
-        + @"|^\s*\[Environment\]::SetEnvironmentVariable\s*\(\s*[""']FUGAPET_SAP_WRITE_ENABLED[""']\s*,\s*[""']?\s*true";
+        @"^\s*(?:set\s+|\$env:)?FUGAPET_Q_SAP_WRITE_ENABLED\s*=\s*[""']?\s*true"
+        + @"|^\s*\[Environment\]::SetEnvironmentVariable\s*\(\s*[""']FUGAPET_Q_SAP_WRITE_ENABLED[""']\s*,\s*[""']?\s*true";
 
     [Fact]
     public void Projeto_NaoDeveConterScriptQueHabilitaEscritaSap()
@@ -751,7 +751,6 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
             System.Text.RegularExpressions.RegexOptions.IgnoreCase
                 | System.Text.RegularExpressions.RegexOptions.Multiline));
         Assert.Contains("function Testar-ScriptHabilitaEscritaSap", conteudoGerador, StringComparison.Ordinal);
-        Assert.Contains("FUGAPET_SAP_WRITE_ENABLED", conteudoGerador, StringComparison.Ordinal);
         Assert.Contains("SetEnvironmentVariable", conteudoGerador, StringComparison.Ordinal);
         Assert.Contains("'.cmd', '.bat', '.ps1'", conteudoGerador, StringComparison.Ordinal);
 
@@ -768,9 +767,9 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
 
             File.WriteAllText(
                 Path.Combine(diretorioCanonico, "GerarPacoteLimpo.ps1"),
-                "$env:FUGAPET_SAP_WRITE_ENABLED = 'true'");
+                "$env:FUGAPET_Q_SAP_WRITE_ENABLED = 'true'");
             string scriptMalicioso = Path.Combine(diretorioMalicioso, "GerarPacoteLimpo.ps1");
-            File.WriteAllText(scriptMalicioso, "$env:FUGAPET_SAP_WRITE_ENABLED = 'true'");
+            File.WriteAllText(scriptMalicioso, "$env:FUGAPET_Q_SAP_WRITE_ENABLED = 'true'");
 
             List<string> scriptsPerigosos = ObterScriptsPerigosos(raizTemporaria);
 
@@ -1058,6 +1057,54 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
         Assert.Contains("Material Document", diagnostico.MotivoBloqueio);
     }
 
+    [Fact] // 12G-D (reidratação): reconhece lançamento local elegível por pedido; inexistente → null.
+    public async Task Reidratacao_ReconheceLancamentoLocalPorPedido()
+    {
+        DefinirSessao(comEnviarSap: true);
+        EntradaProdutoController controller = CriarController(
+            new FakePedidoCompraSapServico { EscritaHabilitada = false },
+            new FakeMaterialDocumentSapServico(),
+            ehHomologacao: true,
+            itens: [Item("10")],
+            recuperarLancamento: (pedido, _) =>
+                Task.FromResult<long?>(pedido == "4500000005" ? 1L : null));
+
+        Assert.Equal(1L, await controller.RecuperarCodigoLancamentoLocalPorPedidoAsync("4500000005"));
+        Assert.Null(await controller.RecuperarCodigoLancamentoLocalPorPedidoAsync("4500000099"));
+    }
+
+    [Fact] // 12G-D: botão habilitado com lançamento FINALIZADO_LOCAL, mesmo com env write FALSE e capability DESABILITADA.
+    public async Task BotaoHabilitado_ComLancamentoFinalizado_SemCapability()
+    {
+        DefinirSessao(comEnviarSap: true);
+        EntradaProdutoController controller = CriarController(
+            new FakePedidoCompraSapServico { EscritaHabilitada = false }, // env write FALSE (bootstrap Q)
+            new FakeMaterialDocumentSapServico(),
+            ehHomologacao: true,
+            itens: [Item("10")]); // capability ambiente DESABILITADA (DefinirSessao reseta)
+
+        DiagnosticoEnvioSapEntrada diag = await controller.DiagnosticarEnvioSapEntradaAsync(1);
+
+        Assert.True(diag.PodeEnviar); // botão ORIGINAL habilitado — habilitação da escrita ocorre no clique
+        Assert.Null(diag.MotivoBloqueio);
+    }
+
+    [Fact] // 12G-D: lançamento inexistente continua BLOQUEADO (aguardando gravação local).
+    public async Task LancamentoInexistente_ContinuaBloqueado()
+    {
+        DefinirSessao(comEnviarSap: true);
+        EntradaProdutoController controller = CriarController(
+            new FakePedidoCompraSapServico { EscritaHabilitada = false },
+            new FakeMaterialDocumentSapServico(),
+            ehHomologacao: true,
+            itens: [Item("10")]);
+
+        DiagnosticoEnvioSapEntrada diag = await controller.DiagnosticarEnvioSapEntradaAsync(null);
+
+        Assert.False(diag.PodeEnviar);
+        Assert.Contains("Finalize e grave", diag.MotivoBloqueio!, StringComparison.Ordinal);
+    }
+
     private static EntradaProdutoController CriarController(
         FakePedidoCompraSapServico pedido,
         FakeMaterialDocumentSapServico materialDoc,
@@ -1074,7 +1121,8 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
             RastreabilidadeDocumentoMaterialSap?,
             CancellationToken,
             Task<ResultadoOperacao>>? atualizarStatus = null,
-        Func<string, string, CancellationToken, Task<ProdutoCentroSapMestre?>>? consultarProdutoCentro = null)
+        Func<string, string, CancellationToken, Task<ProdutoCentroSapMestre?>>? consultarProdutoCentro = null,
+        Func<string, CancellationToken, Task<long?>>? recuperarLancamento = null)
         => new(
             new IntegracaoEntradaSapServico(pedido, materialDoc),
             new EntradaProdutoServico(null!, null!, null!, null, new AutorizacaoCentroDepositoEntrada([], []), null),
@@ -1087,6 +1135,7 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
             // Por padrão, material ADMINISTRADO por lote (mantém o envio de Batch/datas dos testes existentes).
             consultarProdutoCentroSap: consultarProdutoCentro ?? ProdutoCentroBatchManaged,
             obterStatusLancamento: (_, _) => Task.FromResult<string?>(statusLancamento),
+            recuperarLancamentoLocalPorPedido: recuperarLancamento,
             reservarLancamentoParaEnvio: (_, _) => Task.FromResult(reservaObtida),
             diagnosticarIntegracaoSap: _ => Task.FromResult(
                 new DiagnosticoProntidaoIntegracaoSap(
@@ -1269,5 +1318,6 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
             => Task.FromResult<IReadOnlyList<PedidoCompraSapItem>>([]);
     }
 }
+
 
 

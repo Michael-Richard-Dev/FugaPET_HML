@@ -302,6 +302,12 @@ public sealed class EntradaProdutoServico
         CancellationToken cancellationToken = default)
         => _repositorio.ObterStatusLancamentoAsync(codigoLancamento, cancellationToken);
 
+    /// <summary>READ-ONLY (12G-D): localiza o lancamento local elegivel de um pedido para reidratar a tela.</summary>
+    public Task<long?> ObterCodigoLancamentoLocalElegivelPorPedidoAsync(
+        string numeroPedido,
+        CancellationToken cancellationToken = default)
+        => _repositorio.ObterCodigoLancamentoLocalElegivelPorPedidoAsync(numeroPedido, cancellationToken);
+
     /// <summary>Reserva atomica do lancamento (FINALIZADO_LOCAL/ERRO_SAP -&gt; ENVIADO_SAP) antes do POST.
     /// Retorna false quando outro envio ja reservou (concorrencia/idempotencia).</summary>
     public Task<bool> TentarReservarLancamentoParaEnvioSapAsync(

@@ -223,7 +223,7 @@ public partial class ProcessoSemiAcabadoForm : Form
         // Tarefa 20.5 (Ajuste 5): mesmo efeito hover do cabecalho da Entrada.
         ConfigureTitleButtonHover(minimizeWindowLabel, Color.FromArgb(36, 46, 61));
         ConfigureTitleButtonHover(maximizeWindowLabel, Color.FromArgb(36, 46, 61));
-        ConfigureTitleButtonHover(closeWindowLabel, Color.FromArgb(184, 18, 32));
+        ConfigureTitleButtonHover(closeWindowLabel, Color.FromArgb(200, 78, 10));
     }
 
     private static void ConfigureTitleButtonHover(Label button, Color hoverColor)
@@ -2064,7 +2064,7 @@ public partial class ProcessoSemiAcabadoForm : Form
             && !_modoReenvioLancamentoPersistido
             && !_bloqueioLancamentoAberto;
         iniciarLeituraButton.BaseBackColor = _leituraIniciada
-            ? Color.FromArgb(212, 37, 49)
+            ? Color.FromArgb(250, 105, 26)
             : podeAlternarLeitura ? Color.FromArgb(34, 166, 82) : Color.FromArgb(156, 163, 175);
         iniciarLeituraButton.BaseForeColor = Color.White;
         iniciarLeituraButton.IconFontFamily = "Segoe UI Symbol";

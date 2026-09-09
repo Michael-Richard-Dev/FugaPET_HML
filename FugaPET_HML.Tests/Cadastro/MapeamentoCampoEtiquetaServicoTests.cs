@@ -17,7 +17,7 @@ public sealed class MapeamentoCampoEtiquetaServicoTests : IDisposable
     public MapeamentoCampoEtiquetaServicoTests()
     {
         Environment.SetEnvironmentVariable(
-            "FUGAPET_HML_CONEXAO_POSTGRES",
+            "FUGAPET_Q_CONEXAO_POSTGRES",
             "Host=localhost;Port=5432;Database=teste;Username=teste;Password=teste");
 
         // Sessao com permissao para gerenciar o mapeamento (passa o gate de autorizacao).
@@ -78,3 +78,4 @@ public sealed class MapeamentoCampoEtiquetaServicoTests : IDisposable
             => Task.CompletedTask;
     }
 }
+

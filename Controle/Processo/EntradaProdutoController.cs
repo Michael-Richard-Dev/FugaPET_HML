@@ -43,6 +43,8 @@ public sealed class EntradaProdutoController
     // fábrica; testes injetam um stub. Somente leitura; a Form/o controller nunca falam direto com HTTP.
     private readonly Func<string, string, CancellationToken, Task<ProdutoCentroSapMestre?>> _consultarProdutoCentroSap;
     private readonly Func<long, CancellationToken, Task<string?>> _obterStatusLancamento;
+    // 12G-D: reidratação — localiza o lançamento local elegível por pedido (read-only). Seam p/ teste.
+    private readonly Func<string, CancellationToken, Task<long?>> _recuperarLancamentoLocalPorPedido;
     private readonly Func<long, CancellationToken, Task<bool>> _reservarLancamentoParaEnvio;
     private readonly Func<CancellationToken, Task<DiagnosticoProntidaoIntegracaoSap>> _diagnosticarIntegracaoSap;
     private readonly Func<
@@ -53,6 +55,8 @@ public sealed class EntradaProdutoController
         CancellationToken,
         Task<ResultadoOperacao>> _atualizarStatusAposEnvioSap;
     private readonly EntradaProdutoLotesOrquestrador _lotesOrquestrador;
+    // Capability runtime de escrita SAP 101 (12E-E-B). Singleton em memoria por padrao; injetavel em teste.
+    private readonly IRuntimeSapWriteCapabilityService _capability;
 
     // Ctor padrao: a fabrica decide mock/real (a tela nao decide nem instancia servico SAP concreto).
     public EntradaProdutoController()
@@ -79,6 +83,7 @@ public sealed class EntradaProdutoController
         Func<long, CancellationToken, Task<IReadOnlyList<EntradaProdutoItemEnvioSap>>>? carregarItensParaEnvio = null,
         Func<string, string, CancellationToken, Task<ProdutoCentroSapMestre?>>? consultarProdutoCentroSap = null,
         Func<long, CancellationToken, Task<string?>>? obterStatusLancamento = null,
+        Func<string, CancellationToken, Task<long?>>? recuperarLancamentoLocalPorPedido = null,
         Func<long, CancellationToken, Task<bool>>? reservarLancamentoParaEnvio = null,
         Func<CancellationToken, Task<DiagnosticoProntidaoIntegracaoSap>>? diagnosticarIntegracaoSap = null,
         Func<
@@ -88,7 +93,8 @@ public sealed class EntradaProdutoController
             RastreabilidadeDocumentoMaterialSap?,
             CancellationToken,
             Task<ResultadoOperacao>>? atualizarStatusAposEnvioSap = null,
-        EntradaProdutoLotesOrquestrador? lotesOrquestrador = null)
+        EntradaProdutoLotesOrquestrador? lotesOrquestrador = null,
+        IRuntimeSapWriteCapabilityService? capability = null)
     {
         Sap = sap ?? throw new ArgumentNullException(nameof(sap));
         EntradaProduto = entradaProdutoServico ?? throw new ArgumentNullException(nameof(entradaProdutoServico));
@@ -107,6 +113,9 @@ public sealed class EntradaProdutoController
         _obterStatusLancamento = obterStatusLancamento
             ?? ((codigoLancamento, cancellationToken) =>
                 EntradaProduto.ObterStatusLancamentoAsync(codigoLancamento, cancellationToken));
+        _recuperarLancamentoLocalPorPedido = recuperarLancamentoLocalPorPedido
+            ?? ((numeroPedido, cancellationToken) =>
+                EntradaProduto.ObterCodigoLancamentoLocalElegivelPorPedidoAsync(numeroPedido, cancellationToken));
         _reservarLancamentoParaEnvio = reservarLancamentoParaEnvio
             ?? ((codigoLancamento, cancellationToken) =>
                 EntradaProduto.TentarReservarLancamentoParaEnvioSapAsync(codigoLancamento, cancellationToken));
@@ -115,6 +124,7 @@ public sealed class EntradaProdutoController
         _atualizarStatusAposEnvioSap =
             atualizarStatusAposEnvioSap ?? EntradaProduto.AtualizarStatusAposEnvioSapAsync;
         _lotesOrquestrador = lotesOrquestrador ?? new EntradaProdutoLotesOrquestrador();
+        _capability = capability ?? RuntimeSapWriteCapability.Instancia;
     }
 
     public EstadoOperacaoEntradaProdutoLotes IniciarOperacaoComLotes(
@@ -186,6 +196,18 @@ public sealed class EntradaProdutoController
     public void LimparOperacaoComLotes()
         => _lotesOrquestrador.LimparOperacao();
 
+    /// <summary>12G-D: reidratação — código do lançamento local elegível persistido para o pedido, ou null.</summary>
+    public Task<long?> RecuperarCodigoLancamentoLocalPorPedidoAsync(
+        string numeroPedido,
+        CancellationToken cancellationToken = default)
+        => _recuperarLancamentoLocalPorPedido(numeroPedido, cancellationToken);
+
+    /// <summary>12G-D: itens persistidos elegíveis do lançamento (peso/lote/item), para reidratar a tela.</summary>
+    public Task<IReadOnlyList<EntradaProdutoItemEnvioSap>> ListarItensPersistidosParaEnvioAsync(
+        long codigoLancamento,
+        CancellationToken cancellationToken = default)
+        => _carregarItensParaEnvio(codigoLancamento, cancellationToken);
+
     public async Task<DiagnosticoEnvioSapEntrada> DiagnosticarEnvioSapEntradaAsync(
         long? codigoLancamento,
         CancellationToken cancellationToken = default)
@@ -197,6 +219,12 @@ public sealed class EntradaProdutoController
         DiagnosticoProntidaoIntegracaoSap integracao =
             await _diagnosticarIntegracaoSap(cancellationToken);
 
+        // C7 (12G-D): a HABILITAÇÃO da escrita 101 passou a ser DETALHE INTERNO do clique de envio (12G-B) —
+        // a cerimônia arma a capability e o writer a consome (one-shot) antes do POST. Portanto a ELEGIBILIDADE
+        // do botão NÃO depende mais da capability/env-write; depende de prontidão LOCAL + CONFIG. O campo abaixo
+        // é mantido apenas para o chip de status (não gateia PodeEnviar).
+        bool escritaSapHabilitada101 = integracao.EscritaSapHabilitada || _capability.EstaArmado101;
+
         int totalItensPersistidos = 0;
         string? falhaItens = null;
         if (codigoLancamento is long codigo
@@ -206,7 +234,6 @@ public sealed class EntradaProdutoController
             && integracao.AmbienteOperacional
             && integracao.IntegracaoAtiva
             && integracao.SapConfigurado
-            && integracao.EscritaSapHabilitada
             && integracao.MaterialDocumentConfigurado)
         {
             try
@@ -232,14 +259,12 @@ public sealed class EntradaProdutoController
                             ? integracao.MotivoBloqueio ?? "Integração SAP inativa."
                             : !integracao.SapConfigurado
                                 ? "Configuração SAP indisponível."
-                                : !integracao.EscritaSapHabilitada
-                                    ? "Escrita SAP desabilitada."
-                                    : !integracao.MaterialDocumentConfigurado
-                                        ? ConfiguracaoSap.MensagemMaterialDocumentNaoConfigurado
-                                        : falhaItens
-                                            ?? (totalItensPersistidos == 0
-                                                ? "O lançamento não possui itens persistidos elegíveis."
-                                                : null);
+                                : !integracao.MaterialDocumentConfigurado
+                                    ? ConfiguracaoSap.MensagemMaterialDocumentNaoConfigurado
+                                    : falhaItens
+                                        ?? (totalItensPersistidos == 0
+                                            ? "O lançamento não possui itens persistidos elegíveis."
+                                            : null);
 
         return new DiagnosticoEnvioSapEntrada
         {
@@ -250,7 +275,8 @@ public sealed class EntradaProdutoController
             AmbienteHomologacao = ambienteHomologacao,
             UsuarioTemPermissao = usuarioTemPermissao,
             SapConfigurado = integracao.SapConfigurado,
-            EscritaSapHabilitada = integracao.EscritaSapHabilitada,
+            EscritaSapHabilitada = escritaSapHabilitada101,
+            EnvEscritaSapHabilitada = integracao.EscritaSapHabilitada,
             MaterialDocumentConfigurado = integracao.MaterialDocumentConfigurado,
             IntegracaoSapAtiva = integracao.IntegracaoAtiva
         };
@@ -381,6 +407,22 @@ public sealed class EntradaProdutoController
             return bloqueioQuantidade;
         }
 
+        // PEEK da capability 101 (12E-E-B) ANTES da reserva: quando o env write gate esta false (Q runtime),
+        // a escrita 101 exige a capability ARMADA. Se nao esta armada (ex.: TTL expirou entre o diagnostico e
+        // aqui), STOP sem alterar o status local. Nao consome. Se o env write gate estiver true (legado/teste),
+        // a capability nao e exigida.
+        if (!diagnostico.EnvEscritaSapHabilitada && !_capability.EstaArmado101)
+        {
+            Sap.RegistrarDiagnostico(
+                $"Envio SAP bloqueado (lancamento {codigoLancamento}): escrita SAP 101 nao habilitada em runtime.");
+            return new ResultadoEnvioSapEntrada
+            {
+                Cenario = CenarioEnvioSapEntrada.EscritaDesabilitada,
+                Total = itens.Count,
+                Mensagem = "Escrita SAP 101 não habilitada. Habilite a escrita SAP Q antes do envio."
+            };
+        }
+
         // Reserva/claim ATOMICO antes de montar o payload e antes do POST (concorrencia/idempotencia):
         // FINALIZADO_LOCAL/ERRO_SAP -> ENVIADO_SAP em um unico UPDATE condicional. Se 0 linhas, outro
         // envio ja reservou (ou o status mudou): aborta SEM POST.
@@ -420,6 +462,11 @@ public sealed class EntradaProdutoController
         string chaveNegocio = $"{numeroPedido}/{codigoLancamento}";
         RegistrarDiagnosticoEnvioKg(codigoLancamento, itens);
 
+        // 12E-E-C: o CONSUMO ATÔMICO one-shot da capability 101 ocorre no ENFORCEMENT POINT FINAL — dentro
+        // de MaterialDocumentSapServico (writer), imediatamente antes do POST. O controller NÃO consome aqui
+        // (evita duplo consumo). Se a capability expirou/foi consumida por concorrente entre o PEEK e o writer,
+        // o writer devolve FALHA (ZERO POST) e o fluxo de falha abaixo compensa a reserva (status -> ERRO_SAP).
+
         // Apos a reserva, uma falha de POST e tratada como FALHA SAP (status volta a ERRO_SAP, abaixo)
         // para liberar reenvio futuro — em vez de deixar o lancamento preso em ENVIADO_SAP.
         ResultadoMaterialDocumentSap resultadoSap;
@@ -437,6 +484,10 @@ public sealed class EntradaProdutoController
                 $"Envio SAP: falha tecnica ao criar documento de material (lancamento {codigoLancamento}). "
                 + mensagemTecnicaSanitizada);
             resultadoSap = ResultadoMaterialDocumentSap.Falha(null, mensagemFalhaTecnica);
+
+            // TIMEOUT/indeterminado (exceção de transporte, sem StatusHttp conclusivo): o POST pode ter
+            // chegado ao SAP. Capability permanece CONSUMIDA -> RECONCILIACAO_REQUERIDA. Sem auto-retry/rearm.
+            _capability.MarcarReconciliacao();
         }
 
         // O documento e atomico: ou cria com todos os itens, ou nenhum. O status local usa o
@@ -453,6 +504,8 @@ public sealed class EntradaProdutoController
         {
             await Sap.RegistrarFalhaStatusLocalAposSapAsync(
                 codigoLancamento, resultadoSap.MensagemSanitizada, CancellationToken.None);
+            // 2xx sem documento = indeterminado: capability -> RECONCILIACAO_REQUERIDA (sem rearm/retry).
+            _capability.MarcarReconciliacao();
             Sap.RegistrarDiagnostico(
                 $"CRITICO envio SAP lancamento {codigoLancamento}: SAP respondeu 2xx sem "
                 + "MaterialDocument/MaterialDocumentYear. O documento pode ter sido criado. NAO reenviar sem suporte.");
@@ -497,6 +550,8 @@ public sealed class EntradaProdutoController
                 codigoLancamento,
                 atualizacaoLocal.Mensagem,
                 CancellationToken.None);
+            // Documento respondido mas status local falhou = indeterminado local: RECONCILIACAO_REQUERIDA.
+            _capability.MarcarReconciliacao();
             Sap.RegistrarDiagnostico(
                 $"CRITICO envio SAP lancamento {codigoLancamento}: documento de material respondido, "
                 + "mas a atualizacao do status local falhou. NAO reenviar sem suporte.");
@@ -1024,6 +1079,9 @@ public sealed class DiagnosticoEnvioSapEntrada
     public bool UsuarioTemPermissao { get; init; }
     public bool SapConfigurado { get; init; }
     public bool EscritaSapHabilitada { get; init; }
+    // Env write gate BRUTO (FUGAPET_Q_SAP_WRITE_ENABLED). Distinto de EscritaSapHabilitada, que ja e efetivo
+    // (env OU capability). No Q runtime este e sempre false; a capability 101 e a fonte de autorizacao.
+    public bool EnvEscritaSapHabilitada { get; init; }
     public bool MaterialDocumentConfigurado { get; init; }
     public bool IntegracaoSapAtiva { get; init; }
 }

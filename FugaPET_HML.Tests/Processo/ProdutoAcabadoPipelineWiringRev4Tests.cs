@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using FugaPET_HML.AcessoDados.Repositorio;
 using FugaPET_HML.Controle.Processo;
 using FugaPET_HML.Modelo.IntegracaoSap;
@@ -476,7 +476,7 @@ public sealed class ProdutoAcabadoPipelineWiringRev4Tests
     };
 
     private const string CpiBase = "https://cpi.exemplo.local/base";
-    private const string EndpointCpi = "https://cpi.exemplo.local/http/pesagem/handling_unit/CreateHUInput/1111/SAP__self.processHandlingUnitPayload";
+    private const string EndpointCpi = "https://cpi.exemplo.local/http/QS4_110/pesagem/handling_unit/CreateHUInput/1111/SAP__self.processHandlingUnitPayload";
 
 
     [Fact]
@@ -498,11 +498,11 @@ public sealed class ProdutoAcabadoPipelineWiringRev4Tests
             """);
             Dictionary<string, string> ambiente = new()
             {
-                ["FUGAPET_SAP_PALLET_WRITE_ENABLED"] = "true",
+                ["FUGAPET_Q_SAP_PALLET_WRITE_ENABLED"] = "true",
                 ["FUGAPET_SAP_PALLET_INT012_USERNAME"] = "usuario-cpi-fake",
                 ["FUGAPET_SAP_PALLET_INT012_PASSWORD"] = "senha-cpi-fake",
-                ["FUGAPET_SAP_USERNAME"] = "usuario-sap-fake",
-                ["FUGAPET_SAP_PASSWORD"] = "senha-sap-fake"
+                ["FUGAPET_Q_SAP_USERNAME"] = "usuario-sap-fake",
+                ["FUGAPET_Q_SAP_PASSWORD"] = "senha-sap-fake"
             };
 
             ConfiguracaoSap configuracao = LeitorConfiguracaoSap.Carregar(
@@ -833,6 +833,8 @@ public sealed class ProdutoAcabadoPipelineWiringRev4Tests
             => Task.FromResult(ResultadoConsultaOrdemProducaoSap.Encontrada(ordem));
     }
 }
+
+
 
 
 

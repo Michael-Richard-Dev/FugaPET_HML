@@ -1,4 +1,4 @@
-using FugaPET_HML.Modelo;
+﻿using FugaPET_HML.Modelo;
 using FugaPET_HML.Modelo.Entrada;
 using FugaPET_HML.Modelo.IntegracaoSap;
 using FugaPET_HML.Modelo.Processo;
@@ -56,7 +56,7 @@ public partial class ProcessoEntradaProdutoForm : Form
 
     private const int WmNclButtonDown = 0xA1;
     private const int HtCaption = 0x2;
-    private const string WindowIconPath = "Servicos\\icone\\fuga.ico";
+    private const string WindowIconPath = "Servicos\\icone\\fugapet.ico";
     private const string TipoPedidoNormal = "NB";
     private const string DescricaoPedidoNormal = "Pedido normal (NB)";
     private const string ColunaReimpressaoEtiqueta = "productionReprintColumn";
@@ -64,7 +64,7 @@ public partial class ProcessoEntradaProdutoForm : Form
     private static readonly Color RowLight = Color.FromArgb(250, 251, 252);
     private static readonly Color StartActionHoverBorder = Color.FromArgb(34, 197, 94);
     private static readonly Color ReadWeightHoverBorder = Color.FromArgb(59, 130, 246);
-    private static readonly Color DangerActionHoverBorder = Color.FromArgb(229, 27, 43);
+    private static readonly Color DangerActionHoverBorder = Color.FromArgb(200, 78, 10);
     private static readonly Color EnabledLegendTextColor = Color.FromArgb(229, 231, 235);
     private static readonly Color DisabledLegendTextColor = Color.FromArgb(120, 126, 136);
     private static readonly Color SidePanelDefaultColor = Color.FromArgb(45, 49, 56);
@@ -121,6 +121,9 @@ public partial class ProcessoEntradaProdutoForm : Form
     private readonly global::FugaPET_HML.Controle.Cadastro.TaraController _taraController;
     private Task _envioSapTask = Task.CompletedTask;
     private readonly ToolTip _envioSapToolTip = new();
+    // Cerimônia de habilitação da escrita SAP 101 (12E-E-B). Construção sem efeito colateral (auditoria lazy).
+    // 12G-B: acionada como detalhe interno do botão de envio original (sem botão separado).
+    private readonly global::FugaPET_HML.Servicos.IntegracaoSap.HabilitacaoEscritaSapServico _habilitacaoEscritaSap = new();
     private readonly ContextMenuStrip _filtroItensPedidoMenu = new();
     private Label? _estadoVazioItensLabel;
     private FiltroItensEntrada _filtroItensAtual = FiltroItensEntrada.Todos;
@@ -358,7 +361,7 @@ public partial class ProcessoEntradaProdutoForm : Form
 
         ConfigureTitleButtonHover(minimizeWindowLabel, Color.FromArgb(36, 46, 61));
         ConfigureTitleButtonHover(maximizeWindowLabel, Color.FromArgb(36, 46, 61));
-        ConfigureTitleButtonHover(closeWindowLabel, Color.FromArgb(184, 18, 32));
+        ConfigureTitleButtonHover(closeWindowLabel, Color.FromArgb(200, 78, 10));
     }
 
     private void AtualizarEstadoVisualLocal(EstadoVisualLocalEntrada estado, string detalhe)
@@ -996,6 +999,25 @@ public partial class ProcessoEntradaProdutoForm : Form
             AtualizarEstadoVisualIntegracaoSap(
                 EstadoVisualIntegracaoSap.LiberadoParaEnvio,
                 "envio não confirmado");
+            return;
+        }
+
+        // 12G-B: a habilitação da escrita SAP 101 é DETALHE INTERNO do envio — a confirmação acima é a única
+        // ação do operador. Valida HABILITAR_ESCRITA_SAP, executa auditoria durável fail-closed e arma a
+        // capability (one-shot). Falha de permissão/auditoria => ZERO POST. O writer consome antes do POST.
+        ResultadoOperacao habilitacaoEscrita =
+            await _habilitacaoEscritaSap.HabilitarParaEnvioAsync(_fechamentoTelaCts.Token);
+        if (!habilitacaoEscrita.Sucesso)
+        {
+            statusLabel.Text = habilitacaoEscrita.Mensagem;
+            AtualizarEstadoVisualIntegracaoSap(
+                EstadoVisualIntegracaoSap.Falha,
+                habilitacaoEscrita.Mensagem);
+            MessageBox.Show(
+                habilitacaoEscrita.Mensagem,
+                "Envio SAP HML indisponível",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
             return;
         }
 
@@ -2509,7 +2531,7 @@ public partial class ProcessoEntradaProdutoForm : Form
         };
 
         Button cancelButton = CreateDialogButton("Cancelar", Color.FromArgb(55, 60, 69), DialogResult.Cancel);
-        Button deleteButton = CreateDialogButton("Excluir", Color.FromArgb(184, 18, 32), DialogResult.OK);
+        Button deleteButton = CreateDialogButton("Excluir", Color.FromArgb(200, 78, 10), DialogResult.OK);
         cancelButton.Margin = new Padding(0, 0, 10, 0);
 
         buttonsPanel.Controls.Add(cancelButton);
@@ -2565,7 +2587,7 @@ public partial class ProcessoEntradaProdutoForm : Form
         };
 
         Button noButton = CreateDialogButton("Nao", Color.FromArgb(55, 60, 69), DialogResult.No);
-        Button yesButton = CreateDialogButton("Sim", Color.FromArgb(184, 18, 32), DialogResult.Yes);
+        Button yesButton = CreateDialogButton("Sim", Color.FromArgb(200, 78, 10), DialogResult.Yes);
         noButton.Margin = new Padding(0, 0, 10, 0);
 
         buttonsPanel.Controls.Add(noButton);
@@ -2787,7 +2809,7 @@ public partial class ProcessoEntradaProdutoForm : Form
         UpdateStatusCardState(started);
         UpdateTitleBarLockState(started);
         iniciarLeituraButton.BaseBackColor = started
-            ? Color.FromArgb(212, 37, 49)
+            ? Color.FromArgb(250, 105, 26)
             : podeAlternarLeitura ? ReadingStatusActiveColor : ActionDisabledColor;
         iniciarLeituraButton.BaseForeColor = Color.White;
         iniciarLeituraButton.IconFontFamily = "Segoe MDL2 Assets";
@@ -3477,7 +3499,7 @@ public partial class ProcessoEntradaProdutoForm : Form
         };
 
         Button cancelButton = CreateDialogButton("Cancelar", Color.FromArgb(55, 60, 69), DialogResult.Cancel);
-        Button okButton = CreateDialogButton("OK", Color.FromArgb(184, 18, 32), DialogResult.OK);
+        Button okButton = CreateDialogButton("OK", Color.FromArgb(200, 78, 10), DialogResult.OK);
         cancelButton.Margin = new Padding(0, 0, 10, 0);
 
         buttonsPanel.Controls.Add(cancelButton);
@@ -3635,7 +3657,11 @@ public partial class ProcessoEntradaProdutoForm : Form
 
         pedidoComboBox.TextUpdate += PedidoComboBox_TextUpdate;
         pedidoComboBox.SelectedIndexChanged += PedidoComboBox_SelectedIndexChanged;
-        pedidoComboBox.Validated += PedidoComboBox_Validated;
+        // GATE 07: contrato de disparo determinístico — Enter (KeyDown) + saída do campo (Leave). Substitui
+        // Validated (comprovadamente não confiável em runtime para Tab). Idempotência garantida por
+        // AtualizarDadosPedidoSelecionadoAsync (PedidoJaCarregado + troca de CancellationTokenSource + gate).
+        pedidoComboBox.KeyDown += PedidoComboBox_KeyDown;
+        pedidoComboBox.Leave += PedidoComboBox_Leave;
         productionOrderShadowPanel.Resize += (_, _) => AjustarLarguraComboPedido();
         AtualizarDisponibilidadeInicioLeitura();
     }
@@ -3683,7 +3709,25 @@ public partial class ProcessoEntradaProdutoForm : Form
         AtualizarDisponibilidadeInicioLeitura();
     }
 
-    private async void PedidoComboBox_Validated(object? sender, EventArgs e)
+    // GATE 07: Enter dispara a carga do pedido digitado. Handled/SuppressKeyPress evitam beep e ação dupla.
+    private async void PedidoComboBox_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.KeyCode != Keys.Enter)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        e.SuppressKeyPress = true;
+
+        _consultaPedidoTask = AtualizarDadosPedidoSelecionadoAsync();
+        await _consultaPedidoTask;
+        AtualizarDisponibilidadeInicioLeitura();
+    }
+
+    // GATE 07: saída do campo (Tab/clique fora) dispara a carga. Idempotente com Enter/seleção via
+    // PedidoJaCarregado + troca de CancellationTokenSource em AtualizarDadosPedidoSelecionadoAsync.
+    private async void PedidoComboBox_Leave(object? sender, EventArgs e)
     {
         _consultaPedidoTask = AtualizarDadosPedidoSelecionadoAsync();
         await _consultaPedidoTask;
@@ -3834,6 +3878,7 @@ public partial class ProcessoEntradaProdutoForm : Form
             }
 
             PreencherItensPedidoCompra(resultado.ItensAutorizados);
+            await RehidratarLancamentoLocalPersistidoAsync(numeroPedido);
             _numeroPedidoCarregado = numeroPedido;
             statusLabel.Text = resultado.ItensOcultados > 0
                 ? $"{resultado.Mensagem} {resultado.ItensOcultados} item(ns) fora do centro/deposito autorizado nao exibido(s)."
@@ -3994,6 +4039,89 @@ public partial class ProcessoEntradaProdutoForm : Form
             "aguardando gravação local");
         productionActionsButton.Enabled = false;
         AplicarFiltroItensPedido();
+    }
+
+    // 12G-D: após carregar um PO, reconhece um lançamento local FINALIZADO_LOCAL/ERRO_SAP já persistido
+    // (restart) — reidrata _codigoLancamentoPersistido, projeta o peso por item na grade e reavalia a
+    // prontidão para habilitar o botão ORIGINAL de envio. Read-only: não cria pesagem/lançamento nem altera dados.
+    private async Task RehidratarLancamentoLocalPersistidoAsync(string numeroPedido)
+    {
+        if (_codigoLancamentoPersistido is not null
+            || string.IsNullOrWhiteSpace(numeroPedido)
+            || _itensPedidoCarregados.Count == 0)
+        {
+            return;
+        }
+
+        long? codigo;
+        try
+        {
+            codigo = await _controller.RecuperarCodigoLancamentoLocalPorPedidoAsync(
+                numeroPedido, _fechamentoTelaCts.Token);
+        }
+        catch (OperationCanceledException) when (_fechamentoTelaCts.IsCancellationRequested)
+        {
+            return;
+        }
+        catch
+        {
+            // Reidratação é best-effort: falha de leitura não bloqueia a tela nem cria dados.
+            return;
+        }
+
+        if (codigo is not long codigoLancamento || codigoLancamento <= 0)
+        {
+            return;
+        }
+
+        _codigoLancamentoPersistido = codigoLancamento;
+
+        try
+        {
+            var itensPersistidos = await _controller.ListarItensPersistidosParaEnvioAsync(
+                codigoLancamento, _fechamentoTelaCts.Token);
+            Dictionary<string, decimal> pesoPorItem = itensPersistidos
+                .GroupBy(item => NormalizarNumeroItem(item.NumeroItem))
+                .ToDictionary(grupo => grupo.Key, grupo => grupo.Sum(item => item.PesoLiquidoKg));
+
+            foreach (DataGridViewRow row in productionDataGridView.Rows)
+            {
+                if (row.IsNewRow)
+                {
+                    continue;
+                }
+
+                string numeroItem = NormalizarNumeroItem(GetCellValue(row, "productionNumeroItemColumn"));
+                if (pesoPorItem.TryGetValue(numeroItem, out decimal peso) && peso > 0m)
+                {
+                    row.Cells["productionPesoLidoColumn"].Value =
+                        peso.ToString("0.###", System.Globalization.CultureInfo.GetCultureInfo("pt-BR"));
+                }
+            }
+
+            UpdateProductionCounters();
+        }
+        catch (OperationCanceledException) when (_fechamentoTelaCts.IsCancellationRequested)
+        {
+            return;
+        }
+        catch
+        {
+            // O peso exibido é cosmético; o envio usa o lançamento persistido no banco.
+        }
+
+        AtualizarEstadoVisualLocal(
+            EstadoVisualLocalEntrada.Gravado,
+            $"lançamento {codigoLancamento} recuperado do banco");
+        await AtualizarProntidaoEnvioSapAsync();
+    }
+
+    private static string NormalizarNumeroItem(string? valor)
+    {
+        string texto = valor?.Trim() ?? string.Empty;
+        return int.TryParse(texto, out int numero)
+            ? numero.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : texto;
     }
 
     private void AplicarFiltroItensPedido()

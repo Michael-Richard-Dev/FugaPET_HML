@@ -250,6 +250,70 @@ public sealed class PedidoCompraSapHttpSegurancaTests
     }
 
     [Fact]
+    public async Task ConsultarPedido_ComPurchaseOrderBaseUrlEspecifica_UsaApiPurchaseOrder2()
+    {
+        CapturaHandler handler = new("""{ "PurchaseOrder": "4500000005", "_PurchaseOrderItem": [] }""");
+        using HttpClient http = new(handler);
+        PedidoCompraSapApiClient cliente = new(CriarConfiguracao(
+            baseUrl: "https://sap.exemplo.local/sap/opu/odata/sap/API_MATERIAL_DOCUMENT_SRV/",
+            purchaseOrderBaseUrl: "https://sap.exemplo.local/sap/opu/odata4/sap/api_purchaseorder_2/srvd_a2x/sap/purchaseorder/0001/"), http);
+
+        await cliente.ConsultarPedidoAsync("4500000005");
+
+        Assert.Single(handler.Destinos);
+        Assert.Contains(
+            "/sap/opu/odata4/sap/api_purchaseorder_2/srvd_a2x/sap/purchaseorder/0001/PurchaseOrder('4500000005')",
+            handler.Destinos[0].AbsoluteUri,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("API_MATERIAL_DOCUMENT_SRV", handler.Destinos[0].AbsoluteUri, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ConsultarPedido_SemPurchaseOrderBaseUrl_UsaFallbackLegadoBaseUrl()
+    {
+        CapturaHandler handler = new("""{ "PurchaseOrder": "4500000005", "_PurchaseOrderItem": [] }""");
+        using HttpClient http = new(handler);
+        PedidoCompraSapApiClient cliente = new(CriarConfiguracao(
+            baseUrl: "https://sap.exemplo.local/legacy/purchaseorder/"), http);
+
+        await cliente.ConsultarPedidoAsync("4500000005");
+
+        Assert.Single(handler.Destinos);
+        Assert.StartsWith(
+            "https://sap.exemplo.local/legacy/purchaseorder/PurchaseOrder('4500000005')",
+            handler.Destinos[0].AbsoluteUri,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ConsultarPedido_ComPurchaseOrderBaseUrlEspecifica_PreservaSapClient110()
+    {
+        CapturaHandler handler = new("""{ "PurchaseOrder": "4500000005", "_PurchaseOrderItem": [] }""");
+        using HttpClient http = new(handler);
+        PedidoCompraSapApiClient cliente = new(CriarConfiguracao(
+            purchaseOrderBaseUrl: "https://sap.exemplo.local/sap/opu/odata4/sap/api_purchaseorder_2/srvd_a2x/sap/purchaseorder/0001/",
+            sapClient: "110"), http);
+
+        await cliente.ConsultarPedidoAsync("4500000005");
+
+        Assert.Single(handler.Destinos);
+        Assert.Contains("sap-client=110", handler.Destinos[0].Query, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CriarCliente_ComPurchaseOrderBaseUrlInsegura_DeveRejeitarSemExporCredencial()
+    {
+        using HttpClient http = new(new RespostaHandler("{}"));
+
+        InvalidOperationException erro = Assert.Throws<InvalidOperationException>(
+            () => new PedidoCompraSapApiClient(CriarConfiguracao(
+                purchaseOrderBaseUrl: "https://usuario:senha@sap.exemplo.local/odata"), http));
+
+        Assert.DoesNotContain("usuario", erro.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("senha", erro.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ConsultarPedidoInexistente_DeveRetornarNull()
     {
         using HttpClient http = new(new StatusHandler(HttpStatusCode.NotFound));
@@ -300,13 +364,16 @@ public sealed class PedidoCompraSapHttpSegurancaTests
     }
 
     private static ConfiguracaoSap CriarConfiguracao(
-        string baseUrl = "https://sap.exemplo.local/odata")
+        string baseUrl = "https://sap.exemplo.local/odata",
+        string purchaseOrderBaseUrl = "",
+        string sapClient = "000")
         => new()
         {
             BaseUrl = baseUrl,
+            PurchaseOrderBaseUrl = purchaseOrderBaseUrl,
             Usuario = "usuario-teste",
             Senha = "senha-teste",
-            SapClient = "000",
+            SapClient = sapClient,
             HostsPermitidos = ["sap.exemplo.local"],
             TimeoutSegundos = 1
         };
@@ -376,3 +443,4 @@ public sealed class PedidoCompraSapHttpSegurancaTests
         }
     }
 }
+

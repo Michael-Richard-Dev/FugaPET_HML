@@ -102,12 +102,12 @@ public sealed class PesagemMultiplaItemForm : Form
         ConfigurarBotoes();
 
         _statusLabel.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
-        _statusLabel.ForeColor = Color.FromArgb(184, 18, 32);
+        _statusLabel.ForeColor = Color.FromArgb(200, 78, 10);
         _statusLabel.Location = new Point(24, 404);
         _statusLabel.Size = new Size(470, 24);
         _totalValueLabel.AutoSize = true;
         _totalValueLabel.Font = new Font("Segoe UI", 20F, FontStyle.Bold);
-        _totalValueLabel.ForeColor = Color.FromArgb(184, 18, 32);
+        _totalValueLabel.ForeColor = Color.FromArgb(200, 78, 10);
         _totalValueLabel.TextAlign = ContentAlignment.MiddleRight;
         // Posicao recalculada a cada atualizacao do total (AlinharTotalADireita),
         // para que valores grandes sempre apareçam inteiros, alinhados à direita.
@@ -205,7 +205,7 @@ public sealed class PesagemMultiplaItemForm : Form
         ConfigurarBotao(_lerBalancaButton, "Ler balança", Color.FromArgb(34, 166, 82), Color.White, new Point(170, 370), new Size(112, 32));
         ConfigurarBotao(_adicionarManualButton, "Adicionar", Color.FromArgb(45, 49, 56), Color.White, new Point(294, 370), new Size(104, 32));
         ConfigurarBotao(_removerButton, "Cancelar leitura", Color.White, Color.FromArgb(45, 49, 56), new Point(410, 370), new Size(110, 32));
-        ConfigurarBotao(_concluirButton, "Concluir", Color.FromArgb(184, 18, 32), Color.White, new Point(500, 454), new Size(110, 36));
+        ConfigurarBotao(_concluirButton, "Concluir", Color.FromArgb(200, 78, 10), Color.White, new Point(500, 454), new Size(110, 36));
         ConfigurarBotao(_cancelarButton, "Fechar", Color.White, Color.FromArgb(45, 49, 56), new Point(620, 454), new Size(110, 36));
 
         _lerBalancaButton.Click += async (_, _) => await LerBalancaAsync();

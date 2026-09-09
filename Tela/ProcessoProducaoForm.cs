@@ -144,7 +144,7 @@ public partial class ProcessoProducaoForm : UserControl
             Cursor = Cursors.Hand,
             Dock = DockStyle.Fill,
             Font = new Font("Segoe MDL2 Assets", 22F, FontStyle.Regular, GraphicsUnit.Point, 0),
-            ForeColor = Color.FromArgb(229, 27, 43),
+            ForeColor = Color.FromArgb(200, 78, 10),
             ImageAlign = ContentAlignment.MiddleCenter,
             Text = string.Empty,
             TextAlign = ContentAlignment.MiddleCenter

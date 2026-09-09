@@ -1,5 +1,7 @@
 using FugaPET_HML.Controle;
 using FugaPET_HML.Controle.Cadastro;
+using FugaPET_HML.AcessoDados.Banco;
+using FugaPET_HML.AcessoDados.Repositorio;
 using FugaPET_HML.Modelo.Cadastro;
 using FugaPET_HML.Modelo.Consumo;
 using FugaPET_HML.Modelo.IntegracaoSap;
@@ -149,4 +151,20 @@ public sealed class ProcessoConsumoMaterialController
         int sequencia)
         => _consumoMaterialServico.RegistrarPesagemLocal(
             componente, numeroOrdem, pesoBrutoKg, pesoTaraKg, origem, totalJaPesadoLocalKg, sequencia);
+
+    public Task<IReadOnlyList<ComponenteConsumoDecisaoOperacional>> ListarDecisoesZeroIntencionalAsync(
+        long codigoApontamento,
+        CancellationToken cancellationToken = default)
+        => CriarControleApontamentosRepositorio()
+            .ListarDecisoesZeroIntencionalAsync(codigoApontamento, cancellationToken);
+
+    public Task<ResultadoDecisaoOperacionalConsumo> RegistrarZeroIntencionalAsync(
+        ComponenteConsumoDecisaoOperacional decisao,
+        CancellationToken cancellationToken = default)
+        => CriarControleApontamentosRepositorio()
+            .RegistrarZeroIntencionalAsync(decisao, cancellationToken);
+
+    private static IControleApontamentosRepositorio CriarControleApontamentosRepositorio()
+        => new ControleApontamentosRepositorio(
+            new FabricaConexaoPostgreSql(LeitorConfiguracaoBancoPostgreSql.Carregar()));
 }

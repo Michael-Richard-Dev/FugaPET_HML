@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using FugaPET_HML.Servicos.Cadastro;
 using FugaPET_HML.Servicos.IntegracaoSap;
 
@@ -33,9 +33,9 @@ public sealed class LeitorConfiguracaoSapTests : IDisposable
 
         Dictionary<string, string> ambiente = new()
         {
-            ["FUGAPET_SAP_USERNAME"] = marcadorUsuario,
-            ["FUGAPET_SAP_PASSWORD"] = marcadorSenha,
-            ["FUGAPET_SAP_ALLOWED_HOSTS"] = "sap.exemplo.local"
+            ["FUGAPET_Q_SAP_USERNAME"] = marcadorUsuario,
+            ["FUGAPET_Q_SAP_PASSWORD"] = marcadorSenha,
+            ["FUGAPET_Q_SAP_ALLOWED_HOSTS"] = "sap.exemplo.local"
         };
 
         ConfiguracaoSap configuracao = LeitorConfiguracaoSap.Carregar(
@@ -97,7 +97,7 @@ public sealed class LeitorConfiguracaoSapTests : IDisposable
         GravarConfiguracao(Guid.NewGuid().ToString("N"), Guid.NewGuid().ToString("N"));
         Dictionary<string, string> ambiente = new()
         {
-            ["FUGAPET_SAP_WRITE_ENABLED"] = "true"
+            ["FUGAPET_Q_SAP_WRITE_ENABLED"] = "true"
         };
 
         ConfiguracaoSap configuracao = LeitorConfiguracaoSap.Carregar(
@@ -111,7 +111,7 @@ public sealed class LeitorConfiguracaoSapTests : IDisposable
     public void ObterVariavelAmbiente_SemValorNoProcesso_DeveUsarPerfilDoUsuario()
     {
         string? valor = LeitorConfiguracaoSap.ObterVariavelAmbiente(
-            "FUGAPET_SAP_WRITE_ENABLED",
+            "FUGAPET_Q_SAP_WRITE_ENABLED",
             _ => null,
             _ => "true");
 
@@ -122,7 +122,7 @@ public sealed class LeitorConfiguracaoSapTests : IDisposable
     public void ObterVariavelAmbiente_ComValorNoProcesso_DeveTerPrioridade()
     {
         string? valor = LeitorConfiguracaoSap.ObterVariavelAmbiente(
-            "FUGAPET_SAP_WRITE_ENABLED",
+            "FUGAPET_Q_SAP_WRITE_ENABLED",
             _ => "false",
             _ => "true");
 
@@ -135,10 +135,10 @@ public sealed class LeitorConfiguracaoSapTests : IDisposable
         string inexistente = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".json");
         Dictionary<string, string> ambiente = new()
         {
-            ["FUGAPET_SAP_BASE_URL"] = "https://sap.exemplo.local/odata",
-            ["FUGAPET_SAP_USERNAME"] = "usuario",
-            ["FUGAPET_SAP_PASSWORD"] = "senha",
-            ["FUGAPET_SAP_ALLOWED_HOSTS"] = "sap.exemplo.local"
+            ["FUGAPET_Q_SAP_BASE_URL"] = "https://sap.exemplo.local/odata",
+            ["FUGAPET_Q_SAP_USERNAME"] = "usuario",
+            ["FUGAPET_Q_SAP_PASSWORD"] = "senha",
+            ["FUGAPET_Q_SAP_ALLOWED_HOSTS"] = "sap.exemplo.local"
         };
 
         ConfiguracaoSap configuracao = LeitorConfiguracaoSap.Carregar(
@@ -312,3 +312,5 @@ public sealed class LeitorConfiguracaoSapTests : IDisposable
         File.WriteAllText(_arquivoTemporario, json);
     }
 }
+
+

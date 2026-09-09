@@ -1338,7 +1338,7 @@ public sealed class ProcessoConsumoMaterialFormTests
         Assert.Contains("private OrdemProducaoConsumo? _ordemConsumoAtual;", form, StringComparison.Ordinal);
         Assert.Contains("private ComponenteConsumoMaterial? _componenteConsumoSelecionado;", form, StringComparison.Ordinal);
         // Mensagem de componente bloqueado pela regra operacional central.
-        Assert.Contains("Opera??o bloqueada para este componente", form, StringComparison.Ordinal);
+        Assert.Contains("Operação bloqueada para este componente", form, StringComparison.Ordinal);
     }
 
     [Fact]

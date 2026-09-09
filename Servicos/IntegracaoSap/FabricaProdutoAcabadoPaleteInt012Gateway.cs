@@ -9,7 +9,7 @@ namespace FugaPET_HML.Servicos.IntegracaoSap;
 public static class FabricaProdutoAcabadoPaleteInt012Gateway
 {
     /// <summary>Path confirmado do INT012 (CPI) — anexado à base configurada.</summary>
-    public const string EndpointPath = "/http/pesagem/handling_unit/CreateHUInput/1111/SAP__self.processHandlingUnitPayload";
+    public const string EndpointPath = "/http/QS4_110/pesagem/handling_unit/CreateHUInput/1111/SAP__self.processHandlingUnitPayload";
 
     public static IProdutoAcabadoPaleteInt012Gateway Criar(
         ConfiguracaoSap configuracao,

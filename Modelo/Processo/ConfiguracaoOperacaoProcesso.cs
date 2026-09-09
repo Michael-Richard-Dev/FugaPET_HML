@@ -10,6 +10,7 @@ public static class TipoProcessoOperacao
     public const string ConsumoQuimicos = "CONSUMO_QUIMICOS";
     public const string SemiAcabado = "SEMI_ACABADO";
     public const string ProdutoAcabado = "PRODUTO_ACABADO";
+    public const string ResultadoApontamento = "RESULTADO_APONTAMENTO";
 
     /// <summary>Operação sem destino configurado: a leitura interpreta, mas o início fica bloqueado.</summary>
     public const string SemDestinoConfigurado = "SEM_DESTINO_CONFIGURADO";
@@ -30,6 +31,7 @@ public sealed class ConfiguracaoOperacaoProcesso
     public string CentroTrabalho { get; init; } = string.Empty;
     public string TipoProcesso { get; init; } = TipoProcessoOperacao.SemDestinoConfigurado;
     public string TelaDestino { get; init; } = string.Empty;
+    public long? CodigoPerfilResultado { get; init; }
 
     /// <summary>Quando true, exige que a operação anterior da sequência esteja concluída.</summary>
     public bool ExigeOperacaoAnterior { get; init; }

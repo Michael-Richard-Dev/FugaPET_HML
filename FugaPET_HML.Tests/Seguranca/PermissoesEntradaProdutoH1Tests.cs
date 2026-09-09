@@ -9,7 +9,7 @@ public sealed class PermissoesEntradaProdutoH1Tests : IDisposable
     public PermissoesEntradaProdutoH1Tests()
     {
         Environment.SetEnvironmentVariable(
-            "FUGAPET_HML_CONEXAO_POSTGRES",
+            "FUGAPET_Q_CONEXAO_POSTGRES",
             "Host=localhost;Port=5432;Database=teste;Username=teste;Password=teste");
         EstadoSessaoUsuarioAtual.Limpar();
     }
@@ -231,3 +231,4 @@ public sealed class PermissoesEntradaProdutoH1Tests : IDisposable
             : conteudo[indiceInicio..];
     }
 }
+

@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 
 namespace FugaPET_HML.Tests.IntegracaoSap;
 
@@ -11,6 +11,7 @@ public sealed class PublicacaoHmlConfiguracaoSapTests
 
         // Modelos (.exemplo.json) vao para o publish como referencia da 1a configuracao.
         Assert.Contains("<None Include=\"configuracao.sap.exemplo.json\">", csproj, StringComparison.Ordinal);
+        Assert.Contains("<Content Include=\"ambiente.q.json\">", csproj, StringComparison.Ordinal);
         Assert.Contains("<Content Include=\"configuracao.banco.exemplo.json\">", csproj, StringComparison.Ordinal);
         Assert.Contains("<Content Include=\"configuracao.terminal.exemplo.json\">", csproj, StringComparison.Ordinal);
 
@@ -20,9 +21,10 @@ public sealed class PublicacaoHmlConfiguracaoSapTests
         Assert.Contains("<Content Include=\"configuracao.banco.json\" Condition=\"Exists('configuracao.banco.json')\">", csproj, StringComparison.Ordinal);
         Assert.Contains("<Content Include=\"configuracao.terminal.json\" Condition=\"Exists('configuracao.terminal.json')\">", csproj, StringComparison.Ordinal);
 
-        // Exatamente os tres modelos vao para o publish; nenhum arquivo real vai.
-        Assert.Equal(4, csproj.Split("<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>").Length);
-        Assert.Equal(4, csproj.Split("<CopyToPublishDirectory>Never</CopyToPublishDirectory>").Length);
+        // Artefato runtime Q e modelos vao para publish; configuracoes reais permanecem protegidas.
+        Assert.Equal(1, Contar(csproj, "<Content Include=\"ambiente.q.json\">"));
+        Assert.Equal(4, Contar(csproj, "<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>"));
+        Assert.Equal(3, Contar(csproj, "<CopyToPublishDirectory>Never</CopyToPublishDirectory>"));
     }
 
     [Fact]
@@ -77,6 +79,9 @@ public sealed class PublicacaoHmlConfiguracaoSapTests
         Assert.Contains("GetPackagingSet", checklist, StringComparison.Ordinal);
     }
 
+    private static int Contar(string texto, string trecho)
+        => texto.Split(trecho, StringSplitOptions.None).Length - 1;
+
     private static string LerArquivoProjeto(params string[] partes)
         => File.ReadAllText(Path.Combine(RaizProjeto(), Path.Combine(partes)));
 
@@ -96,3 +101,5 @@ public sealed class PublicacaoHmlConfiguracaoSapTests
         throw new DirectoryNotFoundException("Raiz do projeto FugaPET_HML nao encontrada.");
     }
 }
+
+

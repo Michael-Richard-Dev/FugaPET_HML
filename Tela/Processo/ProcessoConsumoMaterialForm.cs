@@ -1,4 +1,4 @@
-﻿using FugaPET_HML.Modelo;
+using FugaPET_HML.Modelo;
 using FugaPET_HML.Controle.Processo;
 using FugaPET_HML.Modelo.Consumo;
 using FugaPET_HML.Modelo.IntegracaoSap;
@@ -19,12 +19,12 @@ public partial class ProcessoConsumoMaterialForm : Form
 {
     private const int WmNclButtonDown = 0xA1;
     private const int HtCaption = 0x2;
-    private const string WindowIconPath = "Servicos\\icone\\fuga.ico";
+    private const string WindowIconPath = "Servicos\\icone\\fugapet.ico";
     private static readonly Color RowGreen = Color.FromArgb(238, 241, 245);
     private static readonly Color RowLight = Color.FromArgb(250, 251, 252);
     private static readonly Color StartActionHoverBorder = Color.FromArgb(34, 197, 94);
     private static readonly Color ReadWeightHoverBorder = Color.FromArgb(59, 130, 246);
-    private static readonly Color DangerActionHoverBorder = Color.FromArgb(229, 27, 43);
+    private static readonly Color DangerActionHoverBorder = Color.FromArgb(200, 78, 10);
     private static readonly Color EnabledLegendTextColor = Color.FromArgb(229, 231, 235);
     private static readonly Color DisabledLegendTextColor = Color.FromArgb(120, 126, 136);
     private static readonly Color SidePanelDefaultColor = Color.FromArgb(45, 49, 56);
@@ -66,6 +66,7 @@ public partial class ProcessoConsumoMaterialForm : Form
     private bool _salvandoConsumo;
     private bool _consumoSalvoNaSessao;
     private Button? _confirmarConsumoButton;
+    private Button? _naoConsumidoButton;
 
     // Preview SAP 261 (Tarefa 6): só montagem/visualização do payload — NÃO envia SAP.
     private long? _ultimoCodigoLancamentoSalvo;
@@ -400,7 +401,7 @@ public partial class ProcessoConsumoMaterialForm : Form
 
         ConfigureTitleButtonHover(minimizeWindowLabel, Color.FromArgb(36, 46, 61));
         ConfigureTitleButtonHover(maximizeWindowLabel, Color.FromArgb(36, 46, 61));
-        ConfigureTitleButtonHover(closeWindowLabel, Color.FromArgb(184, 18, 32));
+        ConfigureTitleButtonHover(closeWindowLabel, Color.FromArgb(200, 78, 10));
     }
 
     private void ReturnToLeituraProducao()
@@ -2865,10 +2866,87 @@ public partial class ProcessoConsumoMaterialForm : Form
         _confirmarConsumoButton.Click += async (_, _) => await ConfirmarConsumoAsync();
         sidePanel.Controls.Add(_confirmarConsumoButton);
         _confirmarConsumoButton.BringToFront();
+
+        _naoConsumidoButton = CriarBotaoNaoConsumido();
+        sidePanel.Controls.Add(_naoConsumidoButton);
+        _naoConsumidoButton.BringToFront();
+    }
+
+    private Button CriarBotaoNaoConsumido()
+    {
+        Button botao = new()
+        {
+            Name = "naoConsumidoButton",
+            Text = "Não Consumido",
+            Size = new Size(190, 32),
+            Location = new Point(12, 528),
+            FlatStyle = FlatStyle.Flat,
+            BackColor = Color.FromArgb(100, 116, 139),
+            ForeColor = Color.White,
+            Font = new Font("Cascadia Code", 6.5F, FontStyle.Bold),
+            Enabled = false,
+            Visible = false,
+            Cursor = Cursors.Hand
+        };
+        botao.FlatAppearance.BorderSize = 0;
+        botao.Click += async (_, _) => await RegistrarNaoConsumidoAsync();
+        return botao;
     }
 
     private bool PossuiPesagemPendenteParaNovoApontamento()
         => _pesagensPorComponente.Values.Any(lista => lista.Count > 0);
+
+    private bool PossuiPesagemLocal(ComponenteConsumoMaterial componente)
+        => _pesagensPorComponente.TryGetValue(
+            ProcessoConsumoMaterialController.ChaveComponente(componente),
+            out List<PesagemConsumoMaterial>? pesagens)
+           && pesagens.Count > 0;
+
+    private async Task RegistrarNaoConsumidoAsync()
+    {
+        ComponenteConsumoMaterial? componente = _componenteConsumoSelecionado;
+        long codigoApontamento = _contextoApontamento?.CodigoApontamento ?? 0;
+
+        if (componente is null || codigoApontamento <= 0)
+        {
+            statusLabel.Text = "Selecione um componente de um apontamento ativo para registrar não consumido.";
+            return;
+        }
+
+        if (PossuiPesagemLocal(componente))
+        {
+            statusLabel.Text = "Componente já possui pesagem local. Exclua a pesagem antes de registrar não consumido.";
+            return;
+        }
+
+        if (MessageBox.Show(
+                "Confirmar que este componente será registrado como NÃO CONSUMIDO para esta ocorrência?",
+                "Não Consumido",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question) != DialogResult.Yes)
+        {
+            return;
+        }
+
+        _ = await _controller.ListarDecisoesZeroIntencionalAsync(codigoApontamento, CancellationToken.None);
+        ResultadoDecisaoOperacionalConsumo resultado = await _controller.RegistrarZeroIntencionalAsync(
+            new ComponenteConsumoDecisaoOperacional
+            {
+                CodigoApontamento = codigoApontamento,
+                NumeroReserva = componente.NumeroReserva,
+                ItemReserva = componente.ItemReserva,
+                CodigoMaterial = componente.CodigoMaterial,
+                Quantidade = 0m,
+                Unidade = componente.UnidadeMedida,
+                Usuario = _contextoApontamento?.Usuario ?? Environment.UserName,
+                Estacao = _contextoApontamento?.Estacao ?? Environment.MachineName
+            },
+            CancellationToken.None);
+
+        statusLabel.Text = resultado.Mensagem;
+        MessageBox.Show(resultado.Mensagem, "Não Consumido", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        AtualizarBotaoConfirmar();
+    }
 
     private string FinalizarApontamentoEnviadoSapELiberarNovaPesagem(string mensagemSucesso)
     {
@@ -2949,6 +3027,18 @@ public partial class ProcessoConsumoMaterialForm : Form
                 && possuiPesagem
                 && !_consumoSalvoNaSessao;
             _confirmarConsumoButton.Enabled = _confirmarConsumoButton.Visible && !_salvandoConsumo;
+        }
+
+        if (_naoConsumidoButton is not null)
+        {
+            ComponenteConsumoMaterial? componente = _componenteConsumoSelecionado;
+            _naoConsumidoButton.Visible = !_isProductionStarted
+                && !_lancamentoComFalhaSap
+                && _ordemConsumoAtual is not null
+                && componente is not null
+                && !PossuiPesagemLocal(componente)
+                && !_consumoSalvoNaSessao;
+            _naoConsumidoButton.Enabled = _naoConsumidoButton.Visible && !_salvandoConsumo;
         }
 
         // Ajuste 2 (Tarefa 18.2): botoes tecnicos NUNCA visiveis ao operador (fluxo unico = Confirmar Consumo).
@@ -3607,11 +3697,11 @@ public partial class ProcessoConsumoMaterialForm : Form
             return "Sem lote SAP.\nAjuste necessário.";
         }
 
-        if (mensagem.Contains("tolerÃ¢ncia", StringComparison.OrdinalIgnoreCase)
+        if (mensagem.Contains("tolerância", StringComparison.OrdinalIgnoreCase)
             || mensagem.Contains("tolerancia", StringComparison.OrdinalIgnoreCase)
             || mensagem.Contains("exced", StringComparison.OrdinalIgnoreCase))
         {
-            return "TolerÃ¢ncia excedida.\nPesagem bloqueada.";
+            return "Tolerância excedida.\nPesagem bloqueada.";
         }
 
         return ResumirMensagemApontamento(mensagem);
@@ -4065,7 +4155,7 @@ public partial class ProcessoConsumoMaterialForm : Form
         };
 
         Button cancelButton = CreateDialogButton("Cancelar", Color.FromArgb(55, 60, 69), DialogResult.Cancel);
-        Button deleteButton = CreateDialogButton("Excluir", Color.FromArgb(184, 18, 32), DialogResult.OK);
+        Button deleteButton = CreateDialogButton("Excluir", Color.FromArgb(200, 78, 10), DialogResult.OK);
         cancelButton.Margin = new Padding(0, 0, 10, 0);
 
         buttonsPanel.Controls.Add(cancelButton);
@@ -4121,7 +4211,7 @@ public partial class ProcessoConsumoMaterialForm : Form
         };
 
         Button noButton = CreateDialogButton("Nao", Color.FromArgb(55, 60, 69), DialogResult.No);
-        Button yesButton = CreateDialogButton("Sim", Color.FromArgb(184, 18, 32), DialogResult.Yes);
+        Button yesButton = CreateDialogButton("Sim", Color.FromArgb(200, 78, 10), DialogResult.Yes);
         noButton.Margin = new Padding(0, 0, 10, 0);
 
         buttonsPanel.Controls.Add(noButton);
@@ -4309,7 +4399,7 @@ public partial class ProcessoConsumoMaterialForm : Form
         UpdateStatusCardState(started);
         UpdateTitleBarLockState(started);
         iniciarLeituraButton.BaseBackColor = started
-            ? Color.FromArgb(212, 37, 49)
+            ? Color.FromArgb(250, 105, 26)
             : podeAlternarLeitura ? ReadingStatusActiveColor : ActionDisabledColor;
         iniciarLeituraButton.BaseForeColor = Color.White;
         iniciarLeituraButton.IconFontFamily = "Segoe UI Symbol";
@@ -4562,7 +4652,7 @@ public partial class ProcessoConsumoMaterialForm : Form
         };
 
         Button cancelButton = CreateDialogButton("Cancelar", Color.FromArgb(55, 60, 69), DialogResult.Cancel);
-        Button okButton = CreateDialogButton("OK", Color.FromArgb(184, 18, 32), DialogResult.OK);
+        Button okButton = CreateDialogButton("OK", Color.FromArgb(200, 78, 10), DialogResult.OK);
         cancelButton.Margin = new Padding(0, 0, 10, 0);
 
         buttonsPanel.Controls.Add(cancelButton);

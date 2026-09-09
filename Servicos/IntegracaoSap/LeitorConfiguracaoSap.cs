@@ -1,44 +1,70 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 
 namespace FugaPET_HML.Servicos.IntegracaoSap;
 
 /// <summary>
 /// Le parametros nao secretos de configuracao.sap.json (secao "sap").
-/// Usuario e senha sao aceitos exclusivamente pelas variaveis de ambiente FUGAPET_SAP_USERNAME
-/// e FUGAPET_SAP_PASSWORD.
+/// Usuario e senha sao aceitos exclusivamente pelas variaveis de ambiente FUGAPET_Q_SAP_USERNAME
+/// e FUGAPET_Q_SAP_PASSWORD.
 /// </summary>
 public static class LeitorConfiguracaoSap
 {
     private const string NomeArquivoConfiguracao = "configuracao.sap.json";
-    private const string VariavelAmbienteBaseUrl = "FUGAPET_SAP_BASE_URL";
-    private const string VariavelAmbienteMaterialDocumentBaseUrl = "FUGAPET_SAP_MATERIAL_DOCUMENT_BASE_URL";
-    private const string VariavelAmbienteProductionOrderBaseUrl = "FUGAPET_SAP_PRODUCTION_ORDER_BASE_URL";
-    private const string VariavelAmbienteProductionOrderConfirmationBaseUrl = "FUGAPET_SAP_PRODUCTION_ORDER_CONFIRMATION_BASE_URL";
-    private const string VariavelAmbienteProductBaseUrl = "FUGAPET_SAP_PRODUCT_BASE_URL";
+    private const string VariavelAmbienteBaseUrl = "FUGAPET_Q_SAP_BASE_URL";
+    private const string VariavelAmbientePurchaseOrderBaseUrl = "FUGAPET_Q_SAP_PURCHASE_ORDER_BASE_URL";
+    private const string VariavelAmbienteMaterialDocumentBaseUrl = "FUGAPET_Q_SAP_MATERIAL_DOCUMENT_BASE_URL";
+    private const string VariavelAmbienteProductionOrderBaseUrl = "FUGAPET_Q_SAP_PRODUCTION_ORDER_BASE_URL";
+    private const string VariavelAmbienteProductionOrderConfirmationBaseUrl = "FUGAPET_Q_SAP_PRODUCTION_ORDER_CONFIRMATION_BASE_URL";
+    private const string VariavelAmbienteProductBaseUrl = "FUGAPET_Q_SAP_PRODUCT_BASE_URL";
     private const string VariavelAmbientePackagingBaseUrl = "FUGAPET_SAP_PACKAGING_BASE_URL";
     private const string VariavelAmbientePackagingUsuario = "FUGAPET_SAP_PACKAGING_USERNAME";
     private const string VariavelAmbientePackagingSenha = "FUGAPET_SAP_PACKAGING_PASSWORD";
     private const string VariavelAmbientePackagingHostsPermitidos = "FUGAPET_SAP_PACKAGING_ALLOWED_HOSTS";
     private const string VariavelAmbientePackagingSapClient = "FUGAPET_SAP_PACKAGING_CLIENT";
-    private const string VariavelAmbienteUsuario = "FUGAPET_SAP_USERNAME";
-    private const string VariavelAmbienteSenha = "FUGAPET_SAP_PASSWORD";
-    private const string VariavelAmbienteSapClient = "FUGAPET_SAP_CLIENT";
-    private const string VariavelAmbienteHostsPermitidos = "FUGAPET_SAP_ALLOWED_HOSTS";
-    private const string VariavelAmbienteEscritaHabilitada = "FUGAPET_SAP_WRITE_ENABLED";
-    private const string VariavelAmbienteHuWriteHabilitado = "FUGAPET_SAP_HU_WRITE_ENABLED";
-    private const string VariavelAmbienteHandlingUnitBaseUrl = "FUGAPET_SAP_HANDLING_UNIT_BASE_URL";
-    private const string VariavelAmbientePaMaterialDocumentWriteHabilitado = "FUGAPET_SAP_PA_MATERIAL_DOCUMENT_WRITE_ENABLED";
-    private const string VariavelAmbientePalletWriteHabilitado = "FUGAPET_SAP_PALLET_WRITE_ENABLED";
-    private const string VariavelAmbientePaPipelineHabilitado = "FUGAPET_SAP_PA_PIPELINE_ENABLED";
+    private const string VariavelAmbienteUsuario = "FUGAPET_Q_SAP_USERNAME";
+    private const string VariavelAmbienteSenha = "FUGAPET_Q_SAP_PASSWORD";
+    private const string VariavelAmbienteSapClient = "FUGAPET_Q_SAP_CLIENT";
+    private const string VariavelAmbienteHostsPermitidos = "FUGAPET_Q_SAP_ALLOWED_HOSTS";
+    private const string VariavelAmbienteEscritaHabilitada = "FUGAPET_Q_SAP_WRITE_ENABLED";
+    private const string VariavelAmbienteHuWriteHabilitado = "FUGAPET_Q_SAP_HU_WRITE_ENABLED";
+    private const string VariavelAmbienteHandlingUnitBaseUrl = "FUGAPET_Q_SAP_HANDLING_UNIT_BASE_URL";
+    private const string VariavelAmbientePaMaterialDocumentWriteHabilitado = "FUGAPET_Q_SAP_PA_MATERIAL_DOCUMENT_WRITE_ENABLED";
+    private const string VariavelAmbientePalletWriteHabilitado = "FUGAPET_Q_SAP_PALLET_WRITE_ENABLED";
+    private const string VariavelAmbientePaPipelineHabilitado = "FUGAPET_Q_SAP_PA_PIPELINE_ENABLED";
     private const string VariavelAmbientePalletInt012BaseUrl = "FUGAPET_SAP_PALLET_INT012_BASE_URL";
     private const string VariavelAmbientePalletInt012HostsPermitidos = "FUGAPET_SAP_PALLET_INT012_ALLOWED_HOSTS";
     private const string VariavelAmbientePalletInt012Usuario = "FUGAPET_SAP_PALLET_INT012_USERNAME";
     private const string VariavelAmbientePalletInt012Senha = "FUGAPET_SAP_PALLET_INT012_PASSWORD";
+    // GATE Q PACKAGING-05: habilitação da capability de norma de embalagem — Q-namespaced, alvo Process.
+    internal const string VariavelAmbientePackagingHabilitado = "FUGAPET_Q_SAP_PACKAGING_ENABLED";
 
     public static ConfiguracaoSap Carregar()
         => Carregar(
             Path.Combine(AppContext.BaseDirectory, NomeArquivoConfiguracao),
-            ObterVariavelAmbienteSistema);
+            ObterVariavelAmbienteSistema,
+            LerVariavelAmbientePorAlvoSistema);
+
+    // GATE Q PACKAGING-05: leitura POR ALVO (Process/User/Machine) sem merge, para o gate da capability.
+    internal static string? LerVariavelAmbientePorAlvoSistema(string nome, EnvironmentVariableTarget alvo)
+        => Environment.GetEnvironmentVariable(nome, alvo);
+
+    /// <summary>
+    /// GATE Q PACKAGING-05: a capability Packaging só habilita quando o valor Process é "true" E os valores
+    /// User e Machine estão ausentes/blank. Qualquer outra combinação (User/Machine presentes, Process
+    /// false/inválido/ausente) ⇒ false (fail-closed). Config técnica legada de Packaging NUNCA participa.
+    /// </summary>
+    internal static bool ResolverPackagingHabilitado(Func<string, EnvironmentVariableTarget, string?> lerPorAlvo)
+    {
+        ArgumentNullException.ThrowIfNull(lerPorAlvo);
+
+        string? processo = lerPorAlvo(VariavelAmbientePackagingHabilitado, EnvironmentVariableTarget.Process)?.Trim();
+        string? usuario = lerPorAlvo(VariavelAmbientePackagingHabilitado, EnvironmentVariableTarget.User)?.Trim();
+        string? maquina = lerPorAlvo(VariavelAmbientePackagingHabilitado, EnvironmentVariableTarget.Machine)?.Trim();
+
+        return string.Equals(processo, "true", StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrWhiteSpace(usuario)
+            && string.IsNullOrWhiteSpace(maquina);
+    }
 
     internal static string? ObterVariavelAmbienteSistema(string nome)
         => ObterVariavelAmbiente(
@@ -59,9 +85,11 @@ public static class LeitorConfiguracaoSap
 
     internal static ConfiguracaoSap Carregar(
         string caminhoArquivo,
-        Func<string, string?> obterVariavelAmbiente)
+        Func<string, string?> obterVariavelAmbiente,
+        Func<string, EnvironmentVariableTarget, string?>? lerVariavelPorAlvo = null)
     {
         string baseUrlArquivo = string.Empty;
+        string purchaseOrderBaseUrlArquivo = string.Empty;
         string materialDocumentBaseUrlArquivo = string.Empty;
         string productionOrderBaseUrlArquivo = string.Empty;
         string productionOrderConfirmationBaseUrlArquivo = string.Empty;
@@ -101,6 +129,7 @@ public static class LeitorConfiguracaoSap
                 if (documento.RootElement.TryGetProperty("sap", out JsonElement sap))
                 {
                     baseUrlArquivo = LerTexto(sap, "base_url", string.Empty);
+                    purchaseOrderBaseUrlArquivo = LerTexto(sap, "purchase_order_base_url", string.Empty);
                     materialDocumentBaseUrlArquivo = LerTexto(sap, "material_document_base_url", string.Empty);
                     productionOrderBaseUrlArquivo = LerTexto(sap, "production_order_base_url", string.Empty);
                     productionOrderConfirmationBaseUrlArquivo = LerTexto(sap, "production_order_confirmation_base_url", string.Empty);
@@ -126,6 +155,10 @@ public static class LeitorConfiguracaoSap
         return new ConfiguracaoSap
         {
             BaseUrl = ObterOuAmbiente(obterVariavelAmbiente, VariavelAmbienteBaseUrl, baseUrlArquivo),
+            PurchaseOrderBaseUrl = ObterOuAmbiente(
+                obterVariavelAmbiente,
+                VariavelAmbientePurchaseOrderBaseUrl,
+                purchaseOrderBaseUrlArquivo),
             MaterialDocumentBaseUrl = ObterOuAmbiente(
                 obterVariavelAmbiente,
                 VariavelAmbienteMaterialDocumentBaseUrl,
@@ -202,6 +235,9 @@ public static class LeitorConfiguracaoSap
             // GATE 046-K: credenciais CPI/INT012 EXCLUSIVAMENTE por ambiente (nunca arquivo/JSON), sem fallback SAP.
             PalletInt012Usuario = ObterSomenteAmbiente(obterVariavelAmbiente, VariavelAmbientePalletInt012Usuario),
             PalletInt012Senha = ObterSomenteAmbiente(obterVariavelAmbiente, VariavelAmbientePalletInt012Senha),
+            // GATE Q PACKAGING-05: capability Packaging só true por Process=true (User/Machine ausentes).
+            // Sem leitor por alvo (ex.: testes de carga que não exercitam o gate) ⇒ false fail-closed.
+            PackagingHabilitado = lerVariavelPorAlvo is not null && ResolverPackagingHabilitado(lerVariavelPorAlvo),
             TimeoutSegundos = timeout
         };
     }
@@ -278,3 +314,7 @@ public static class LeitorConfiguracaoSap
             .ToArray();
     }
 }
+
+
+
+

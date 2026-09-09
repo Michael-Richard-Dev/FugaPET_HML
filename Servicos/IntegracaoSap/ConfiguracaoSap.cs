@@ -8,8 +8,11 @@ namespace FugaPET_HML.Servicos.IntegracaoSap;
 /// </summary>
 public sealed class ConfiguracaoSap
 {
-    /// <summary>URL base do servico OData do pedido de compra (ate .../purchaseorder/0001).</summary>
+    /// <summary>URL base legada do SAP standard. Mantida para compatibilidade de clientes antigos.</summary>
     public string BaseUrl { get; init; } = string.Empty;
+
+    /// <summary>URL base explicita do servico OData de Pedido de Compra (API_PURCHASEORDER_2).</summary>
+    public string PurchaseOrderBaseUrl { get; init; } = string.Empty;
 
     /// <summary>
     /// URL base do servico OData de Movimentos de Material (API_MATERIAL_DOCUMENT_SRV), usada para
@@ -118,6 +121,9 @@ public sealed class ConfiguracaoSap
         && !string.IsNullOrWhiteSpace(Usuario)
         && !string.IsNullOrWhiteSpace(Senha)
         && HostsPermitidos.Count > 0;
+
+    public string PurchaseOrderBaseUrlEfetiva =>
+        !string.IsNullOrWhiteSpace(PurchaseOrderBaseUrl) ? PurchaseOrderBaseUrl : BaseUrl;
 
     /// <summary>
     /// True quando, alem da configuracao base (credenciais + allowlist), ha URL do servico de
@@ -290,6 +296,40 @@ public sealed class ConfiguracaoSap
         && !string.IsNullOrWhiteSpace(Senha)
         && HostsPermitidos.Count > 0;
 
+    /// <summary>
+    /// URL base efetiva do serviço de Work Center (API_WORKCENTER, entidade A_WorkCenters), usada para
+    /// resolver Plant + WorkCenter (WorkCenterInternalID + WorkCenterTypeCode). Deriva do padrão SAP já
+    /// configurado (MaterialDocument e, em último caso, BaseUrl); sem campo dedicado. Vazia ⇒ fail-closed.
+    /// </summary>
+    public string WorkCenterBaseUrlEfetiva
+    {
+        get
+        {
+            string derivadoDoMaterialDocument = DerivarUrlServicoSap(MaterialDocumentBaseUrl, "API_WORKCENTER");
+            return !string.IsNullOrWhiteSpace(derivadoDoMaterialDocument)
+                ? derivadoDoMaterialDocument
+                : DerivarUrlServicoSap(BaseUrl, "API_WORKCENTER");
+        }
+    }
+
+    /// <summary>
+    /// True quando há URL (derivada) do serviço de Work Center + credenciais + allowlist. Sem isso, a
+    /// resolução Plant + WorkCenter fica indisponível (fail-closed no Controle de Apontamentos).
+    /// </summary>
+    public bool WorkCenterConfigurado =>
+        !string.IsNullOrWhiteSpace(WorkCenterBaseUrlEfetiva)
+        && !string.IsNullOrWhiteSpace(Usuario)
+        && !string.IsNullOrWhiteSpace(Senha)
+        && HostsPermitidos.Count > 0;
+
+    /// <summary>
+    /// GATE Q PACKAGING-05: habilitação da CAPABILITY de norma de embalagem no ambiente Q. Resolvida
+    /// EXCLUSIVAMENTE por variável de ambiente Q-namespaced (FUGAPET_Q_SAP_PACKAGING_ENABLED) no alvo
+    /// Process, e somente quando User/Machine estão ausentes. Config técnica legada de Packaging NUNCA
+    /// habilita. JSON NUNCA habilita. Padrão false (fail-closed).
+    /// </summary>
+    public bool PackagingHabilitado { get; init; }
+
 
     /// <summary>
     /// Endpoint consultável (somente leitura) do serviço de norma/estrutura de embalagem do Produto Acabado
@@ -430,4 +470,5 @@ public sealed class ConfiguracaoSap
     public const string MensagemConfiguracaoInvalida =
         "Configuração SAP inválida. Acione o suporte técnico.";
 }
+
 

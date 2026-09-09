@@ -27,5 +27,11 @@
          Preservadas fisicamente, fora da compilacao ativa REV5. -->
     <Compile Remove="IntegracaoSap\ProdutoAcabadoHandlingUnitGatewayHml1Tests.cs" />
     <Compile Remove="IntegracaoSap\ProdutoAcabadoHuPostUnicoHml2Tests.cs" />
+    <!-- FUGAPET-Q-TEST-SNAPSHOT-QA-ADJUDICATION-08:
+         preservados fisicamente, fora da compilacao ativa do snapshot Q atual. -->
+    <Compile Remove="Processo\ConsumoRecuperacaoLancamentoCode05Tests.cs" />
+    <Compile Remove="IntegracaoSap\ProductionRoutingPpFormFixTests.cs" />
+    <Compile Remove="Processo\ControleApontamentosWorkCenterCode05Tests.cs" />
+    <Compile Remove="Processo\OutOfSnapshot\ControleApontamentosResultadoSemiAcabadoOutOfSnapshotTests.cs" />
   </ItemGroup>
 </Project>

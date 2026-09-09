@@ -101,6 +101,24 @@ public interface IControleApontamentosRepositorio
         string idempotencyKeyTermino,
         CancellationToken cancellationToken = default);
 
+    Task RegistrarVinculoProcessoAsync(
+        long codigoApontamento,
+        string tipoProcesso,
+        long codigoRegistroProcesso,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<ApontamentoProcesso>> ListarProcessosVinculadosAsync(
+        long codigoApontamento,
+        CancellationToken cancellationToken = default);
+
+    Task<ResultadoDecisaoOperacionalConsumo> RegistrarZeroIntencionalAsync(
+        ComponenteConsumoDecisaoOperacional decisao,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<ComponenteConsumoDecisaoOperacional>> ListarDecisoesZeroIntencionalAsync(
+        long codigoApontamento,
+        CancellationToken cancellationToken = default);
+
     /// <summary>EM_ANDAMENTO → CANCELADA (operador recusou a confirmação). True se 1 linha alterada.</summary>
     Task<bool> TentarCancelarApontamentoAsync(
         long codigoApontamento,

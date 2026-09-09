@@ -45,7 +45,7 @@ public sealed class ProdutoAcabadoPipelineSapTests
         ProdutoAcabadoMovimento261Adapter adapter = new(cli, gatePaHabilitado: true);
         ResultadoMovimentoSap r = await adapter.EnviarAsync(Cmd261());
         Assert.Equal(EstadoMovimentoSap.Confirmado, r.Estado);
-        Assert.Equal(1, cli.Chamadas); // chegou ao cliente sem depender de FUGAPET_SAP_WRITE_ENABLED
+        Assert.Equal(1, cli.Chamadas); // chegou ao cliente sem depender de FUGAPET_Q_SAP_WRITE_ENABLED
     }
 
     [Fact]
@@ -198,7 +198,7 @@ public sealed class ProdutoAcabadoPipelineSapTests
     }
     private static ProdutoAcabadoPaleteRequest ReqInt012(string pack = "PACK_TEST_001") => new()
     { HandlingUnitExternalID = "PLT-1", GrossWeight = 20m, NetWeight = 18m, TareWeight = 2m, WeightUnit = "KG", Plant = "3007", StorageLocation = "PA01", PackagingMaterial = pack, HandlingUnitItems = [new() { HandlingUnit = "300010001" }] };
-    private const string EndpointInt012 = "https://cpi.exemplo.local/http/pesagem/handling_unit/CreateHUInput/1111/SAP__self.processHandlingUnitPayload";
+    private const string EndpointInt012 = "https://cpi.exemplo.local/http/QS4_110/pesagem/handling_unit/CreateHUInput/1111/SAP__self.processHandlingUnitPayload";
     private static readonly IReadOnlyList<string> HostsInt012 = ["cpi.exemplo.local"];
 
     [Fact]
@@ -264,7 +264,7 @@ public sealed class ProdutoAcabadoPipelineSapTests
 
     [Fact]
     public void Int012_Factory_EndpointPathConfirmado()
-        => Assert.EndsWith("/http/pesagem/handling_unit/CreateHUInput/1111/SAP__self.processHandlingUnitPayload",
+        => Assert.EndsWith("/http/QS4_110/pesagem/handling_unit/CreateHUInput/1111/SAP__self.processHandlingUnitPayload",
             FabricaProdutoAcabadoPaleteInt012Gateway.MontarEndpoint("https://cpi.exemplo.local/qualquer"), StringComparison.Ordinal);
 
     private static string CaminhoProjeto(params string[] partes)
@@ -275,6 +275,7 @@ public sealed class ProdutoAcabadoPipelineSapTests
         return Path.Combine(dir, Path.Combine(partes));
     }
 }
+
 
 
 

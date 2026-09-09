@@ -27,6 +27,7 @@ public sealed class ProcessoControleApontamentosServico
 {
     public const string MensagemEstruturaNaoAplicada =
         "A configuração da operação ainda não foi aplicada no banco DEV.";
+    private const string MarcadorPerfilResultadoNaoResolvido = "PERFIL_RESULTADO_NAO_RESOLVIDO";
 
     private readonly IProductionOrderSapServico _ordemProducaoServico;
     private readonly Func<IControleApontamentosRepositorio> _criarRepositorio;
@@ -343,7 +344,7 @@ public sealed class ProcessoControleApontamentosServico
             Operacao = operacao,
             Configuracao = configuracao,
             Apontamento = criado,
-            Contexto = MontarContexto(criado, configuracao.TipoProcesso),
+            Contexto = MontarContexto(criado, configuracao.TipoProcesso, configuracao.CodigoPerfilResultado),
             ApontamentosDaOrdem = apontamentosOrdem,
             ConfiguracoesDaOrdem = configuracoesOrdem
         };
@@ -569,6 +570,7 @@ public sealed class ProcessoControleApontamentosServico
         string usuario,
         string estacao,
         CodigoBarrasOperacao codigo,
+        string tipoProcesso = "",
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(resultado);
@@ -581,6 +583,33 @@ public sealed class ProcessoControleApontamentosServico
         try
         {
             IControleApontamentosRepositorio repositorio = _criarRepositorio();
+            OperacaoProducaoApontamento? apontamento = new() { TipoProcesso = tipoProcesso };
+
+            if (resultado.CodigoRegistroProcesso is long codigoRegistroProcesso && codigoRegistroProcesso > 0)
+            {
+                await repositorio.RegistrarVinculoProcessoAsync(
+                    codigoApontamento,
+                    apontamento?.TipoProcesso ?? string.Empty,
+                    codigoRegistroProcesso,
+                    cancellationToken);
+            }
+
+            if (string.Equals(apontamento.TipoProcesso, TipoProcessoOperacao.ResultadoApontamento, StringComparison.Ordinal))
+            {
+                IReadOnlyList<ApontamentoProcesso> vinculos =
+                    await repositorio.ListarProcessosVinculadosAsync(codigoApontamento, cancellationToken);
+
+                EstadoConclusaoAgregada conclusaoResultado =
+                    AvaliarConclusaoResultadoApontamento(apontamento, vinculos);
+
+                if (conclusaoResultado != EstadoConclusaoAgregada.Concluida)
+                {
+                    System.Diagnostics.Trace.TraceInformation(
+                        $"[Apontamento][{MarcadorPerfilResultadoNaoResolvido}] Resultado do apontamento sem registro terminal para a ocorrência atual.");
+                    return false;
+                }
+            }
+
             return await repositorio.TentarMarcarAguardandoFinalizacaoAsync(
                 codigoApontamento, resultado, usuario, estacao, codigo, cancellationToken);
         }
@@ -592,6 +621,23 @@ public sealed class ProcessoControleApontamentosServico
             return false;
         }
     }
+
+    private static EstadoConclusaoAgregada AvaliarConclusaoResultadoApontamento(
+        OperacaoProducaoApontamento apontamento,
+        IReadOnlyList<ApontamentoProcesso> vinculos)
+    {
+        if (string.Equals(apontamento.TipoProcesso, TipoProcessoOperacao.ResultadoApontamento, StringComparison.Ordinal))
+        {
+            return AvaliadorConclusaoAgregada.AvaliarResultadoApontamento(vinculos);
+        }
+
+        return EstadoConclusaoAgregada.Pendente;
+    }
+
+    private Task<ResultadoConsultaOrdemProducaoSap> ConsultarOrdemParaConclusaoAgregadaAsync(
+        OperacaoProducaoApontamento apontamento,
+        CancellationToken cancellationToken)
+        => _ordemProducaoServico.ConsultarOrdemAsync(apontamento.NumeroOrdem, cancellationToken);
 
     // =========================== Sequência técnica ===========================
 
@@ -761,7 +807,7 @@ public sealed class ProcessoControleApontamentosServico
     }
 
     private static ContextoApontamentoProcesso MontarContexto(
-        OperacaoProducaoApontamento apontamento, string tipoProcesso)
+        OperacaoProducaoApontamento apontamento, string tipoProcesso, long? codigoPerfilResultado = null)
         => new()
         {
             CodigoApontamento = apontamento.CodigoApontamento,
@@ -777,7 +823,8 @@ public sealed class ProcessoControleApontamentosServico
             Usuario = apontamento.UsuarioInicio,
             Estacao = apontamento.EstacaoInicio,
             IniciadoEm = apontamento.IniciadoEm?.LocalDateTime ?? DateTime.Now,
-            CodigoBarrasInicio = apontamento.CodigoBarrasInicio
+            CodigoBarrasInicio = apontamento.CodigoBarrasInicio,
+            CodigoPerfilResultado = codigoPerfilResultado
         };
 
     private static ResultadoLeituraApontamento ComEstado(

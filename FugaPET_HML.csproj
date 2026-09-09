@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
-    <ApplicationIcon>Servicos\icone\fuga.ico</ApplicationIcon>
+    <ApplicationIcon>Servicos\icone\fugapet.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -76,6 +76,9 @@
     <Content Include="Servicos\image\Fuga-2026-sem-fundo.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Include="Servicos\image\FugaPet branco sem fundo.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <Content Include="Servicos\image\Fuga-2026-sem-fundo-cortado.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
@@ -96,6 +99,10 @@
     </Content>
     <Content Include="Servicos\icone\ATTRIBUTION.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="ambiente.q.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
     <!-- Configuracoes REAIS: copiadas para o bin (execucao local no dev), porem NUNCA para o publish.
          Assim o pacote de atualizacao NAO sobrescreve os configuracao.*.json da maquina do usuario. -->
@@ -142,12 +149,13 @@
 
   <ItemGroup>
     <Folder Include="Servicos\Auditoria\" />
-    <Folder Include="Servicos\IntegracaoSap\" />
     <Folder Include="Servicos\Balanca\" />
+    <Folder Include="Servicos\IntegracaoSap\NovaPasta\" />
     <Folder Include="Servicos\Zebra\" />
     <Folder Include="Servicos\Status\" />
   </ItemGroup>
 
 </Project>
+
 
 

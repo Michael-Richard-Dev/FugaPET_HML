@@ -176,7 +176,7 @@ public partial class ProcessoControleApontamentosForm : Form
 
         ConfigurarHoverBotaoTitulo(minimizeWindowLabel, Color.FromArgb(36, 46, 61));
         ConfigurarHoverBotaoTitulo(maximizeWindowLabel, Color.FromArgb(36, 46, 61));
-        ConfigurarHoverBotaoTitulo(closeWindowLabel, Color.FromArgb(184, 18, 32));
+        ConfigurarHoverBotaoTitulo(closeWindowLabel, Color.FromArgb(200, 78, 10));
     }
 
     private void CustomTitleBar_MouseDown(object? sender, MouseEventArgs e)
@@ -422,6 +422,7 @@ public partial class ProcessoControleApontamentosForm : Form
             {
                 TipoProcessoOperacao.ConsumoMateriaPrima => AbrirConsumo(contexto, ModoConsumoMaterial.MateriaPrima),
                 TipoProcessoOperacao.ConsumoQuimicos => AbrirConsumo(contexto, ModoConsumoMaterial.Quimico),
+                TipoProcessoOperacao.ResultadoApontamento => AbrirResultadoApontamento(contexto),
                 _ => AvisarDestinoNaoConectado(contexto)
             };
         }
@@ -440,7 +441,7 @@ public partial class ProcessoControleApontamentosForm : Form
         try
         {
             liberouTermino = await _controller.RegistrarConclusaoOperacionalAsync(
-                contexto.CodigoApontamento, execucao, _usuarioSessao, _estacao, codigo, CancellationToken.None);
+                contexto.CodigoApontamento, execucao, _usuarioSessao, _estacao, codigo, contexto.TipoProcesso, CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -488,6 +489,21 @@ public partial class ProcessoControleApontamentosForm : Form
         try
         {
             using ProcessoConsumoMaterialForm form = new(modo, contexto);
+            form.ShowDialog(this);
+            return form.ResultadoExecucaoApontamento;
+        }
+        finally
+        {
+            Show();
+        }
+    }
+
+    private ResultadoExecucaoProcesso AbrirResultadoApontamento(ContextoApontamentoProcesso contexto)
+    {
+        Hide();
+        try
+        {
+            using ProcessoResultadoApontamentoForm form = new(contexto);
             form.ShowDialog(this);
             return form.ResultadoExecucaoApontamento;
         }
@@ -717,7 +733,7 @@ public partial class ProcessoControleApontamentosForm : Form
             Dock = DockStyle.Left,
             Width = 28,
             Font = new Font("Segoe MDL2 Assets", 10F),
-            ForeColor = Color.FromArgb(212, 37, 49),
+            ForeColor = Color.FromArgb(250, 105, 26),
             Text = glyph,
             TextAlign = ContentAlignment.MiddleCenter
         };

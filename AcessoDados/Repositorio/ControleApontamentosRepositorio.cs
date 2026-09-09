@@ -62,6 +62,7 @@ public sealed class ControleApontamentosRepositorio : RepositorioBase, IControle
         const string sql = """
             SELECT codigo_configuracao, centro, tipo_ordem, sequencia_sap, operacao_sap, suboperacao_sap,
                    centro_trabalho, tipo_processo, tela_destino, exige_operacao_anterior, ativo,
+                   codigo_perfil_resultado,
                    (centro <> '')::int + (tipo_ordem <> '')::int + (sequencia_sap <> '')::int
                  + (suboperacao_sap <> '')::int + (centro_trabalho <> '')::int AS especificidade
               FROM operacao_producao_configuracao
@@ -89,7 +90,7 @@ public sealed class ControleApontamentosRepositorio : RepositorioBase, IControle
         {
             while (await leitor.ReadAsync(cancellationToken))
             {
-                candidatas.Add((LerConfiguracao(leitor), leitor.GetInt32(11)));
+                candidatas.Add((LerConfiguracao(leitor), leitor.GetInt32(12)));
             }
         }
 
@@ -112,7 +113,8 @@ public sealed class ControleApontamentosRepositorio : RepositorioBase, IControle
     {
         const string sql = """
             SELECT codigo_configuracao, centro, tipo_ordem, sequencia_sap, operacao_sap, suboperacao_sap,
-                   centro_trabalho, tipo_processo, tela_destino, exige_operacao_anterior, ativo
+                   centro_trabalho, tipo_processo, tela_destino, exige_operacao_anterior, ativo,
+                   codigo_perfil_resultado
               FROM operacao_producao_configuracao
              WHERE ativo = true
                AND (centro = @centro OR centro = '')
@@ -147,7 +149,8 @@ public sealed class ControleApontamentosRepositorio : RepositorioBase, IControle
             TipoProcesso = leitor.GetString(7),
             TelaDestino = leitor.IsDBNull(8) ? string.Empty : leitor.GetString(8),
             ExigeOperacaoAnterior = leitor.GetBoolean(9),
-            Ativo = leitor.GetBoolean(10)
+            Ativo = leitor.GetBoolean(10),
+            CodigoPerfilResultado = leitor.IsDBNull(11) ? null : leitor.GetInt64(11)
         };
 
     // ---------------- Consultas de apontamento ----------------
@@ -466,6 +469,195 @@ public sealed class ControleApontamentosRepositorio : RepositorioBase, IControle
             // Código de término já usado em outro apontamento: conflito funcional.
             return null;
         }
+    }
+
+    public async Task RegistrarVinculoProcessoAsync(
+        long codigoApontamento,
+        string tipoProcesso,
+        long codigoRegistroProcesso,
+        CancellationToken cancellationToken = default)
+        => await ExecutarEmTransacaoAuditavelAsync(async (conexao, transacao) =>
+        {
+            const string sqlVinculo = """
+                INSERT INTO operacao_producao_apontamento_processo
+                (codigo_apontamento, tipo_processo, codigo_registro_processo, criado_em, atualizado_em)
+                VALUES
+                (
+                    @codigo_apontamento, @tipo_processo, @codigo_registro_processo, now(), now()
+                )
+                ON CONFLICT (codigo_apontamento, tipo_processo, codigo_registro_processo) DO NOTHING;
+                """;
+
+            await using (NpgsqlCommand comandoVinculo = new(sqlVinculo, conexao, transacao))
+            {
+                comandoVinculo.Parameters.Add(ParametroLongo("@codigo_apontamento", codigoApontamento));
+                comandoVinculo.Parameters.Add(ParametroTexto("@tipo_processo", tipoProcesso));
+                comandoVinculo.Parameters.Add(ParametroLongo("@codigo_registro_processo", codigoRegistroProcesso));
+                await comandoVinculo.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            const string sqlLegado = """
+                UPDATE operacao_producao_apontamento
+                   SET codigo_registro_processo = @codigo_registro_processo,
+                       atualizado_em = now()
+                 WHERE codigo_apontamento = @codigo_apontamento
+                   AND codigo_registro_processo IS NULL;
+                """;
+
+            await using NpgsqlCommand comandoLegado = new(sqlLegado, conexao, transacao);
+            comandoLegado.Parameters.Add(ParametroLongo("@codigo_apontamento", codigoApontamento));
+            comandoLegado.Parameters.Add(ParametroLongo("@codigo_registro_processo", codigoRegistroProcesso));
+            await comandoLegado.ExecuteNonQueryAsync(cancellationToken);
+            return 1;
+        }, cancellationToken);
+
+    public async Task<IReadOnlyList<ApontamentoProcesso>> ListarProcessosVinculadosAsync(
+        long codigoApontamento,
+        CancellationToken cancellationToken = default)
+    {
+        string[] tiposConsumo =
+        [
+            TipoProcessoOperacao.ConsumoMateriaPrima,
+            TipoProcessoOperacao.ConsumoQuimicos
+        ];
+
+        const string sql = """
+            SELECT v.codigo_apontamento_processo,
+                   v.codigo_apontamento,
+                   v.tipo_processo,
+                   v.codigo_registro_processo,
+                   COALESCE(cml.status_lancamento, '') AS status_lancamento,
+                   COALESCE(cml.documento_material_sap, '') AS documento_material_sap,
+            COALESCE(cml.exercicio_documento_material_sap, '') AS exercicio_documento,
+                   COALESCE(cmi.numero_reserva, '') AS reservation,
+                   COALESCE(cmi.item_reserva, '') AS reservation_item
+              FROM operacao_producao_apontamento_processo v
+              LEFT JOIN consumo_material_lancamento cml
+                ON v.tipo_processo = ANY(@tipos_consumo)
+               AND cml.codigo_consumo_material_lancamento = v.codigo_registro_processo
+              LEFT JOIN consumo_material_item cmi
+                ON v.tipo_processo = ANY(@tipos_consumo)
+               AND cmi.codigo_consumo_material_lancamento = cml.codigo_consumo_material_lancamento
+             WHERE v.codigo_apontamento = @codigo
+             ORDER BY v.codigo_apontamento_processo, cmi.codigo_consumo_material_item;
+            """;
+
+        List<ApontamentoProcesso> processos = [];
+        await using NpgsqlConnection conexao = await CriarConexaoAbertaAsync(cancellationToken);
+        await using NpgsqlCommand comando = new(sql, conexao);
+        comando.Parameters.Add(ParametroLongo("@codigo", codigoApontamento));
+        comando.Parameters.Add(new NpgsqlParameter<string[]>("@tipos_consumo", tiposConsumo));
+        await using NpgsqlDataReader leitor = await comando.ExecuteReaderAsync(cancellationToken);
+        while (await leitor.ReadAsync(cancellationToken))
+        {
+            processos.Add(new ApontamentoProcesso
+            {
+                CodigoApontamentoProcesso = leitor.GetInt64(0),
+                CodigoApontamento = leitor.GetInt64(1),
+                TipoProcesso = leitor.GetString(2),
+                CodigoRegistroProcesso = leitor.GetInt64(3),
+                StatusLancamento = TextoOuVazio(leitor, 4),
+                DocumentoMaterialSap = TextoOuVazio(leitor, 5),
+                ExercicioMaterialSap = TextoOuVazio(leitor, 6),
+                Reservation = TextoOuVazio(leitor, 7),
+                ReservationItem = TextoOuVazio(leitor, 8)
+            });
+        }
+
+        return processos;
+    }
+
+    public async Task<ResultadoDecisaoOperacionalConsumo> RegistrarZeroIntencionalAsync(
+        ComponenteConsumoDecisaoOperacional decisao,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(decisao);
+        if (decisao.CodigoApontamento <= 0
+            || string.IsNullOrWhiteSpace(decisao.NumeroReserva)
+            || string.IsNullOrWhiteSpace(decisao.ItemReserva)
+            || string.IsNullOrWhiteSpace(decisao.CodigoMaterial))
+        {
+            return ResultadoDecisaoOperacionalConsumo.DadosInvalidos("Dados insuficientes para registrar componente não consumido.");
+        }
+
+        try
+        {
+            int afetadas = await ExecutarEmTransacaoAuditavelAsync(async (conexao, transacao) =>
+            {
+                const string sql = """
+                    INSERT INTO consumo_material_componente_decisao
+                    (
+                        codigo_apontamento, numero_reserva, item_reserva, codigo_material,
+                        decisao_operacional, quantidade, unidade, usuario, estacao, criado_em
+                    )
+                    VALUES
+                    (
+                        @codigo_apontamento, @numero_reserva, @item_reserva, @codigo_material,
+                        'ZERO_INTENCIONAL', 0, @unidade, @usuario, @estacao, now()
+                    )
+                    ON CONFLICT (codigo_apontamento, numero_reserva, item_reserva) DO NOTHING;
+                    """;
+
+                await using NpgsqlCommand comando = new(sql, conexao, transacao);
+                comando.Parameters.Add(ParametroLongo("@codigo_apontamento", decisao.CodigoApontamento));
+                comando.Parameters.Add(ParametroTexto("@numero_reserva", decisao.NumeroReserva));
+                comando.Parameters.Add(ParametroTexto("@item_reserva", decisao.ItemReserva));
+                comando.Parameters.Add(ParametroTexto("@codigo_material", decisao.CodigoMaterial));
+                comando.Parameters.Add(ParametroTexto("@unidade", decisao.Unidade));
+                comando.Parameters.Add(ParametroTexto("@usuario", decisao.Usuario));
+                comando.Parameters.Add(ParametroTexto("@estacao", decisao.Estacao));
+                return await comando.ExecuteNonQueryAsync(cancellationToken);
+            }, cancellationToken);
+
+            return afetadas == 0
+                ? ResultadoDecisaoOperacionalConsumo.JaExistente()
+                : ResultadoDecisaoOperacionalConsumo.Registrada();
+        }
+        catch (PostgresException ex) when (ex.SqlState == SqlStateUniqueViolation)
+        {
+            return ResultadoDecisaoOperacionalConsumo.JaExistente();
+        }
+        catch (PostgresException)
+        {
+            return ResultadoDecisaoOperacionalConsumo.ErroPersistencia();
+        }
+    }
+
+    public async Task<IReadOnlyList<ComponenteConsumoDecisaoOperacional>> ListarDecisoesZeroIntencionalAsync(
+        long codigoApontamento,
+        CancellationToken cancellationToken = default)
+    {
+        const string sql = """
+            SELECT codigo_apontamento, numero_reserva, item_reserva, codigo_material,
+                   decisao_operacional, quantidade, unidade, usuario, estacao
+              FROM consumo_material_componente_decisao
+             WHERE codigo_apontamento = @codigo_apontamento
+               AND decisao_operacional = 'ZERO_INTENCIONAL'
+             ORDER BY numero_reserva, item_reserva, codigo_material;
+            """;
+
+        List<ComponenteConsumoDecisaoOperacional> decisoes = [];
+        await using NpgsqlConnection conexao = await CriarConexaoAbertaAsync(cancellationToken);
+        await using NpgsqlCommand comando = new(sql, conexao);
+        comando.Parameters.Add(ParametroLongo("@codigo_apontamento", codigoApontamento));
+        await using NpgsqlDataReader leitor = await comando.ExecuteReaderAsync(cancellationToken);
+        while (await leitor.ReadAsync(cancellationToken))
+        {
+            decisoes.Add(new ComponenteConsumoDecisaoOperacional
+            {
+                CodigoApontamento = leitor.GetInt64(0),
+                NumeroReserva = TextoOuVazio(leitor, 1),
+                ItemReserva = TextoOuVazio(leitor, 2),
+                CodigoMaterial = TextoOuVazio(leitor, 3),
+                DecisaoOperacional = TextoOuVazio(leitor, 4),
+                Quantidade = leitor.GetDecimal(5),
+                Unidade = TextoOuVazio(leitor, 6),
+                Usuario = TextoOuVazio(leitor, 7),
+                Estacao = TextoOuVazio(leitor, 8)
+            });
+        }
+
+        return decisoes;
     }
 
     public async Task<bool> TentarCancelarApontamentoAsync(

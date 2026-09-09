@@ -122,7 +122,7 @@ public partial class ProcessoProdutoAcabadoForm : Form
         productionOrderTextBox.TextAlign = HorizontalAlignment.Left;
         productionOrderTextBox.BorderStyle = BorderStyle.None;
         productionOrderTextBox.BackColor = Color.White;
-        productionOrderTextBox.ForeColor = Color.FromArgb(229, 27, 43);
+        productionOrderTextBox.ForeColor = Color.FromArgb(200, 78, 10);
         productionOrderTextBox.TabStop = true;
         productionOrderSearchLabel.Enabled = true;
         productionOrderSearchLabel.Cursor = Cursors.Hand;
@@ -255,7 +255,7 @@ public partial class ProcessoProdutoAcabadoForm : Form
         // Mesmo efeito hover do cabeçalho das demais telas de Processo.
         ConfigureTitleButtonHover(minimizeWindowLabel, Color.FromArgb(36, 46, 61));
         ConfigureTitleButtonHover(maximizeWindowLabel, Color.FromArgb(36, 46, 61));
-        ConfigureTitleButtonHover(closeWindowLabel, Color.FromArgb(184, 18, 32));
+        ConfigureTitleButtonHover(closeWindowLabel, Color.FromArgb(200, 78, 10));
     }
 
     private static void ConfigureTitleButtonHover(Label button, Color hoverColor)
@@ -511,7 +511,7 @@ public partial class ProcessoProdutoAcabadoForm : Form
             RowHeadersVisible = false,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect
         };
-        paletesDataGridView.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(17, 24, 39);
+        paletesDataGridView.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(200, 78, 10);
         paletesDataGridView.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
         paletesDataGridView.ColumnHeadersDefaultCellStyle.Font = FonteGridHeader;
         paletesDataGridView.DefaultCellStyle.Font = FonteGridCell;
@@ -2664,7 +2664,7 @@ public partial class ProcessoProdutoAcabadoForm : Form
         iniciarLeituraButton.PrimaryText = _leituraIniciada ? "PARAR LEITURA" : "INICIAR LEITURA";
         iniciarLeituraButton.IconGlyph = _leituraIniciada ? "\uE71A" : "\uE768";
         iniciarLeituraButton.BaseBackColor = _leituraIniciada
-            ? Color.FromArgb(212, 37, 49)                        // vermelho parar
+            ? Color.FromArgb(250, 105, 26)                        // vermelho parar
             : podeAlternarLeitura ? Color.FromArgb(34, 166, 82)  // verde iniciar
                                   : Color.FromArgb(156, 163, 175); // cinza desabilitado
         iniciarLeituraButton.BaseForeColor = Color.White;

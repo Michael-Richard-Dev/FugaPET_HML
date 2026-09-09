@@ -62,7 +62,8 @@ public sealed class ProcessoControleApontamentosController
         string usuario,
         string estacao,
         CodigoBarrasOperacao codigo,
+        string tipoProcesso = "",
         CancellationToken cancellationToken = default)
         => _servico.RegistrarConclusaoOperacionalAsync(
-            codigoApontamento, resultado, usuario, estacao, codigo, cancellationToken);
+            codigoApontamento, resultado, usuario, estacao, codigo, tipoProcesso, cancellationToken);
 }

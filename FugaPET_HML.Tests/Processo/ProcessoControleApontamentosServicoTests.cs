@@ -1108,6 +1108,23 @@ public sealed class ProcessoControleApontamentosServicoTests
             return Task.FromResult(true);
         }
 
+        public Task RegistrarVinculoProcessoAsync(
+            long codigoApontamento, string tipoProcesso, long codigoRegistroProcesso,
+            CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task<IReadOnlyList<ApontamentoProcesso>> ListarProcessosVinculadosAsync(
+            long codigoApontamento, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<ApontamentoProcesso>>([]);
+
+        public Task<ResultadoDecisaoOperacionalConsumo> RegistrarZeroIntencionalAsync(
+            ComponenteConsumoDecisaoOperacional decisao, CancellationToken cancellationToken = default)
+            => Task.FromResult(ResultadoDecisaoOperacionalConsumo.Registrada());
+
+        public Task<IReadOnlyList<ComponenteConsumoDecisaoOperacional>> ListarDecisoesZeroIntencionalAsync(
+            long codigoApontamento, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<ComponenteConsumoDecisaoOperacional>>([]);
+
         public Task<DateTimeOffset?> TentarConcluirApontamentoAsync(
             long codigoApontamento, string usuarioTermino, string estacaoTermino,
             CodigoBarrasOperacao codigoTermino, string idempotencyKeyTermino,

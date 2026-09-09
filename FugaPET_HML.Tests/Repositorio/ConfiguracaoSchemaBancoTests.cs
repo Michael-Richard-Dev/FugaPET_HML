@@ -6,14 +6,14 @@ namespace FugaPET_HML.Tests.Repositorio;
 public sealed class ConfiguracaoSchemaBancoTests : IDisposable
 {
     private readonly string? _conexaoAnterior =
-        Environment.GetEnvironmentVariable("FUGAPET_HML_CONEXAO_POSTGRES");
+        Environment.GetEnvironmentVariable("FUGAPET_Q_CONEXAO_POSTGRES");
 
     [Fact]
-    public void ConfiguracaoPadrao_DeveUsarHomologacao()
+    public void ConfiguracaoPadrao_Q_DeveFalharFechadoSemSchema()
     {
         ConfiguracaoBancoPostgreSql configuracao = new();
 
-        Assert.Equal("homologacao", configuracao.Schema);
+        Assert.Equal(string.Empty, configuracao.Schema);
     }
 
     [Fact]
@@ -41,39 +41,39 @@ public sealed class ConfiguracaoSchemaBancoTests : IDisposable
     public void LeitorConnectionString_DeveLerSearchPath()
     {
         Environment.SetEnvironmentVariable(
-            "FUGAPET_HML_CONEXAO_POSTGRES",
-            "Host=localhost;Database=teste;Username=teste;Password=teste;Search Path=homologacao");
+            "FUGAPET_Q_CONEXAO_POSTGRES",
+            "Host=localhost;Database=teste;Username=teste;Password=teste;Search Path=qualidade");
 
         ConfiguracaoBancoPostgreSql configuracao =
             LeitorConfiguracaoBancoPostgreSql.Carregar();
 
-        Assert.Equal("homologacao", configuracao.Schema);
+        Assert.Equal("qualidade", configuracao.Schema);
         Assert.True(configuracao.Habilitado);
         Assert.False(configuracao.ModoDemonstracao);
         Assert.False(configuracao.AmbienteDemonstrativo);
     }
 
     [Fact]
-    public void LeitorConnectionString_SemSearchPath_DeveUsarHomologacao()
+    public void LeitorConnectionString_SemSearchPath_Q_DeveFalharFechadoSemSchema()
     {
         // Sem Search Path na connection string, o fallback do leitor deve ser o schema do
-        // ambiente DEV (homologacao) — nunca o legado "homologacao".
+        // ambiente Q: ausência de Search Path permanece vazia para bloqueio fail-closed.
         Environment.SetEnvironmentVariable(
-            "FUGAPET_HML_CONEXAO_POSTGRES",
+            "FUGAPET_Q_CONEXAO_POSTGRES",
             "Host=localhost;Database=teste;Username=teste;Password=teste");
 
         ConfiguracaoBancoPostgreSql configuracao =
             LeitorConfiguracaoBancoPostgreSql.Carregar();
 
-        Assert.Equal("homologacao", configuracao.Schema);
+        Assert.Equal(string.Empty, configuracao.Schema);
     }
 
     [Fact]
     public void LeitorConnectionString_DeveRejeitarSchemaInvalido()
     {
         Environment.SetEnvironmentVariable(
-            "FUGAPET_HML_CONEXAO_POSTGRES",
-            "Host=localhost;Database=teste;Username=teste;Password=teste;Search Path=homologacao,public");
+            "FUGAPET_Q_CONEXAO_POSTGRES",
+            "Host=localhost;Database=teste;Username=teste;Password=teste;Search Path=qualidade,public");
 
         Assert.Throws<InvalidOperationException>(
             LeitorConfiguracaoBancoPostgreSql.Carregar);
@@ -82,7 +82,11 @@ public sealed class ConfiguracaoSchemaBancoTests : IDisposable
     public void Dispose()
     {
         Environment.SetEnvironmentVariable(
-            "FUGAPET_HML_CONEXAO_POSTGRES",
+            "FUGAPET_Q_CONEXAO_POSTGRES",
             _conexaoAnterior);
     }
 }
+
+
+
+

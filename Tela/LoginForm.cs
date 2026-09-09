@@ -5,7 +5,7 @@ namespace FugaPET_HML.Tela;
 
 public partial class LoginForm : Form
 {
-    private const string WindowIconPath = "Servicos\\icone\\fuga.ico";
+    private const string WindowIconPath = "Servicos\\icone\\fugapet.ico";
 
     public LoginForm()
     {
@@ -29,7 +29,7 @@ public partial class LoginForm : Form
     private static void ConfigureInputFocus(TextBox textBox, FugaPET_HML.Tela.Controls.RoundedPanel panel)
     {
         Color normalBorder = Color.FromArgb(214, 219, 226);
-        Color focusBorder = Color.FromArgb(229, 27, 43);
+        Color focusBorder = Color.FromArgb(200, 78, 10);
 
         textBox.GotFocus += (_, _) =>
         {

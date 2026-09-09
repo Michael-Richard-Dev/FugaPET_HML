@@ -16,9 +16,9 @@ public partial class PainelInicialForm : Form
 {
     private const int WmNclButtonDown = 0xA1;
     private const int HtCaption = 0x2;
-    private const string WindowIconPath = "Servicos\\icone\\fuga.ico";
+    private const string WindowIconPath = "Servicos\\icone\\fugapet.ico";
     private const string RotinaLeituraProducao = PermissoesSistema.Rotinas.LeituraProducao;
-    private static readonly Color SidebarActiveColor = Color.FromArgb(229, 27, 43);
+    private static readonly Color SidebarActiveColor = Color.FromArgb(250, 105, 26);
     private static readonly Color SidebarInactiveColor = Color.Transparent;
     private static readonly Color SidebarTextColor = Color.FromArgb(229, 231, 235);
 
@@ -55,6 +55,27 @@ public partial class PainelInicialForm : Form
         KeyPreview = true;
         CriarStatusPreCarregamentoPedidos();
         Shown += (_, _) => ApplyRuntimeVisuals();
+        // GATE 10 (fidelidade visual): substitui os logos FUGA COUROS embutidos (PainelInicialForm.resx) pelo
+        // novo logo FUGA PET recuperado (Resources.fuga_2026_logo → FugaPet sem fundo 1.png). Só imagem; assinado
+        // após ApplyRuntimeVisuals para prevalecer. Bytes do asset intocados.
+        Shown += (_, _) =>
+        {
+            // GATE 10-D: sidebar (fundo escuro #8F3405) usa o WORDMARK FUGA PET COMPLETO em versão branca
+            // (F laranja original + "FUGA"/"PET" em branco, transparente) — asset derivado determinístico do
+            // logo oficial. Centro/Login mantêm o wordmark charcoal sobre branco.
+            string marcaPath = Path.Combine(AppContext.BaseDirectory, "Servicos\\image\\FugaPet branco sem fundo.png");
+            if (File.Exists(marcaPath))
+            {
+                using Image marcaTmp = Image.FromFile(marcaPath);
+                sidebarLogoPictureBox.Image = new Bitmap(marcaTmp);
+            }
+            else
+            {
+                sidebarLogoPictureBox.Image = global::FugaPET_HML.Properties.Resources.fuga_2026_logo;
+            }
+
+            contentBrandPictureBox.Image = global::FugaPET_HML.Properties.Resources.fuga_2026_logo;
+        };
         Shown += (_, _) => AplicarPermissoesPorPerfil();
         Shown += async (_, _) => await AtualizarStatusIndustrialAsync();
         // Apos o MainForm aparecer (usuario ja autenticado), aquece o cache de pedidos da Entrada
@@ -349,8 +370,8 @@ public partial class PainelInicialForm : Form
         item.BackColor = SidebarInactiveColor;
         menuItem.Icon.Cursor = Cursors.No;
         menuItem.Text.Cursor = Cursors.No;
-        menuItem.Icon.ForeColor = Color.FromArgb(107, 114, 128);
-        menuItem.Text.ForeColor = Color.FromArgb(107, 114, 128);
+        menuItem.Icon.ForeColor = Color.FromArgb(255, 255, 255);
+        menuItem.Text.ForeColor = Color.FromArgb(255, 255, 255);
         menuItem.Text.Font = new Font(menuItem.Text.Font.FontFamily, menuItem.Text.Font.Size, FontStyle.Regular);
 
         _menuRotinaDesenvolvimentoToolTip.SetToolTip(item, mensagem);
@@ -1428,9 +1449,9 @@ public partial class PainelInicialForm : Form
         maximizeWindowLabel.Click += (_, _) => ToggleWindowState();
         closeWindowLabel.Click += (_, _) => Close();
 
-        ConfigureTitleButtonHover(minimizeWindowLabel, Color.FromArgb(36, 46, 61));
-        ConfigureTitleButtonHover(maximizeWindowLabel, Color.FromArgb(36, 46, 61));
-        ConfigureTitleButtonHover(closeWindowLabel, Color.FromArgb(184, 18, 32));
+        ConfigureTitleButtonHover(minimizeWindowLabel, Color.FromArgb(200, 78, 10));
+        ConfigureTitleButtonHover(maximizeWindowLabel, Color.FromArgb(200, 78, 10));
+        ConfigureTitleButtonHover(closeWindowLabel, Color.FromArgb(200, 78, 10));
     }
 
     private void CustomTitleBar_MouseDown(object? sender, MouseEventArgs e)

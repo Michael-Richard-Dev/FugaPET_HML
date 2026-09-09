@@ -13,7 +13,7 @@ public sealed class AcessoMenuSegurancaTests : IDisposable
     {
         // Liga a integracao de banco para que a autorizacao seja efetivamente exigida.
         Environment.SetEnvironmentVariable(
-            "FUGAPET_HML_CONEXAO_POSTGRES",
+            "FUGAPET_Q_CONEXAO_POSTGRES",
             "Host=localhost;Port=5432;Database=teste;Username=teste;Password=teste");
         EstadoSessaoUsuarioAtual.Limpar();
         DefinirSessaoSomenteSeguranca();
@@ -63,3 +63,4 @@ public sealed class AcessoMenuSegurancaTests : IDisposable
         EstadoSessaoUsuarioAtual.Limpar();
     }
 }
+

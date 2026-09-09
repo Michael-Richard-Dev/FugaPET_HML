@@ -1131,6 +1131,32 @@ public sealed class EntradaProdutoRepositorio : RepositorioBase
     }
 
     /// <summary>
+    /// READ-ONLY (12G-D): localiza o lancamento local ELEGIVEL para envio 101 de um pedido, para reidratar
+    /// a tela apos restart. Retorna o codigo do lancamento mais recente com status FINALIZADO_LOCAL/ERRO_SAP
+    /// (exclui ENVIADO_SAP/CONFIRMADO_SAP/CANCELADO), ou null. Nao altera dados, nao reserva, nao cria.
+    /// </summary>
+    public async Task<long?> ObterCodigoLancamentoLocalElegivelPorPedidoAsync(
+        string numeroPedido,
+        CancellationToken cancellationToken = default)
+    {
+        const string sql = """
+            SELECT codigo_entrada_produto_lancamento
+              FROM entrada_produto_lancamento
+             WHERE trim(numero_pedido) = trim(@numero_pedido)
+               AND situacao_entrada_produto_lancamento = true
+               AND status_lancamento IN ('FINALIZADO_LOCAL', 'ERRO_SAP')
+             ORDER BY codigo_entrada_produto_lancamento DESC
+             LIMIT 1;
+            """;
+
+        await using NpgsqlConnection conexao = await CriarConexaoAbertaAsync(cancellationToken);
+        await using NpgsqlCommand comando = new(sql, conexao);
+        comando.Parameters.Add(new NpgsqlParameter("@numero_pedido", numeroPedido?.Trim() ?? string.Empty));
+        object? retorno = await comando.ExecuteScalarAsync(cancellationToken);
+        return retorno is long codigo ? codigo : null;
+    }
+
+    /// <summary>
     /// Status atual do lancamento ativo (status_lancamento). Usado como defesa de reenvio antes de
     /// montar o documento de material. Retorna null quando o lancamento nao existe/ativo.
     /// </summary>

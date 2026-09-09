@@ -8,7 +8,7 @@ public sealed class UsuarioServicoTests : IDisposable
 {
     public UsuarioServicoTests()
     {
-        Environment.SetEnvironmentVariable("FUGAPET_HML_CONEXAO_POSTGRES", "Host=localhost;Port=5432;Database=teste;Username=teste;Password=teste");
+        Environment.SetEnvironmentVariable("FUGAPET_Q_CONEXAO_POSTGRES", "Host=localhost;Port=5432;Database=teste;Username=teste;Password=teste");
         EstadoSessaoUsuarioAtual.Definir(new SessaoUsuarioAplicacao
         {
             IdUsuario = 1,
@@ -52,3 +52,4 @@ public sealed class UsuarioServicoTests : IDisposable
         EstadoSessaoUsuarioAtual.Limpar();
     }
 }
+

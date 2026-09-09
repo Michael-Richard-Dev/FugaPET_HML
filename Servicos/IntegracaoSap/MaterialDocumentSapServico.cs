@@ -18,6 +18,9 @@ public sealed class MaterialDocumentSapServico : IMaterialDocumentSapServico
     private readonly ConfiguracaoSap _configuracaoSap;
     private readonly Lazy<MaterialDocumentSapApiClient> _cliente;
     private readonly ILogIntegracaoSapServico _logIntegracaoSapServico;
+    private readonly IRuntimeSapWriteCapabilityService _capability;
+    // Seam de dispatch HTTP (o cliente real é sealed). Default = cliente real; testes contam dispatches no boundary.
+    private readonly Func<MaterialDocumentSapRequest, CancellationToken, Task<ResultadoMaterialDocumentSap>> _dispatchHttp;
 
     public MaterialDocumentSapServico()
         : this(LeitorConfiguracaoSap.Carregar(), logIntegracaoSapServico: null, cliente: null)
@@ -32,10 +35,15 @@ public sealed class MaterialDocumentSapServico : IMaterialDocumentSapServico
     internal MaterialDocumentSapServico(
         ConfiguracaoSap configuracaoSap,
         ILogIntegracaoSapServico? logIntegracaoSapServico,
-        MaterialDocumentSapApiClient? cliente)
+        MaterialDocumentSapApiClient? cliente,
+        IRuntimeSapWriteCapabilityService? capability = null,
+        Func<MaterialDocumentSapRequest, CancellationToken, Task<ResultadoMaterialDocumentSap>>? dispatchHttp = null)
     {
         _configuracaoSap = configuracaoSap;
         _logIntegracaoSapServico = logIntegracaoSapServico ?? LogIntegracaoSapNuloServico.Instancia;
+        _capability = capability ?? RuntimeSapWriteCapability.Instancia;
+        _dispatchHttp = dispatchHttp
+            ?? ((requisicao, cancellationToken) => _cliente.Value.CriarDocumentoMaterialAsync(requisicao, cancellationToken));
         _cliente = new Lazy<MaterialDocumentSapApiClient>(
             () => cliente ?? new MaterialDocumentSapApiClient(
                 _configuracaoSap,
@@ -67,7 +75,13 @@ public sealed class MaterialDocumentSapServico : IMaterialDocumentSapServico
                 chaveNegocio, correlationId, cronometro, _configuracaoSap.MensagemMaterialDocumentAusente());
         }
 
-        if (!_configuracaoSap.EscritaHabilitada)
+        // ENFORCEMENT POINT FINAL da capability 101 (12E-E-C). Este é o único ponto que autoriza um
+        // dispatch HTTP de Material Document 101. Escopo EXCLUSIVO 101 — não afeta 261/HU/PALLET.
+        //   env bootstrap true (legado/teste): preserva o comportamento coberto por testes existentes.
+        //   env false (Q runtime): CONSUMO ATÔMICO one-shot ARMADA_101 -> CONSUMIDA imediatamente antes do
+        //     POST. CONSUMIDA/RECONCILIACAO/DESABILITADA/expirada => TryAdquirir101 falha => ZERO POST.
+        //     Segunda invocação direta do writer com CONSUMIDA é bloqueada aqui (não há novo dispatch).
+        if (!_configuracaoSap.EscritaHabilitada && !_capability.TryAdquirir101())
         {
             return await BloquearAsync(
                 chaveNegocio, correlationId, cronometro, ConfiguracaoSap.MensagemEscritaBloqueada);
@@ -88,7 +102,7 @@ public sealed class MaterialDocumentSapServico : IMaterialDocumentSapServico
                 "Etapa PAYLOAD: " + MaterialDocumentSapApiClient.DescreverPayloadSanitizado(requisicao));
 
             ResultadoMaterialDocumentSap resultado =
-                await _cliente.Value.CriarDocumentoMaterialAsync(requisicao, cancellationToken);
+                await _dispatchHttp(requisicao, cancellationToken);
 
             await RegistrarLogAsync(
                 chaveNegocio,

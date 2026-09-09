@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -21,7 +21,7 @@ public sealed class PedidoCompraSapApiClient
     {
         _configuracao = configuracao ?? throw new ArgumentNullException(nameof(configuracao));
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-        _baseUri = ValidadorUrlSap.ValidarBaseUrl(configuracao);
+        _baseUri = ValidadorUrlSap.ValidarBaseUrl(configuracao.PurchaseOrderBaseUrlEfetiva, configuracao.HostsPermitidos);
 
         string credenciais = Convert.ToBase64String(
             Encoding.UTF8.GetBytes($"{configuracao.Usuario}:{configuracao.Senha}"));
@@ -578,3 +578,4 @@ public sealed class PedidoCompraSapApiClient
         return null;
     }
 }
+

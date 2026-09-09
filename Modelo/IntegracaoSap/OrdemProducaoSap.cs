@@ -77,6 +77,8 @@ public sealed record OperacaoOrdemProducaoSap
     public string Suboperacao { get; init; } = string.Empty;
 
     public string CentroTrabalho { get; init; } = string.Empty;      // WorkCenter
+    public string WorkCenterInternalId { get; init; } = string.Empty; // WorkCenterInternalID (A_ProductionOrderOperation_2)
+    public string WorkCenterTypeCode { get; init; } = string.Empty;   // WorkCenterTypeCode
     public string Centro { get; init; } = string.Empty;             // ProductionPlant
     public string Descricao { get; init; } = string.Empty;          // MfgOrderOperationText
     public decimal QuantidadePrevista { get; init; }                 // OpPlannedTotalQuantity

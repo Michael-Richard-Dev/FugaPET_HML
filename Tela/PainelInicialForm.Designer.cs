@@ -667,7 +667,7 @@ partial class PainelInicialForm
         // 
         // sidebarPanel
         // 
-        sidebarPanel.BackColor = Color.FromArgb(9, 22, 36);
+        sidebarPanel.BackColor = Color.FromArgb(143, 52, 5);
         sidebarPanel.Controls.Add(sidebarLogoPictureBox);
         sidebarPanel.Controls.Add(menuItemInicio);
         sidebarPanel.Controls.Add(menuItemCadastro);
@@ -699,7 +699,7 @@ partial class PainelInicialForm
         // 
         // menuItemInicio
         // 
-        menuItemInicio.BackColor = Color.FromArgb(229, 27, 43);
+        menuItemInicio.BackColor = Color.FromArgb(250, 105, 26);
         menuItemInicio.Controls.Add(menuInicioIcon);
         menuItemInicio.Controls.Add(menuInicioText);
         menuItemInicio.Cursor = Cursors.Hand;
@@ -1095,7 +1095,7 @@ partial class PainelInicialForm
         // 
         // headerBar
         // 
-        headerBar.BackColor = Color.FromArgb(17, 24, 39);
+        headerBar.BackColor = Color.FromArgb(200, 78, 10);
         headerBar.Controls.Add(headerSubtitleLabel);
         headerBar.Controls.Add(sapStatusPanel);
         headerBar.Controls.Add(minimizeWindowLabel);
@@ -1125,11 +1125,11 @@ partial class PainelInicialForm
         // 
         sapStatusPanel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         sapStatusPanel.BackColor = Color.Transparent;
-        sapStatusPanel.BorderColor = Color.FromArgb(58, 68, 83);
+        sapStatusPanel.BorderColor = Color.FromArgb(200, 78, 10);
         sapStatusPanel.BorderRadius = 12;
         sapStatusPanel.Controls.Add(sapStatusDotLabel);
         sapStatusPanel.Controls.Add(sapStatusLabel);
-        sapStatusPanel.FillColor = Color.FromArgb(24, 31, 43);
+        sapStatusPanel.FillColor = Color.FromArgb(200, 78, 10);
         sapStatusPanel.Location = new Point(685, 12);
         sapStatusPanel.Name = "sapStatusPanel";
         sapStatusPanel.ShadowBlur = 0;
@@ -1248,11 +1248,11 @@ partial class PainelInicialForm
         // 
         contentBrandHeaderPanel.Anchor = AnchorStyles.None;
         contentBrandHeaderPanel.BackColor = Color.Transparent;
-        contentBrandHeaderPanel.BorderColor = Color.FromArgb(17, 24, 39);
+        contentBrandHeaderPanel.BorderColor = Color.FromArgb(255, 255, 255);
         contentBrandHeaderPanel.BorderRadius = 10;
         contentBrandHeaderPanel.Controls.Add(logoSaLabel);
         contentBrandHeaderPanel.Controls.Add(contentBrandPictureBox);
-        contentBrandHeaderPanel.FillColor = Color.FromArgb(17, 24, 39);
+        contentBrandHeaderPanel.FillColor = Color.FromArgb(255, 255, 255);
         contentBrandHeaderPanel.Location = new Point(399, 245);
         contentBrandHeaderPanel.Name = "contentBrandHeaderPanel";
         contentBrandHeaderPanel.ShadowBlur = 0;
@@ -1349,7 +1349,7 @@ partial class PainelInicialForm
         // 
         cellTerminalIcon.Dock = DockStyle.Left;
         cellTerminalIcon.Font = new Font("Segoe MDL2 Assets", 10F);
-        cellTerminalIcon.ForeColor = Color.FromArgb(212, 37, 49);
+        cellTerminalIcon.ForeColor = Color.FromArgb(250, 105, 26);
         cellTerminalIcon.Location = new Point(0, 0);
         cellTerminalIcon.Name = "cellTerminalIcon";
         cellTerminalIcon.Size = new Size(28, 38);
@@ -1397,7 +1397,7 @@ partial class PainelInicialForm
         // 
         cellEmpresaIcon.Dock = DockStyle.Left;
         cellEmpresaIcon.Font = new Font("Segoe MDL2 Assets", 10F);
-        cellEmpresaIcon.ForeColor = Color.FromArgb(212, 37, 49);
+        cellEmpresaIcon.ForeColor = Color.FromArgb(250, 105, 26);
         cellEmpresaIcon.Location = new Point(0, 0);
         cellEmpresaIcon.Name = "cellEmpresaIcon";
         cellEmpresaIcon.Size = new Size(28, 38);
@@ -1446,7 +1446,7 @@ partial class PainelInicialForm
         // 
         cellBancoIcon.Dock = DockStyle.Left;
         cellBancoIcon.Font = new Font("Segoe MDL2 Assets", 10F);
-        cellBancoIcon.ForeColor = Color.FromArgb(212, 37, 49);
+        cellBancoIcon.ForeColor = Color.FromArgb(250, 105, 26);
         cellBancoIcon.Location = new Point(0, 0);
         cellBancoIcon.Name = "cellBancoIcon";
         cellBancoIcon.Size = new Size(28, 38);
@@ -1494,7 +1494,7 @@ partial class PainelInicialForm
         // 
         cellHoraIcon.Dock = DockStyle.Left;
         cellHoraIcon.Font = new Font("Segoe MDL2 Assets", 10F);
-        cellHoraIcon.ForeColor = Color.FromArgb(212, 37, 49);
+        cellHoraIcon.ForeColor = Color.FromArgb(250, 105, 26);
         cellHoraIcon.Location = new Point(0, 0);
         cellHoraIcon.Name = "cellHoraIcon";
         cellHoraIcon.Size = new Size(28, 38);
@@ -1542,7 +1542,7 @@ partial class PainelInicialForm
         // 
         cellDataIcon.Dock = DockStyle.Left;
         cellDataIcon.Font = new Font("Segoe MDL2 Assets", 10F);
-        cellDataIcon.ForeColor = Color.FromArgb(212, 37, 49);
+        cellDataIcon.ForeColor = Color.FromArgb(250, 105, 26);
         cellDataIcon.Location = new Point(0, 0);
         cellDataIcon.Name = "cellDataIcon";
         cellDataIcon.Size = new Size(28, 38);
@@ -1633,7 +1633,7 @@ partial class PainelInicialForm
         welcomeIconLabel.BackColor = Color.Transparent;
         welcomeIconLabel.Dock = DockStyle.Fill;
         welcomeIconLabel.Font = new Font("Segoe UI", 28F, FontStyle.Bold);
-        welcomeIconLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        welcomeIconLabel.ForeColor = Color.FromArgb(250, 105, 26);
         welcomeIconLabel.Location = new Point(0, 0);
         welcomeIconLabel.Name = "welcomeIconLabel";
         welcomeIconLabel.Size = new Size(72, 72);
@@ -1657,7 +1657,7 @@ partial class PainelInicialForm
         // 
         welcomeUserLabel.BackColor = Color.Transparent;
         welcomeUserLabel.Font = new Font("Segoe UI", 16F, FontStyle.Bold);
-        welcomeUserLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        welcomeUserLabel.ForeColor = Color.FromArgb(250, 105, 26);
         welcomeUserLabel.Location = new Point(238, 28);
         welcomeUserLabel.Name = "welcomeUserLabel";
         welcomeUserLabel.Size = new Size(280, 30);
@@ -1707,7 +1707,7 @@ partial class PainelInicialForm
         // 
         // illusMachineBody
         // 
-        illusMachineBody.BackColor = Color.FromArgb(31, 41, 55);
+        illusMachineBody.BackColor = Color.FromArgb(200, 78, 10);
         illusMachineBody.Location = new Point(230, 27);
         illusMachineBody.Name = "illusMachineBody";
         illusMachineBody.Size = new Size(90, 76);
@@ -1723,7 +1723,7 @@ partial class PainelInicialForm
         // 
         // illusMachineLed1
         // 
-        illusMachineLed1.BackColor = Color.FromArgb(212, 37, 49);
+        illusMachineLed1.BackColor = Color.FromArgb(250, 105, 26);
         illusMachineLed1.Location = new Point(250, 79);
         illusMachineLed1.Name = "illusMachineLed1";
         illusMachineLed1.Size = new Size(8, 8);
@@ -1739,7 +1739,7 @@ partial class PainelInicialForm
         // 
         // illusShield
         // 
-        illusShield.BackColor = Color.FromArgb(212, 37, 49);
+        illusShield.BackColor = Color.FromArgb(250, 105, 26);
         illusShield.Location = new Point(330, 35);
         illusShield.Name = "illusShield";
         illusShield.Size = new Size(36, 60);
@@ -1759,7 +1759,7 @@ partial class PainelInicialForm
         // 
         // illusBox1
         // 
-        illusBox1.BackColor = Color.FromArgb(212, 37, 49);
+        illusBox1.BackColor = Color.FromArgb(250, 105, 26);
         illusBox1.Location = new Point(40, 69);
         illusBox1.Name = "illusBox1";
         illusBox1.Size = new Size(28, 28);
@@ -1775,7 +1775,7 @@ partial class PainelInicialForm
         // 
         // illusBox3
         // 
-        illusBox3.BackColor = Color.FromArgb(212, 37, 49);
+        illusBox3.BackColor = Color.FromArgb(250, 105, 26);
         illusBox3.Location = new Point(56, 39);
         illusBox3.Name = "illusBox3";
         illusBox3.Size = new Size(28, 28);
@@ -1791,7 +1791,7 @@ partial class PainelInicialForm
         // 
         // illusMidBox2
         // 
-        illusMidBox2.BackColor = Color.FromArgb(212, 37, 49);
+        illusMidBox2.BackColor = Color.FromArgb(250, 105, 26);
         illusMidBox2.Location = new Point(176, 59);
         illusMidBox2.Name = "illusMidBox2";
         illusMidBox2.Size = new Size(22, 22);
@@ -1799,7 +1799,7 @@ partial class PainelInicialForm
         // 
         // illusMidBox3
         // 
-        illusMidBox3.BackColor = Color.FromArgb(212, 37, 49);
+        illusMidBox3.BackColor = Color.FromArgb(250, 105, 26);
         illusMidBox3.Location = new Point(163, 33);
         illusMidBox3.Name = "illusMidBox3";
         illusMidBox3.Size = new Size(22, 22);
@@ -1919,7 +1919,7 @@ partial class PainelInicialForm
         metric1IconLabel.BackColor = Color.Transparent;
         metric1IconLabel.Dock = DockStyle.Fill;
         metric1IconLabel.Font = new Font("Segoe Fluent Icons", 14F);
-        metric1IconLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        metric1IconLabel.ForeColor = Color.FromArgb(250, 105, 26);
         metric1IconLabel.Location = new Point(0, 0);
         metric1IconLabel.Name = "metric1IconLabel";
         metric1IconLabel.Size = new Size(46, 46);
@@ -1942,7 +1942,7 @@ partial class PainelInicialForm
         // 
         metric1ValueLabel.BackColor = Color.Transparent;
         metric1ValueLabel.Font = new Font("Segoe UI", 16F, FontStyle.Bold);
-        metric1ValueLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        metric1ValueLabel.ForeColor = Color.FromArgb(250, 105, 26);
         metric1ValueLabel.Location = new Point(72, 38);
         metric1ValueLabel.Name = "metric1ValueLabel";
         metric1ValueLabel.Size = new Size(80, 30);
@@ -1997,7 +1997,7 @@ partial class PainelInicialForm
         metric2IconLabel.BackColor = Color.Transparent;
         metric2IconLabel.Dock = DockStyle.Fill;
         metric2IconLabel.Font = new Font("Segoe Fluent Icons", 14F);
-        metric2IconLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        metric2IconLabel.ForeColor = Color.FromArgb(250, 105, 26);
         metric2IconLabel.Location = new Point(0, 0);
         metric2IconLabel.Name = "metric2IconLabel";
         metric2IconLabel.Size = new Size(46, 46);
@@ -2020,7 +2020,7 @@ partial class PainelInicialForm
         // 
         metric2ValueLabel.BackColor = Color.Transparent;
         metric2ValueLabel.Font = new Font("Segoe UI", 16F, FontStyle.Bold);
-        metric2ValueLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        metric2ValueLabel.ForeColor = Color.FromArgb(250, 105, 26);
         metric2ValueLabel.Location = new Point(72, 38);
         metric2ValueLabel.Name = "metric2ValueLabel";
         metric2ValueLabel.Size = new Size(80, 30);
@@ -2075,7 +2075,7 @@ partial class PainelInicialForm
         metric3IconLabel.BackColor = Color.Transparent;
         metric3IconLabel.Dock = DockStyle.Fill;
         metric3IconLabel.Font = new Font("Segoe Fluent Icons", 14F);
-        metric3IconLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        metric3IconLabel.ForeColor = Color.FromArgb(250, 105, 26);
         metric3IconLabel.Location = new Point(0, 0);
         metric3IconLabel.Name = "metric3IconLabel";
         metric3IconLabel.Size = new Size(46, 46);
@@ -2098,7 +2098,7 @@ partial class PainelInicialForm
         // 
         metric3ValueLabel.BackColor = Color.Transparent;
         metric3ValueLabel.Font = new Font("Segoe UI", 16F, FontStyle.Bold);
-        metric3ValueLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        metric3ValueLabel.ForeColor = Color.FromArgb(250, 105, 26);
         metric3ValueLabel.Location = new Point(72, 38);
         metric3ValueLabel.Name = "metric3ValueLabel";
         metric3ValueLabel.Size = new Size(80, 30);
@@ -2153,7 +2153,7 @@ partial class PainelInicialForm
         metric4IconLabel.BackColor = Color.Transparent;
         metric4IconLabel.Dock = DockStyle.Fill;
         metric4IconLabel.Font = new Font("Segoe Fluent Icons", 14F);
-        metric4IconLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        metric4IconLabel.ForeColor = Color.FromArgb(250, 105, 26);
         metric4IconLabel.Location = new Point(0, 0);
         metric4IconLabel.Name = "metric4IconLabel";
         metric4IconLabel.Size = new Size(46, 46);
@@ -2176,7 +2176,7 @@ partial class PainelInicialForm
         // 
         metric4ValueLabel.BackColor = Color.Transparent;
         metric4ValueLabel.Font = new Font("Segoe UI", 16F, FontStyle.Bold);
-        metric4ValueLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        metric4ValueLabel.ForeColor = Color.FromArgb(250, 105, 26);
         metric4ValueLabel.Location = new Point(72, 38);
         metric4ValueLabel.Name = "metric4ValueLabel";
         metric4ValueLabel.Size = new Size(80, 30);
@@ -2231,7 +2231,7 @@ partial class PainelInicialForm
         metric5IconLabel.BackColor = Color.Transparent;
         metric5IconLabel.Dock = DockStyle.Fill;
         metric5IconLabel.Font = new Font("Segoe Fluent Icons", 14F);
-        metric5IconLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        metric5IconLabel.ForeColor = Color.FromArgb(250, 105, 26);
         metric5IconLabel.Location = new Point(0, 0);
         metric5IconLabel.Name = "metric5IconLabel";
         metric5IconLabel.Size = new Size(46, 46);
@@ -2254,7 +2254,7 @@ partial class PainelInicialForm
         // 
         metric5ValueLabel.BackColor = Color.Transparent;
         metric5ValueLabel.Font = new Font("Segoe UI", 16F, FontStyle.Bold);
-        metric5ValueLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        metric5ValueLabel.ForeColor = Color.FromArgb(250, 105, 26);
         metric5ValueLabel.Location = new Point(72, 38);
         metric5ValueLabel.Name = "metric5ValueLabel";
         metric5ValueLabel.Size = new Size(80, 30);
@@ -2373,7 +2373,7 @@ partial class PainelInicialForm
         module1IconLabel.BackColor = Color.Transparent;
         module1IconLabel.Dock = DockStyle.Fill;
         module1IconLabel.Font = new Font("Segoe Fluent Icons", 13F);
-        module1IconLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        module1IconLabel.ForeColor = Color.FromArgb(250, 105, 26);
         module1IconLabel.Location = new Point(0, 0);
         module1IconLabel.Name = "module1IconLabel";
         module1IconLabel.Size = new Size(40, 40);
@@ -2407,7 +2407,7 @@ partial class PainelInicialForm
         // 
         module1ArrowLabel.BackColor = Color.Transparent;
         module1ArrowLabel.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
-        module1ArrowLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        module1ArrowLabel.ForeColor = Color.FromArgb(250, 105, 26);
         module1ArrowLabel.Location = new Point(14, 168);
         module1ArrowLabel.Name = "module1ArrowLabel";
         module1ArrowLabel.Size = new Size(28, 22);
@@ -2451,7 +2451,7 @@ partial class PainelInicialForm
         module2IconLabel.BackColor = Color.Transparent;
         module2IconLabel.Dock = DockStyle.Fill;
         module2IconLabel.Font = new Font("Segoe Fluent Icons", 13F);
-        module2IconLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        module2IconLabel.ForeColor = Color.FromArgb(250, 105, 26);
         module2IconLabel.Location = new Point(0, 0);
         module2IconLabel.Name = "module2IconLabel";
         module2IconLabel.Size = new Size(40, 40);
@@ -2485,7 +2485,7 @@ partial class PainelInicialForm
         // 
         module2ArrowLabel.BackColor = Color.Transparent;
         module2ArrowLabel.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
-        module2ArrowLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        module2ArrowLabel.ForeColor = Color.FromArgb(250, 105, 26);
         module2ArrowLabel.Location = new Point(14, 168);
         module2ArrowLabel.Name = "module2ArrowLabel";
         module2ArrowLabel.Size = new Size(28, 22);
@@ -2529,7 +2529,7 @@ partial class PainelInicialForm
         module3IconLabel.BackColor = Color.Transparent;
         module3IconLabel.Dock = DockStyle.Fill;
         module3IconLabel.Font = new Font("Segoe Fluent Icons", 13F);
-        module3IconLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        module3IconLabel.ForeColor = Color.FromArgb(250, 105, 26);
         module3IconLabel.Location = new Point(0, 0);
         module3IconLabel.Name = "module3IconLabel";
         module3IconLabel.Size = new Size(40, 40);
@@ -2563,7 +2563,7 @@ partial class PainelInicialForm
         // 
         module3ArrowLabel.BackColor = Color.Transparent;
         module3ArrowLabel.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
-        module3ArrowLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        module3ArrowLabel.ForeColor = Color.FromArgb(250, 105, 26);
         module3ArrowLabel.Location = new Point(14, 168);
         module3ArrowLabel.Name = "module3ArrowLabel";
         module3ArrowLabel.Size = new Size(28, 22);
@@ -2607,7 +2607,7 @@ partial class PainelInicialForm
         module4IconLabel.BackColor = Color.Transparent;
         module4IconLabel.Dock = DockStyle.Fill;
         module4IconLabel.Font = new Font("Segoe Fluent Icons", 13F);
-        module4IconLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        module4IconLabel.ForeColor = Color.FromArgb(250, 105, 26);
         module4IconLabel.Location = new Point(0, 0);
         module4IconLabel.Name = "module4IconLabel";
         module4IconLabel.Size = new Size(40, 40);
@@ -2641,7 +2641,7 @@ partial class PainelInicialForm
         // 
         module4ArrowLabel.BackColor = Color.Transparent;
         module4ArrowLabel.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
-        module4ArrowLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        module4ArrowLabel.ForeColor = Color.FromArgb(250, 105, 26);
         module4ArrowLabel.Location = new Point(14, 168);
         module4ArrowLabel.Name = "module4ArrowLabel";
         module4ArrowLabel.Size = new Size(28, 22);
@@ -2685,7 +2685,7 @@ partial class PainelInicialForm
         module5IconLabel.BackColor = Color.Transparent;
         module5IconLabel.Dock = DockStyle.Fill;
         module5IconLabel.Font = new Font("Segoe Fluent Icons", 13F);
-        module5IconLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        module5IconLabel.ForeColor = Color.FromArgb(250, 105, 26);
         module5IconLabel.Location = new Point(0, 0);
         module5IconLabel.Name = "module5IconLabel";
         module5IconLabel.Size = new Size(40, 40);
@@ -2719,7 +2719,7 @@ partial class PainelInicialForm
         // 
         module5ArrowLabel.BackColor = Color.Transparent;
         module5ArrowLabel.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
-        module5ArrowLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        module5ArrowLabel.ForeColor = Color.FromArgb(250, 105, 26);
         module5ArrowLabel.Location = new Point(14, 168);
         module5ArrowLabel.Name = "module5ArrowLabel";
         module5ArrowLabel.Size = new Size(28, 22);
@@ -2766,7 +2766,7 @@ partial class PainelInicialForm
         activitiesViewAllLabel.BackColor = Color.Transparent;
         activitiesViewAllLabel.Cursor = Cursors.Hand;
         activitiesViewAllLabel.Font = new Font("Segoe UI", 8F, FontStyle.Bold);
-        activitiesViewAllLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        activitiesViewAllLabel.ForeColor = Color.FromArgb(250, 105, 26);
         activitiesViewAllLabel.Location = new Point(520, 16);
         activitiesViewAllLabel.Name = "activitiesViewAllLabel";
         activitiesViewAllLabel.Size = new Size(60, 18);
@@ -3085,7 +3085,7 @@ partial class PainelInicialForm
         activitiesHistoryLabel.BackColor = Color.Transparent;
         activitiesHistoryLabel.Cursor = Cursors.Hand;
         activitiesHistoryLabel.Font = new Font("Segoe UI", 8F, FontStyle.Bold);
-        activitiesHistoryLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        activitiesHistoryLabel.ForeColor = Color.FromArgb(250, 105, 26);
         activitiesHistoryLabel.Location = new Point(410, 398);
         activitiesHistoryLabel.Name = "activitiesHistoryLabel";
         activitiesHistoryLabel.Size = new Size(170, 18);
@@ -3570,7 +3570,7 @@ partial class PainelInicialForm
         acao1IconLabel.BackColor = Color.Transparent;
         acao1IconLabel.Dock = DockStyle.Fill;
         acao1IconLabel.Font = new Font("Segoe Fluent Icons", 12F);
-        acao1IconLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        acao1IconLabel.ForeColor = Color.FromArgb(250, 105, 26);
         acao1IconLabel.Location = new Point(0, 0);
         acao1IconLabel.Name = "acao1IconLabel";
         acao1IconLabel.Size = new Size(36, 36);
@@ -3650,7 +3650,7 @@ partial class PainelInicialForm
         acao2IconLabel.BackColor = Color.Transparent;
         acao2IconLabel.Dock = DockStyle.Fill;
         acao2IconLabel.Font = new Font("Segoe Fluent Icons", 12F);
-        acao2IconLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        acao2IconLabel.ForeColor = Color.FromArgb(250, 105, 26);
         acao2IconLabel.Location = new Point(0, 0);
         acao2IconLabel.Name = "acao2IconLabel";
         acao2IconLabel.Size = new Size(36, 36);
@@ -3730,7 +3730,7 @@ partial class PainelInicialForm
         acao3IconLabel.BackColor = Color.Transparent;
         acao3IconLabel.Dock = DockStyle.Fill;
         acao3IconLabel.Font = new Font("Segoe Fluent Icons", 12F);
-        acao3IconLabel.ForeColor = Color.FromArgb(212, 37, 49);
+        acao3IconLabel.ForeColor = Color.FromArgb(250, 105, 26);
         acao3IconLabel.Location = new Point(0, 0);
         acao3IconLabel.Name = "acao3IconLabel";
         acao3IconLabel.Size = new Size(36, 36);
@@ -3821,7 +3821,7 @@ partial class PainelInicialForm
         // 
         cellUserIcon.Dock = DockStyle.Left;
         cellUserIcon.Font = new Font("Segoe MDL2 Assets", 10F);
-        cellUserIcon.ForeColor = Color.FromArgb(212, 37, 49);
+        cellUserIcon.ForeColor = Color.FromArgb(250, 105, 26);
         cellUserIcon.Location = new Point(0, 0);
         cellUserIcon.Name = "cellUserIcon";
         cellUserIcon.Size = new Size(28, 100);
