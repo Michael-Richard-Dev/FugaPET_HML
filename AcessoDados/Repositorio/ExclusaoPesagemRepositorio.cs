@@ -207,8 +207,11 @@ public sealed class ExclusaoPesagemRepositorio : RepositorioBase, IExclusaoPesag
     private static async Task<(bool elegivel, Guid correlationId)> BloquearLoteElegivelAsync(
         NpgsqlConnection c, NpgsqlTransaction t, long codigoLote, CancellationToken ct)
     {
+        // Schema físico do lote NÃO possui coluna booleana de situação: o estado é o próprio status_lote
+        // (CHECK inclui 'CANCELADO'). 'FINALIZADO_LOCAL' já exclui qualquer estado SAP/cancelado — elegibilidade
+        // local equivalente ao contrato 054/055, sem introduzir um booleano inexistente no banco.
         const string sql = """
-            SELECT (status_lote = 'FINALIZADO_LOCAL' AND situacao_entrada_produto_lote = true) AS elegivel,
+            SELECT (status_lote = 'FINALIZADO_LOCAL') AS elegivel,
                    correlation_id
               FROM entrada_produto_lote
              WHERE codigo_entrada_produto_lote = @codigo
@@ -299,11 +302,14 @@ public sealed class ExclusaoPesagemRepositorio : RepositorioBase, IExclusaoPesag
     private static async Task CancelarLoteSeVazioAsync(
         NpgsqlConnection c, NpgsqlTransaction t, long codigoLote, long usuario, CancellationToken ct)
     {
+        // Cancelamento lógico do lote (nunca DELETE físico). Colunas físicas reais: status_lote + alterado_por
+        // (varchar(80)); alterado_em é carimbado automaticamente pela trigger BEFORE UPDATE do lote. Não existe
+        // coluna de situação booleana nem *_atualizado_por para o lote. app.usuario_id (SET LOCAL) alimenta a
+        // auditoria; alterado_por registra o autor como texto, coerente com o contrato de autoria do lote.
         const string sql = """
             UPDATE entrada_produto_lote lote
                SET status_lote = 'CANCELADO',
-                   situacao_entrada_produto_lote = false,
-                   entrada_produto_lote_atualizado_por = @usuario
+                   alterado_por = @usuario
              WHERE lote.codigo_entrada_produto_lote = @codigo
                AND lote.status_lote <> 'CANCELADO'
                AND NOT EXISTS (
@@ -314,7 +320,7 @@ public sealed class ExclusaoPesagemRepositorio : RepositorioBase, IExclusaoPesag
             """;
         await using NpgsqlCommand cmd = new(sql, c, t);
         cmd.Parameters.Add(ParametroLongo("@codigo", codigoLote));
-        cmd.Parameters.Add(ParametroLongo("@usuario", usuario));
+        cmd.Parameters.Add(ParametroTexto("@usuario", usuario.ToString(System.Globalization.CultureInfo.InvariantCulture)));
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
