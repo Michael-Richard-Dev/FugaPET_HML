@@ -1057,6 +1057,68 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
         Assert.Contains("Material Document", diagnostico.MotivoBloqueio);
     }
 
+    // 054/§15: provider que devolve `original` nas 2 primeiras leituras (diagnóstico + payload) e `mudado`
+    // a partir da 3ª (recarga pós-reserva), simulando EXCLUIR PESAGEM concorrente entre o claim e o POST.
+    private static Func<long, CancellationToken, Task<IReadOnlyList<EntradaProdutoItemEnvioSap>>> ProviderMudaApos2(
+        IReadOnlyList<EntradaProdutoItemEnvioSap> original,
+        IReadOnlyList<EntradaProdutoItemEnvioSap> mudado)
+    {
+        int chamadas = 0;
+        return (_, _) => Task.FromResult(chamadas++ < 2 ? original : mudado);
+    }
+
+    [Fact] // 054/§15: itens mudaram entre reserva e POST → ABORTA sem POST (payload stale nunca despacha).
+    public async Task PostClaimReload_ItensMudaram_AbortaSemPost()
+    {
+        DefinirSessao(comEnviarSap: true);
+        FakeMaterialDocumentSapServico materialDoc = new();
+        EntradaProdutoController controller = CriarController(
+            new FakePedidoCompraSapServico { EscritaHabilitada = true },
+            materialDoc,
+            ehHomologacao: true,
+            itens: [Item("10", pesoLiquido: 8m)],
+            carregarItensProvider: ProviderMudaApos2([Item("10", pesoLiquido: 8m)], [Item("10", pesoLiquido: 9m)]));
+
+        ResultadoEnvioSapEntrada r = await controller.EnviarPesoEntradaParaSapHomologacaoAsync(99);
+
+        Assert.Null(materialDoc.UltimaRequisicao);              // ZERO POST
+        Assert.Equal(CenarioEnvioSapEntrada.Falha, r.Cenario);
+    }
+
+    [Fact] // 054/§15: nada elegível restou na recarga (todas pesagens excluídas) → ABORTA sem POST.
+    public async Task PostClaimReload_SemItensElegiveis_AbortaSemPost()
+    {
+        DefinirSessao(comEnviarSap: true);
+        FakeMaterialDocumentSapServico materialDoc = new();
+        EntradaProdutoController controller = CriarController(
+            new FakePedidoCompraSapServico { EscritaHabilitada = true },
+            materialDoc,
+            ehHomologacao: true,
+            itens: [Item("10", pesoLiquido: 8m)],
+            carregarItensProvider: ProviderMudaApos2([Item("10", pesoLiquido: 8m)], []));
+
+        ResultadoEnvioSapEntrada r = await controller.EnviarPesoEntradaParaSapHomologacaoAsync(99);
+
+        Assert.Null(materialDoc.UltimaRequisicao);
+        Assert.Equal(CenarioEnvioSapEntrada.Falha, r.Cenario);
+    }
+
+    [Fact] // 054/§15: estado inalterado entre reserva e POST → o envio prossegue normalmente (1 documento).
+    public async Task PostClaimReload_SemMudanca_Despacha()
+    {
+        DefinirSessao(comEnviarSap: true);
+        FakeMaterialDocumentSapServico materialDoc = new();
+        EntradaProdutoController controller = CriarController(
+            new FakePedidoCompraSapServico { EscritaHabilitada = true },
+            materialDoc,
+            ehHomologacao: true,
+            itens: [Item("10", pesoLiquido: 8m)]); // provider default = mesma lista sempre
+
+        await controller.EnviarPesoEntradaParaSapHomologacaoAsync(99);
+
+        Assert.NotNull(materialDoc.UltimaRequisicao);          // POST ocorreu (estado consistente)
+    }
+
     [Fact] // 12G-D (reidratação): reconhece lançamento local elegível por pedido; inexistente → null.
     public async Task Reidratacao_ReconheceLancamentoLocalPorPedido()
     {
@@ -1122,7 +1184,8 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
             CancellationToken,
             Task<ResultadoOperacao>>? atualizarStatus = null,
         Func<string, string, CancellationToken, Task<ProdutoCentroSapMestre?>>? consultarProdutoCentro = null,
-        Func<string, CancellationToken, Task<long?>>? recuperarLancamento = null)
+        Func<string, CancellationToken, Task<long?>>? recuperarLancamento = null,
+        Func<long, CancellationToken, Task<IReadOnlyList<EntradaProdutoItemEnvioSap>>>? carregarItensProvider = null)
         => new(
             new IntegracaoEntradaSapServico(pedido, materialDoc),
             new EntradaProdutoServico(null!, null!, null!, null, new AutorizacaoCentroDepositoEntrada([], []), null),
@@ -1131,7 +1194,7 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
             new AutorizacaoCentroDepositoEntrada([], []),
             FabricaControladoresCadastro.CriarTaraController(),
             ehAmbienteHomologacao: () => ehHomologacao,
-            carregarItensParaEnvio: (_, _) => Task.FromResult(itens),
+            carregarItensParaEnvio: carregarItensProvider ?? ((_, _) => Task.FromResult(itens)),
             // Por padrão, material ADMINISTRADO por lote (mantém o envio de Batch/datas dos testes existentes).
             consultarProdutoCentroSap: consultarProdutoCentro ?? ProdutoCentroBatchManaged,
             obterStatusLancamento: (_, _) => Task.FromResult<string?>(statusLancamento),
