@@ -87,6 +87,7 @@ public static class PermissoesSistema
         public const string SincronizarCache = "SINCRONIZAR_CACHE";
         public const string EnviarSap = "ENVIAR_SAP";
         public const string HabilitarEscritaSap = "HABILITAR_ESCRITA_SAP";
+        public const string ExcluirPesagem = "EXCLUIR_PESAGEM";
         public const string Visualizar = "VISUALIZAR";
         public const string Exportar = "EXPORTAR";
         public const string Liberar = "LIBERAR";

@@ -45,6 +45,8 @@ public sealed class EntradaProdutoController
     private readonly Func<long, CancellationToken, Task<string?>> _obterStatusLancamento;
     // 12G-D: reidratação — localiza o lançamento local elegível por pedido (read-only). Seam p/ teste.
     private readonly Func<string, CancellationToken, Task<long?>> _recuperarLancamentoLocalPorPedido;
+    // 054: EXCLUIR PESAGEM — cancelamento lógico local. Seam p/ teste (default = serviço real).
+    private readonly Func<long, CancellationToken, Task<Modelo.Entrada.ResultadoExclusaoPesagem>> _excluirPesagemLocal;
     private readonly Func<long, CancellationToken, Task<bool>> _reservarLancamentoParaEnvio;
     private readonly Func<CancellationToken, Task<DiagnosticoProntidaoIntegracaoSap>> _diagnosticarIntegracaoSap;
     private readonly Func<
@@ -94,7 +96,8 @@ public sealed class EntradaProdutoController
             CancellationToken,
             Task<ResultadoOperacao>>? atualizarStatusAposEnvioSap = null,
         EntradaProdutoLotesOrquestrador? lotesOrquestrador = null,
-        IRuntimeSapWriteCapabilityService? capability = null)
+        IRuntimeSapWriteCapabilityService? capability = null,
+        Func<long, CancellationToken, Task<Modelo.Entrada.ResultadoExclusaoPesagem>>? excluirPesagemLocal = null)
     {
         Sap = sap ?? throw new ArgumentNullException(nameof(sap));
         EntradaProduto = entradaProdutoServico ?? throw new ArgumentNullException(nameof(entradaProdutoServico));
@@ -125,6 +128,13 @@ public sealed class EntradaProdutoController
             atualizarStatusAposEnvioSap ?? EntradaProduto.AtualizarStatusAposEnvioSapAsync;
         _lotesOrquestrador = lotesOrquestrador ?? new EntradaProdutoLotesOrquestrador();
         _capability = capability ?? RuntimeSapWriteCapability.Instancia;
+        _excluirPesagemLocal = excluirPesagemLocal
+            ?? ((codigoPesagem, cancellationToken) =>
+                new ExclusaoPesagemServico(
+                    new AcessoDados.Repositorio.ExclusaoPesagemRepositorio(
+                        new AcessoDados.Banco.FabricaConexaoPostgreSql(
+                            AcessoDados.Banco.LeitorConfiguracaoBancoPostgreSql.Carregar())))
+                    .ExcluirAsync(codigoPesagem, cancellationToken));
     }
 
     public EstadoOperacaoEntradaProdutoLotes IniciarOperacaoComLotes(
@@ -201,6 +211,12 @@ public sealed class EntradaProdutoController
         string numeroPedido,
         CancellationToken cancellationToken = default)
         => _recuperarLancamentoLocalPorPedido(numeroPedido, cancellationToken);
+
+    /// <summary>054: EXCLUIR PESAGEM — cancelamento lógico local da pesagem persistida (sem SAP, sem DELETE físico).</summary>
+    public Task<Modelo.Entrada.ResultadoExclusaoPesagem> ExcluirPesagemLocalAsync(
+        long codigoPesagem,
+        CancellationToken cancellationToken = default)
+        => _excluirPesagemLocal(codigoPesagem, cancellationToken);
 
     /// <summary>12G-D: itens persistidos elegíveis do lançamento (peso/lote/item), para reidratar a tela.</summary>
     public Task<IReadOnlyList<EntradaProdutoItemEnvioSap>> ListarItensPersistidosParaEnvioAsync(
@@ -452,6 +468,38 @@ public sealed class EntradaProdutoController
                 Cenario = CenarioEnvioSapEntrada.EnvioEmProcessamento,
                 Total = itens.Count,
                 Mensagem = "Envio já bloqueado ou em processamento. Aguarde a conclusão."
+            };
+        }
+
+        // 054 / §15 CORRETIVA (concorrência com EXCLUIR PESAGEM): APÓS a reserva (claim) e ANTES do POST,
+        // RECARREGA o estado autoritativo (pesagens VÁLIDAS/ativas) e compara com o snapshot usado no payload.
+        // Se qualquer item/peso elegível mudou, OU nada elegível restou, ABORTA sem POST — payload stale nunca
+        // despacha. Garante a semântica: cancelamento-primeiro => 101 relê e não envia a pesagem cancelada.
+        IReadOnlyList<EntradaProdutoItemEnvioSap> itensRevalidados;
+        try
+        {
+            itensRevalidados = await _carregarItensParaEnvio(codigoLancamento, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await Sap.RegistrarFalhaStatusLocalAposSapAsync(
+                codigoLancamento, "Falha ao revalidar itens após a reserva.", CancellationToken.None);
+            Sap.RegistrarDiagnostico(
+                $"Envio SAP abortado (lancamento {codigoLancamento}): recarga pós-reserva falhou.{Environment.NewLine}{ex}");
+            return new ResultadoEnvioSapEntrada { Cenario = CenarioEnvioSapEntrada.Falha, Total = itens.Count };
+        }
+
+        if (!ItensElegiveisIguais(itens, itensRevalidados))
+        {
+            await Sap.RegistrarFalhaStatusLocalAposSapAsync(
+                codigoLancamento, "Estado do lançamento mudou após a reserva; envio abortado sem POST.", CancellationToken.None);
+            Sap.RegistrarDiagnostico(
+                $"Envio SAP abortado (lancamento {codigoLancamento}): itens elegíveis mudaram entre reserva e POST (payload stale). ZERO POST.");
+            return new ResultadoEnvioSapEntrada
+            {
+                Cenario = CenarioEnvioSapEntrada.Falha,
+                Total = itensRevalidados.Count,
+                Mensagem = "O envio foi abortado porque o estado do lançamento mudou. Atualize os dados antes de tentar novamente."
             };
         }
 
@@ -723,6 +771,40 @@ public sealed class EntradaProdutoController
     // Monta o documento 101 a partir das POSICOES ja preparadas (uma por lote quando administrado por
     // lote; consolidada quando nao administrado). Batch/datas e agrupamento ja foram decididos pelo
     // PreparadorPayloadMaterialDocumentEntrada com base em A_ProductPlant.
+    // 054/§15: itens elegíveis (numero_item → soma peso líquido) idênticos entre snapshot e recarga pós-reserva.
+    // depois vazio => false (nada elegível restou). Qualquer divergência de item/peso => false (payload stale).
+    private static bool ItensElegiveisIguais(
+        IReadOnlyList<EntradaProdutoItemEnvioSap> antes,
+        IReadOnlyList<EntradaProdutoItemEnvioSap> depois)
+    {
+        if (depois.Count == 0)
+        {
+            return false;
+        }
+
+        static Dictionary<string, decimal> PorItem(IReadOnlyList<EntradaProdutoItemEnvioSap> itens)
+            => itens
+                .GroupBy(i => i.NumeroItem.Trim())
+                .ToDictionary(g => g.Key, g => g.Sum(x => x.PesoLiquidoKg));
+
+        Dictionary<string, decimal> a = PorItem(antes);
+        Dictionary<string, decimal> b = PorItem(depois);
+        if (a.Count != b.Count)
+        {
+            return false;
+        }
+
+        foreach (KeyValuePair<string, decimal> par in a)
+        {
+            if (!b.TryGetValue(par.Key, out decimal peso) || peso != par.Value)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static MaterialDocumentSapRequest MontarRequisicaoMaterialDocument(
         string numeroPedido,
         long codigoLancamento,

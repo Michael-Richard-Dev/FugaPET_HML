@@ -30,6 +30,8 @@ public sealed class PesagemMultiplaItemForm : Form
     // não fala com banco/impressora diretamente. Devolvem true se a etiqueta foi impressa.
     private readonly Func<EntradaProdutoPesagem, Task<bool>>? _imprimirPesagemAsync;
     private readonly Func<EntradaProdutoPesagem, Task<bool>>? _reimprimirPesagemAsync;
+    // 054: EXCLUIR PESAGEM persistida (cancelamento lógico local). true = excluída → fecha e o pai recarrega.
+    private readonly Func<EntradaProdutoPesagem, Task<bool>>? _excluirPesagemAsync;
 
     // Modo somente consulta/reimpressão (lançamento já persistido): bloqueia incluir/cancelar.
     private readonly bool _somenteConsulta;
@@ -52,13 +54,15 @@ public sealed class PesagemMultiplaItemForm : Form
         IReadOnlyList<EntradaProdutoPesagem> pesagensAtuais,
         Func<EntradaProdutoPesagem, Task<bool>>? imprimirPesagemAsync = null,
         Func<EntradaProdutoPesagem, Task<bool>>? reimprimirPesagemAsync = null,
-        bool somenteConsulta = false)
+        bool somenteConsulta = false,
+        Func<EntradaProdutoPesagem, Task<bool>>? excluirPesagemAsync = null)
     {
         _balancaLeituraServico = balancaLeituraServico;
         _tara = tara;
         _codigoBalanca = codigoBalanca;
         _imprimirPesagemAsync = imprimirPesagemAsync;
         _reimprimirPesagemAsync = reimprimirPesagemAsync;
+        _excluirPesagemAsync = excluirPesagemAsync;
         _somenteConsulta = somenteConsulta;
         _pesagens.AddRange(pesagensAtuais);
 
@@ -189,6 +193,53 @@ public sealed class PesagemMultiplaItemForm : Form
 
         // Duplo clique reimprime SOMENTE aquela pesagem (regra definitiva). Permissão é validada no callback do pai.
         _pesagensGrid.CellDoubleClick += async (_, e) => await ReimprimirPesagemAsync(e.RowIndex);
+
+        // 054: EXCLUIR PESAGEM persistida via menu de contexto (só quando o pai fornece o callback = permissão presente).
+        if (_excluirPesagemAsync is not null)
+        {
+            ContextMenuStrip menu = new();
+            ToolStripMenuItem itemExcluir = new("Excluir pesagem");
+            itemExcluir.Click += async (_, _) => await ExcluirPesagemSelecionadaAsync();
+            menu.Items.Add(itemExcluir);
+            _pesagensGrid.ContextMenuStrip = menu;
+            _pesagensGrid.CellMouseDown += (_, e) =>
+            {
+                if (e.Button == MouseButtons.Right && e.RowIndex >= 0 && e.RowIndex < _pesagensGrid.Rows.Count)
+                {
+                    _pesagensGrid.ClearSelection();
+                    _pesagensGrid.Rows[e.RowIndex].Selected = true;
+                }
+            };
+        }
+    }
+
+    // 054: mapeia a linha selecionada para a pesagem PERSISTIDA (por PK) e delega ao callback do pai (que confirma,
+    // valida permissão, executa a transação e recarrega). Sucesso => fecha a janela para o pai reidratar.
+    private async Task ExcluirPesagemSelecionadaAsync()
+    {
+        if (_excluirPesagemAsync is null || _pesagensGrid.CurrentRow is not DataGridViewRow linha)
+        {
+            return;
+        }
+
+        int indice = linha.Index;
+        if (indice < 0 || indice >= _pesagens.Count)
+        {
+            return;
+        }
+
+        EntradaProdutoPesagem pesagem = _pesagens[indice];
+        if (pesagem.CodigoEntradaProdutoPesagem is not long codigo || codigo <= 0)
+        {
+            return; // pesagem em memória (sem PK persistida) não é excluível por este fluxo.
+        }
+
+        bool excluida = await _excluirPesagemAsync(pesagem);
+        if (excluida)
+        {
+            DialogResult = DialogResult.OK;
+            Close();
+        }
     }
 
     private void ConfigurarEntradaManual()

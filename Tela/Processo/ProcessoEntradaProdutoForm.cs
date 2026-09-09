@@ -3001,7 +3001,17 @@ public partial class ProcessoEntradaProdutoForm : Form
                 ImpressaoEntradaServico.MontarEtiquetaPorPesagem(itemPersistido, pesagem, expirationDateTextBox.Text));
 
         string itemPedido = GetCellValue(row, "productionCodeColumn");
-        using PesagemMultiplaItemForm form = new(
+
+        // 054: EXCLUIR PESAGEM — só oferece o callback (e o menu) com a permissão EXATA EXCLUIR_PESAGEM.
+        bool excluiuAlguma = false;
+        Func<EntradaProdutoPesagem, Task<bool>>? excluirPesagem = null;
+        if (PossuiPermissaoEntrada(PermissoesSistema.Acoes.ExcluirPesagem))
+        {
+            excluirPesagem = pesagem => ConfirmarEExcluirPesagemPersistidaAsync(
+                pesagem, itemPedido, sucesso => excluiuAlguma = excluiuAlguma || sucesso);
+        }
+
+        using (PesagemMultiplaItemForm form = new(
             _balancaLeituraServico,
             itemPedido,
             tara,
@@ -3009,8 +3019,18 @@ public partial class ProcessoEntradaProdutoForm : Form
             pesagens,
             imprimirPesagemAsync: null,
             reimprimirPesagemAsync: reimprimirPesagem,
-            somenteConsulta: true);
-        form.ShowDialog(this);
+            somenteConsulta: true,
+            excluirPesagemAsync: excluirPesagem))
+        {
+            form.ShowDialog(this);
+        }
+
+        if (excluiuAlguma)
+        {
+            await ReidratarAposExclusaoPesagemAsync();
+            return;
+        }
+
         statusLabel.Text = $"Pesagens do item {itemPedido}. Total: {itemPersistido.PesoLiquidoTotalKg.ToString("0.###", System.Globalization.CultureInfo.GetCultureInfo("pt-BR"))} kg.";
     }
 
@@ -4039,6 +4059,65 @@ public partial class ProcessoEntradaProdutoForm : Form
             "aguardando gravação local");
         productionActionsButton.Enabled = false;
         AplicarFiltroItensPedido();
+    }
+
+    // 054: §7 confirmação + chamada de exclusão da pesagem PERSISTIDA (backend revalida tudo na transação).
+    private async Task<bool> ConfirmarEExcluirPesagemPersistidaAsync(
+        EntradaProdutoPesagem pesagem, string itemPedido, Action<bool> registrarResultado)
+    {
+        if (pesagem.CodigoEntradaProdutoPesagem is not long codigo || codigo <= 0)
+        {
+            return false;
+        }
+
+        string lote = pesagem.CodigoEntradaProdutoLote?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-";
+        string pesoLiquido = pesagem.PesoLiquidoKg.ToString("0.###", System.Globalization.CultureInfo.GetCultureInfo("pt-BR"));
+        DialogResult confirmacao = MessageBox.Show(
+            "Excluir esta pesagem local?" + Environment.NewLine + Environment.NewLine
+            + $"Pedido: {_numeroPedidoCarregado}" + Environment.NewLine
+            + $"Item: {itemPedido}" + Environment.NewLine
+            + $"Lote: {lote}" + Environment.NewLine
+            + $"Pesagem: {codigo}" + Environment.NewLine
+            + $"Peso líquido: {pesoLiquido} kg" + Environment.NewLine + Environment.NewLine
+            + "Nenhuma operação será executada no SAP.",
+            "Excluir pesagem",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button2);
+        if (confirmacao != DialogResult.Yes)
+        {
+            return false;
+        }
+
+        ResultadoExclusaoPesagem resultado;
+        try
+        {
+            resultado = await _controller.ExcluirPesagemLocalAsync(codigo, _fechamentoTelaCts.Token);
+        }
+        catch (OperationCanceledException) when (_fechamentoTelaCts.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        statusLabel.Text = resultado.Mensagem;
+        if (!resultado.Sucesso)
+        {
+            MessageBox.Show(resultado.Mensagem, "Excluir pesagem", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
+        }
+
+        registrarResultado(true);
+        return true;
+    }
+
+    // 054/§18: pós-sucesso sem restart — descarta estado em memória e força recarregar a MESMA PO (pesagens
+    // persistidas ativas), recalcula peso/elegibilidade e reidrata. Árvore vazia/cancelada => sem lançamento elegível.
+    private async Task ReidratarAposExclusaoPesagemAsync()
+    {
+        _leiturasPorItem.Clear();
+        _codigoLancamentoPersistido = null;
+        _numeroPedidoCarregado = null;
+        await AtualizarDadosPedidoSelecionadoAsync();
     }
 
     // 12G-D: após carregar um PO, reconhece um lançamento local FINALIZADO_LOCAL/ERRO_SAP já persistido
