@@ -21,3 +21,10 @@ configuracao.*.json.old*
 
 # Nota local com senha de exemplo para gerar hash do admin (nunca versionar)
 Gerar Hash para primeiro acesso.txt
+
+# GATE 02 (baseline preservation): artefatos GERADOS do checkpoint Q — nunca versionar.
+# NAO ignora BancoDados/ (referencia de banco, versionamento sob autoridade propria).
+_Q03SRC/
+entrega_release_04/
+**/TestResults/
+*.bak
