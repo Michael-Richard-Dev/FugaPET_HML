@@ -260,7 +260,13 @@ public partial class ProcessoEntradaProdutoForm : Form
         // do 081, que estourava o viewport e forçava barras de rolagem.
         LegibilidadeRecebimentoMercadoria.AplicarEscalaFonte(this, LegibilidadeRecebimentoMercadoria.Escala);
 
-        // §8/§9 Sem AutoScroll: a janela permanece Maximizada, cabendo integralmente na área de trabalho
+        // §4/§8 (FIX2) Adapta a GEOMETRIA ao CONTEÚDO: cresce alturas de controles de texto e de linhas de
+        // altura absoluta dos TableLayoutPanels o necessário para a fonte 2.0x caber (cabeçalho, cards, ComboBox,
+        // toolbar, painel direito, rodapé). Larguras não são multiplicadas; a grade absorve o espaço vertical
+        // restante e permanece a região elástica. Corrige o clipping observado no runtime do FIX1.
+        LegibilidadeRecebimentoMercadoria.AdaptarAlturasParaFonte(this);
+
+        // §8/§9/§13 Sem AutoScroll: a janela permanece Maximizada, cabendo integralmente na área de trabalho
         // (1920x1080 / 100%). A grade é a região elástica; nenhuma barra de rolagem de janela é necessária.
         AutoScroll = false;
         WindowState = FormWindowState.Maximized;

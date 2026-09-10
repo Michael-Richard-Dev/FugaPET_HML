@@ -187,4 +187,73 @@ public sealed class LegibilidadeRecebimentoMercadoria081Tests
         Assert.Contains("sapStatusPanel.FillColor = LegibilidadeRecebimentoMercadoria.LaranjaFugaPetEscuro;", src, StringComparison.Ordinal);
         Assert.Contains("sapStatusLabel.ForeColor = Color.White;", src, StringComparison.Ordinal);
     }
+
+    // ---------------- FIX2: adaptação de geometria ao conteúdo (alturas) ----------------
+
+    // Linha ABSOLUTA de um TableLayoutPanel cresce para caber o texto 2x; linha da grade (elástica) intacta;
+    // altura de controle de texto fixo cresce até a altura preferida da fonte. (CONTROL_HEIGHTS_ADAPTED)
+    [Fact]
+    public void Adaptar_CresceLinhaAbsolutaEAlturaDeTexto_GridElasticaIntacta()
+        => ExecutarEmSta(() =>
+        {
+            using TableLayoutPanel tlp = new() { ColumnCount = 1, RowCount = 2, Size = new Size(300, 200) };
+            tlp.RowStyles.Add(new RowStyle(SizeType.Absolute, 18f));   // linha de texto (curta p/ fonte 2x)
+            tlp.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));   // linha elástica (grade)
+
+            Label valor = new() { AutoSize = false, Size = new Size(120, 14), Font = new Font("Segoe UI", 18F, FontStyle.Bold), Text = "4500000005" };
+            DataGridView grid = new() { Font = new Font("Segoe UI", 16F) };
+            tlp.Controls.Add(valor, 0, 0);
+            tlp.Controls.Add(grid, 0, 1);
+
+            int alturaPreferidaTexto = valor.PreferredSize.Height;
+
+            LegibilidadeRecebimentoMercadoria.AdaptarAlturasParaFonte(tlp);
+
+            Assert.True(tlp.RowStyles[0].Height >= alturaPreferidaTexto,
+                $"linha absoluta deveria crescer para >= {alturaPreferidaTexto}, ficou {tlp.RowStyles[0].Height}");
+            Assert.Equal(SizeType.Percent, tlp.RowStyles[1].SizeType);   // grade continua elástica
+            Assert.Equal(100f, tlp.RowStyles[1].Height);                 // não fixada
+            Assert.True(valor.Height >= alturaPreferidaTexto);           // texto cabe verticalmente
+        });
+
+    // A adaptação só CRESCE: um controle/linha já suficiente não é reduzido. (monotônico)
+    [Fact]
+    public void Adaptar_NaoReduz_QuandoJaCabe()
+        => ExecutarEmSta(() =>
+        {
+            using TableLayoutPanel tlp = new() { ColumnCount = 1, RowCount = 1, Size = new Size(200, 200) };
+            tlp.RowStyles.Add(new RowStyle(SizeType.Absolute, 400f));   // já bem maior que o necessário
+            Label pequeno = new() { AutoSize = false, Size = new Size(80, 60), Font = new Font("Segoe UI", 9F), Text = "x" };
+            tlp.Controls.Add(pequeno, 0, 0);
+
+            LegibilidadeRecebimentoMercadoria.AdaptarAlturasParaFonte(tlp);
+
+            Assert.Equal(400f, tlp.RowStyles[0].Height);   // não reduziu
+            Assert.Equal(60, pequeno.Height);              // não reduziu
+        });
+
+    // ComboBox recebe altura compatível com a fonte (COMBOBOX_ADAPTED).
+    [Fact]
+    public void Adaptar_ComboBox_AlturaCompativelComFonte()
+        => ExecutarEmSta(() =>
+        {
+            using Panel raiz = new() { Size = new Size(300, 100) };
+            ComboBox combo = new() { Font = new Font("Segoe UI", 18F), Location = new Point(5, 5), Width = 200 };
+            raiz.Controls.Add(combo);
+            int preferida = combo.PreferredSize.Height;
+
+            LegibilidadeRecebimentoMercadoria.AdaptarAlturasParaFonte(raiz);
+
+            Assert.False(combo.IntegralHeight);
+            Assert.True(combo.Height >= preferida, $"ComboBox {combo.Height} < preferida {preferida}");
+        });
+
+    [Fact] // a tela chama a adaptação de alturas APÓS a escala de fonte (fiação FIX2).
+    public void Tela_AdaptaAlturasAposEscalaFonte()
+    {
+        string src = FonteTela();
+        int iEscala = src.IndexOf("AplicarEscalaFonte(this,", StringComparison.Ordinal);
+        int iAdaptar = src.IndexOf("AdaptarAlturasParaFonte(this);", StringComparison.Ordinal);
+        Assert.True(iEscala >= 0 && iAdaptar > iEscala, "AdaptarAlturasParaFonte deve ser chamado após AplicarEscalaFonte");
+    }
 }

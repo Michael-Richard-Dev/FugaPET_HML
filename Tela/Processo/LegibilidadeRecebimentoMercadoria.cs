@@ -87,4 +87,107 @@ public static class LegibilidadeRecebimentoMercadoria
     }
 
     private static int Arredondar(float valor) => (int)Math.Round(valor, MidpointRounding.AwayFromZero);
+
+    /// <summary>
+    /// GATE 082-FIX2 — adapta a GEOMETRIA ao CONTEÚDO (não à escala): após ampliar a fonte, cresce apenas o
+    /// necessário para o texto caber. Percorre em pós-ordem (conteúdo interno cresce antes do container) e:
+    ///  - em controles de texto de altura fixa (Label/Button/CheckBox/TextBox/ComboBox), garante altura mínima
+    ///    igual à altura preferida da fonte (SÓ CRESCE, nunca reduz);
+    ///  - em cada TableLayoutPanel, cresce as linhas de altura ABSOLUTA até caber o filho mais alto, deixando
+    ///    intactas as linhas elásticas (Percent/AutoSize) e as que hospedam a DataGridView (região elástica).
+    /// Larguras não são multiplicadas (evita overflow horizontal); a grade absorve o espaço vertical restante.
+    /// </summary>
+    public static void AdaptarAlturasParaFonte(Control raiz)
+    {
+        if (raiz is null)
+        {
+            return;
+        }
+
+        raiz.SuspendLayout();
+        foreach (Control filho in raiz.Controls)
+        {
+            AdaptarAlturasParaFonte(filho);
+        }
+
+        GarantirAlturaDeTexto(raiz);
+
+        if (raiz is TableLayoutPanel tabela)
+        {
+            CrescerLinhasAbsolutas(tabela);
+        }
+
+        raiz.ResumeLayout(false);
+    }
+
+    private static void GarantirAlturaDeTexto(Control controle)
+    {
+        if (controle is ComboBox combo)
+        {
+            combo.IntegralHeight = false;
+            int necessario = combo.PreferredSize.Height;
+            if (combo.Height < necessario)
+            {
+                combo.Height = necessario;
+            }
+            return;
+        }
+
+        if (controle is Label or Button or CheckBox or TextBox && !controle.AutoSize)
+        {
+            int necessario = controle.PreferredSize.Height;
+            if (controle.Height < necessario)
+            {
+                controle.MinimumSize = new Size(controle.MinimumSize.Width, necessario);
+                controle.Height = necessario;
+            }
+        }
+    }
+
+    private static void CrescerLinhasAbsolutas(TableLayoutPanel tabela)
+    {
+        int linhas = tabela.RowStyles.Count;
+        if (linhas == 0)
+        {
+            return;
+        }
+
+        int[] alturaNecessaria = new int[linhas];
+        bool[] linhaElastica = new bool[linhas];
+
+        foreach (Control filho in tabela.Controls)
+        {
+            int linha = tabela.GetRow(filho);
+            if (linha < 0 || linha >= linhas)
+            {
+                continue;
+            }
+
+            // Linha que hospeda a grade permanece elástica (não fixamos sua altura).
+            if (filho is DataGridView)
+            {
+                linhaElastica[linha] = true;
+            }
+
+            int altura = filho.PreferredSize.Height + filho.Margin.Top + filho.Margin.Bottom;
+            if (altura > alturaNecessaria[linha])
+            {
+                alturaNecessaria[linha] = altura;
+            }
+        }
+
+        for (int linha = 0; linha < linhas; linha++)
+        {
+            if (linhaElastica[linha])
+            {
+                continue;
+            }
+
+            RowStyle estilo = tabela.RowStyles[linha];
+            if (estilo.SizeType == SizeType.Absolute && alturaNecessaria[linha] > estilo.Height)
+            {
+                estilo.Height = alturaNecessaria[linha];
+            }
+        }
+    }
 }
