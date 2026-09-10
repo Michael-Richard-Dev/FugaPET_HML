@@ -1,4 +1,4 @@
-namespace FugaPET_HML.Tela;
+﻿namespace FugaPET_HML.Tela;
 
 partial class PainelInicialForm
 {
@@ -652,7 +652,7 @@ partial class PainelInicialForm
         // 
         bodyLayout.BackColor = Color.FromArgb(247, 248, 250);
         bodyLayout.ColumnCount = 2;
-        bodyLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180F));
+        bodyLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 380F));
         bodyLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         bodyLayout.Controls.Add(sidebarPanel, 0, 0);
         bodyLayout.Controls.Add(rightAreaLayout, 1, 0);
@@ -705,7 +705,7 @@ partial class PainelInicialForm
         menuItemInicio.Cursor = Cursors.Hand;
         menuItemInicio.Location = new Point(9, 82);
         menuItemInicio.Name = "menuItemInicio";
-        menuItemInicio.Size = new Size(162, 40);
+        menuItemInicio.Size = new Size(360, 40);
         menuItemInicio.TabIndex = 1;
         // 
         // menuInicioIcon
@@ -740,7 +740,7 @@ partial class PainelInicialForm
         menuItemCadastro.Cursor = Cursors.Hand;
         menuItemCadastro.Location = new Point(9, 130);
         menuItemCadastro.Name = "menuItemCadastro";
-        menuItemCadastro.Size = new Size(162, 40);
+        menuItemCadastro.Size = new Size(360, 40);
         menuItemCadastro.TabIndex = 2;
         // 
         // menuCadastroIcon
@@ -775,7 +775,7 @@ partial class PainelInicialForm
         menuItemLeitura.Cursor = Cursors.Hand;
         menuItemLeitura.Location = new Point(9, 178);
         menuItemLeitura.Name = "menuItemLeitura";
-        menuItemLeitura.Size = new Size(162, 40);
+        menuItemLeitura.Size = new Size(360, 40);
         menuItemLeitura.TabIndex = 3;
         // 
         // menuLeituraIcon
@@ -799,7 +799,7 @@ partial class PainelInicialForm
         menuLeituraText.Name = "menuLeituraText";
         menuLeituraText.Size = new Size(112, 40);
         menuLeituraText.TabIndex = 1;
-        menuLeituraText.Text = "Processo de \r\nProdução";
+        menuLeituraText.Text = "Processo de Produção";
         menuLeituraText.TextAlign = ContentAlignment.MiddleLeft;
         // 
         // menuItemEtiquetas
@@ -810,7 +810,7 @@ partial class PainelInicialForm
         menuItemEtiquetas.Cursor = Cursors.Hand;
         menuItemEtiquetas.Location = new Point(9, 226);
         menuItemEtiquetas.Name = "menuItemEtiquetas";
-        menuItemEtiquetas.Size = new Size(162, 40);
+        menuItemEtiquetas.Size = new Size(360, 40);
         menuItemEtiquetas.TabIndex = 6;
         // 
         // menuEtiquetasIcon
@@ -845,7 +845,7 @@ partial class PainelInicialForm
         menuItemHistorico.Cursor = Cursors.Hand;
         menuItemHistorico.Location = new Point(9, 274);
         menuItemHistorico.Name = "menuItemHistorico";
-        menuItemHistorico.Size = new Size(162, 40);
+        menuItemHistorico.Size = new Size(360, 40);
         menuItemHistorico.TabIndex = 7;
         // 
         // menuHistoricoIcon
@@ -880,7 +880,7 @@ partial class PainelInicialForm
         menuItemRelatorios.Cursor = Cursors.Hand;
         menuItemRelatorios.Location = new Point(9, 322);
         menuItemRelatorios.Name = "menuItemRelatorios";
-        menuItemRelatorios.Size = new Size(162, 40);
+        menuItemRelatorios.Size = new Size(360, 40);
         menuItemRelatorios.TabIndex = 8;
         // 
         // menuRelatoriosIcon
@@ -915,7 +915,7 @@ partial class PainelInicialForm
         menuItemSap.Cursor = Cursors.Hand;
         menuItemSap.Location = new Point(9, 370);
         menuItemSap.Name = "menuItemSap";
-        menuItemSap.Size = new Size(162, 40);
+        menuItemSap.Size = new Size(360, 40);
         menuItemSap.TabIndex = 9;
         // 
         // menuSapIcon
@@ -950,7 +950,7 @@ partial class PainelInicialForm
         menuItemConfig.Cursor = Cursors.Hand;
         menuItemConfig.Location = new Point(9, 418);
         menuItemConfig.Name = "menuItemConfig";
-        menuItemConfig.Size = new Size(162, 40);
+        menuItemConfig.Size = new Size(360, 40);
         menuItemConfig.TabIndex = 10;
         // 
         // menuConfigIcon
@@ -985,7 +985,7 @@ partial class PainelInicialForm
         menuItemSeguranca.Cursor = Cursors.Hand;
         menuItemSeguranca.Location = new Point(9, 466);
         menuItemSeguranca.Name = "menuItemSeguranca";
-        menuItemSeguranca.Size = new Size(162, 40);
+        menuItemSeguranca.Size = new Size(360, 40);
         menuItemSeguranca.TabIndex = 11;
         // 
         // menuSegurancaIcon
@@ -1569,7 +1569,7 @@ partial class PainelInicialForm
         menuItemConsulta.Cursor = Cursors.Hand;
         menuItemConsulta.Location = new Point(9, 274);
         menuItemConsulta.Name = "menuItemConsulta";
-        menuItemConsulta.Size = new Size(162, 40);
+        menuItemConsulta.Size = new Size(360, 40);
         menuItemConsulta.TabIndex = 5;
         // 
         // menuConsultaIcon

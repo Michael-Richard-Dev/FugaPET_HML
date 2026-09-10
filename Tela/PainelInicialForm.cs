@@ -84,6 +84,87 @@ public partial class PainelInicialForm : Form
         Shown += (_, _) => IniciarPreCarregamentoOrdensProducao();
         FormClosing += (_, _) => _fechamentoPreCarregamentoCts.Cancel();
         KeyDown += PainelInicialForm_KeyDown;
+
+        // Legibilidade: duplica (2.0x) a fonte de TODO o corpo (menu lateral + conteúdo), EXCETO cabeçalho e
+        // rodapé (que ficam no tamanho padrão). Roda uma única vez, no último Shown — após conteúdo, visuais de
+        // runtime e permissões já aplicados — e adapta as alturas ao novo tamanho.
+        bool escalaCorpoAplicada = false;
+        Shown += (_, _) =>
+        {
+            if (escalaCorpoAplicada)
+            {
+                return;
+            }
+            escalaCorpoAplicada = true;
+
+            SuspendLayout();
+            foreach (Control corpo in new Control[] { sidebarPanel, contentScrollPanel })
+            {
+                global::FugaPET_HML.Tela.Processo.LegibilidadeRecebimentoMercadoria.AplicarEscalaFonte(
+                    corpo, global::FugaPET_HML.Tela.Processo.LegibilidadeRecebimentoMercadoria.Escala);
+                global::FugaPET_HML.Tela.Processo.LegibilidadeRecebimentoMercadoria.AdaptarAlturasParaFonte(corpo);
+            }
+            ResumeLayout(true);
+            PerformLayout();
+
+            // Altura + espaçamento dos itens (o reempilhamento vertical funciona em runtime): dá altura para o
+            // item de 2 linhas ("Processo de Produção") e separa os módulos. Larguras/rotulos já vêm do Designer.
+            ReempilharSidebar();
+        };
+
+        // Sidebar 2.0x SEM cortar: os rótulos ficam em AutoSize (crescem com a fonte e nunca cortam). A largura
+        // da barra e dos itens vem do Designer (coluna 380 / itens 360), então o rótulo grande cabe dentro do
+        // item. AutoSize é setado aqui no init (fora de qualquer SuspendLayout) para valer de fato.
+        foreach (Label rotulo in new[]
+                 {
+                     menuInicioText, menuCadastroText, menuLeituraText, menuEtiquetasText, menuHistoricoText,
+                     menuRelatoriosText, menuSapText, menuConfigText, menuSegurancaText,
+                 })
+        {
+            rotulo.AutoSize = true;
+        }
+    }
+
+    // Reempilha os itens do menu com mais altura (cabe o item de 2 linhas) e mais espaço entre eles, centralizando
+    // ícone e texto verticalmente. Largura vem do Designer; aqui só mexe em altura/posição (que aplicam em runtime).
+    private void ReempilharSidebar()
+    {
+        const int altura = 62;
+        const int espaco = 16;
+
+        (Control item, Control texto)[] itens =
+        [
+            (menuItemInicio, menuInicioText),
+            (menuItemCadastro, menuCadastroText),
+            (menuItemLeitura, menuLeituraText),
+            (menuItemEtiquetas, menuEtiquetasText),
+            (menuItemHistorico, menuHistoricoText),
+            (menuItemRelatorios, menuRelatoriosText),
+            (menuItemSap, menuSapText),
+            (menuItemConfig, menuConfigText),
+            (menuItemSeguranca, menuSegurancaText),
+        ];
+
+        int y = menuItemInicio.Top + 16;
+        foreach ((Control item, Control texto) in itens)
+        {
+            item.Height = altura;
+            item.Top = y;
+            y += altura + espaco;
+
+            foreach (Control filho in item.Controls)
+            {
+                if (!ReferenceEquals(filho, texto))
+                {
+                    filho.Height = altura;   // ícone centraliza via TextAlign
+                }
+            }
+
+            // Medição FRESCA (GetPreferredSize) — o PreferredSize em cache pode vir de 1 linha e desalinhar o
+            // item de 2 linhas ("Processo de Produção"), fazendo a 2ª linha vazar por baixo.
+            int alturaTexto = texto.GetPreferredSize(Size.Empty).Height;
+            texto.Top = Math.Max(4, (altura - alturaTexto) / 2);
+        }
     }
 
     /// <summary>Dispara o pre-carregamento dos pedidos da Entrada sem bloquear a UI (fire-and-forget).</summary>
