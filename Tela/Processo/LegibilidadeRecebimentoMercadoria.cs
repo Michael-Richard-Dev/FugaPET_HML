@@ -4,14 +4,19 @@ using System.Windows.Forms;
 namespace FugaPET_HML.Tela.Processo;
 
 /// <summary>
-/// GATE 081 — legibilidade da tela "Recebimento de Mercadoria". Escala determinística de tipografia + geometria
-/// (2.0x) preservando o tamanho de ícones/logos (PictureBox) e a espessura de bordas. A escala é uniforme
-/// (fonte, posição e tamanho pelo mesmo fator), portanto o que cabia em 1x continua cabendo em 2x — sem clipping
-/// nem overlap. Puro sobre Control: testável sem instanciar a tela real.
+/// GATE 081/082 — legibilidade da tela "Recebimento de Mercadoria". Escala SOMENTE a tipografia (2.0x),
+/// NUNCA a geometria: a tela é montada com TableLayoutPanel + Anchor/Dock + AutoScaleMode.Font e janela
+/// Maximizada, então o layout se readapta ao viewport (1920x1080 / 100%) sozinho quando a fonte cresce —
+/// sem barras de rolagem e sem estourar a área de trabalho. Ícones/logos (PictureBox) e bordas não são
+/// tocados (§9). Puro sobre Control: testável sem instanciar a tela real.
+///
+/// GATE 082-FIX1: removida a escala de GEOMETRIA do 081 (Location/Size ×2), que empurrava os controles
+/// para fora do viewport dentro das células de layout e forçava AutoScroll/barras. A fonte 2.0x aprovada
+/// por Michael Richard é preservada.
 /// </summary>
 public static class LegibilidadeRecebimentoMercadoria
 {
-    /// <summary>Fator exigido por Michael Richard: dobrar as fontes da tela.</summary>
+    /// <summary>Fator exigido por Michael Richard: dobrar as fontes da tela (validado em 1920x1080/100%).</summary>
     public const float Escala = 2.0f;
 
     // Tema FugaPET congelado (laranja/branco). Mesmos valores já usados no reskin aprovado.
@@ -19,22 +24,20 @@ public static class LegibilidadeRecebimentoMercadoria
     public static readonly Color LaranjaFugaPetEscuro = Color.FromArgb(200, 78, 10);
 
     /// <summary>
-    /// Escala fonte + geometria de toda a subárvore de <paramref name="raiz"/> pelo fator informado. O tamanho
-    /// da própria raiz não é alterado (só o conteúdo). Ícones/logos (PictureBox) mantêm o tamanho em pixels
-    /// (apenas reposicionados); bordas não são tocadas.
+    /// Multiplica a fonte de toda a subárvore de <paramref name="raiz"/> pelo fator informado, SEM alterar
+    /// Location/Size (a geometria é responsabilidade do layout responsivo da tela). Snapshot das fontes ANTES
+    /// de mutar evita composição por herança (pai já escalado inflaria o filho que herda).
     /// </summary>
-    public static void AplicarEscala(Control raiz, float escala)
+    public static void AplicarEscalaFonte(Control raiz, float escala)
     {
         if (raiz is null || escala <= 0f)
         {
             return;
         }
 
-        // Snapshot das fontes ANTES de qualquer mutação: evita composição por herança (pai já escalado
-        // inflaria o filho que herda). Cada controle recebe baseFont * escala uma única vez.
         Dictionary<Control, float> fontesBase = [];
         Coletar(raiz, fontesBase);
-        EscalarSubarvore(raiz, escala, fontesBase);
+        Aplicar(raiz, escala, fontesBase);
     }
 
     private static void Coletar(Control controle, Dictionary<Control, float> fontesBase)
@@ -46,20 +49,13 @@ public static class LegibilidadeRecebimentoMercadoria
         }
     }
 
-    private static void EscalarSubarvore(Control controle, float escala, Dictionary<Control, float> fontesBase)
+    private static void Aplicar(Control controle, float escala, Dictionary<Control, float> fontesBase)
     {
         controle.SuspendLayout();
 
         foreach (Control filho in controle.Controls)
         {
-            // Posição sempre escala (proporcional ao pai que também cresce). Tamanho escala exceto ícones/logo.
-            filho.Location = new Point(Arredondar(filho.Location.X * escala), Arredondar(filho.Location.Y * escala));
-            if (filho is not PictureBox)
-            {
-                filho.Size = new Size(Arredondar(filho.Width * escala), Arredondar(filho.Height * escala));
-            }
-
-            EscalarSubarvore(filho, escala, fontesBase);
+            Aplicar(filho, escala, fontesBase);
         }
 
         // Fonte: a partir do snapshot (não do valor já herdado/mutado). PictureBox não tem texto relevante.
@@ -70,14 +66,16 @@ public static class LegibilidadeRecebimentoMercadoria
 
         if (controle is DataGridView grid && fontesBase.TryGetValue(grid, out float gridFont) && gridFont > 0f)
         {
-            EscalarGrid(grid, escala, gridFont);
+            EscalarGridFonte(grid, escala, gridFont);
         }
 
         controle.ResumeLayout(false);
     }
 
-    // DataGridView: linhas/headers são estilos (não controles-filho) — precisam ser escalados explicitamente.
-    private static void EscalarGrid(DataGridView grid, float escala, float baseFont)
+    // DataGridView é a região elástica da tela (Anchor/Dock): escala a FONTE de header/células e a altura de
+    // linha/header para acomodar o texto. NÃO escala larguras de coluna (evita overflow horizontal; as colunas
+    // usam preenchimento/redistribuição). Se faltar espaço, a própria grade rola internamente — nunca a janela.
+    private static void EscalarGridFonte(DataGridView grid, float escala, float baseFont)
     {
         Font fonte = new(grid.Font.FontFamily, baseFont * escala, grid.Font.Style, GraphicsUnit.Point);
         grid.ColumnHeadersDefaultCellStyle.Font = fonte;
@@ -86,18 +84,6 @@ public static class LegibilidadeRecebimentoMercadoria
 
         grid.ColumnHeadersHeight = Arredondar(grid.ColumnHeadersHeight * escala);
         grid.RowTemplate.Height = Arredondar(grid.RowTemplate.Height * escala);
-
-        foreach (DataGridViewColumn coluna in grid.Columns)
-        {
-            if (coluna.Width > 0)
-            {
-                coluna.Width = Arredondar(coluna.Width * escala);
-            }
-            if (coluna.MinimumWidth > 0)
-            {
-                coluna.MinimumWidth = Arredondar(coluna.MinimumWidth * escala);
-            }
-        }
     }
 
     private static int Arredondar(float valor) => (int)Math.Round(valor, MidpointRounding.AwayFromZero);

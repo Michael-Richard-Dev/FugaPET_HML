@@ -254,24 +254,19 @@ public partial class ProcessoEntradaProdutoForm : Form
         sapStatusLabel.ForeColor = Color.White;
         sapStatusLabel.Tag = "SAP_STATUS_DESTAQUE";
 
-        // §7/§8 Tipografia 2.0x + geometria proporcional (ícones/logo mantêm tamanho; bordas preservadas).
-        Size clienteBase = ClientSize;
-        LegibilidadeRecebimentoMercadoria.AplicarEscala(this, LegibilidadeRecebimentoMercadoria.Escala);
+        // §7 Tipografia 2.0x SEM escalar geometria: a tela usa TableLayoutPanel + Anchor/Dock +
+        // AutoScaleMode.Font, então o layout se readapta ao viewport quando a fonte cresce. Ícones/logo
+        // mantêm o tamanho e as bordas são preservadas (§9). GATE 082-FIX1: removida a escala de geometria
+        // do 081, que estourava o viewport e forçava barras de rolagem.
+        LegibilidadeRecebimentoMercadoria.AplicarEscalaFonte(this, LegibilidadeRecebimentoMercadoria.Escala);
 
-        // §9/§10 A janela cresce apenas o necessário para acomodar a tipografia; limitada à área de trabalho,
-        // com rolagem para permanecer utilizável na resolução operacional atual.
-        Size alvo = new(
-            (int)Math.Round(clienteBase.Width * LegibilidadeRecebimentoMercadoria.Escala),
-            (int)Math.Round(clienteBase.Height * LegibilidadeRecebimentoMercadoria.Escala));
-        AutoScroll = true;
-        AutoScrollMinSize = alvo;
-        Rectangle areaTrabalho = Screen.FromControl(this).WorkingArea;
-        ClientSize = new Size(
-            Math.Min(alvo.Width, areaTrabalho.Width),
-            Math.Min(alvo.Height, areaTrabalho.Height));
-        StartPosition = FormStartPosition.CenterScreen;
+        // §8/§9 Sem AutoScroll: a janela permanece Maximizada, cabendo integralmente na área de trabalho
+        // (1920x1080 / 100%). A grade é a região elástica; nenhuma barra de rolagem de janela é necessária.
+        AutoScroll = false;
+        WindowState = FormWindowState.Maximized;
 
         ResumeLayout(true);
+        PerformLayout();
     }
 
     private static DadosLoteEntrada? SolicitarDadosLotePadrao(IWin32Window owner, ModoEntradaMaterial modoEntrada)
