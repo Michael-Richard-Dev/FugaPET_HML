@@ -219,6 +219,59 @@ public partial class ProcessoEntradaProdutoForm : Form
             _fechamentoTelaCts.Cancel();
             _controller.LimparOperacaoComLotes();
         };
+
+        // GATE 081: melhoria visual/legibilidade — SOMENTE no modo Recebimento de Mercadoria e por ÚLTIMO,
+        // após toda a configuração de fontes/estilos, para não ser sobrescrita.
+        AplicarLegibilidadeRecebimentoMercadoria();
+    }
+
+    // GATE 081: identidade FugaPET + ícone laranja/traços brancos + status SAP destacado + tipografia 2.0x.
+    // Escopo estrito: só quando a tela é a porta única "Recebimento de Mercadoria". Só apresentação — nenhuma
+    // regra de negócio, SAP, persistência, filtro ROH/HIBE, lote/tara ou Excluir Pesagem é alterada aqui.
+    private void AplicarLegibilidadeRecebimentoMercadoria()
+    {
+        if (_modoEntrada != global::FugaPET_HML.Modelo.Processo.ModoEntradaMaterial.RecebimentoMercadoria)
+        {
+            return;
+        }
+
+        SuspendLayout();
+
+        // §4 Identidade FugaPET (substitui o branding local Fuga Couros pelo logo FugaPET aprovado no projeto).
+        companyLogoPictureBox.Image = global::FugaPET_HML.Properties.Resources.fuga_2026_logo;
+        companyLogoPictureBox.Tag = "FUGAPET_LOGO";
+
+        // §5 Ícone do título: fundo LARANJA FugaPET + desenho de TRAÇOS BRANCOS (asset aprovado). Sem vermelho/rosa.
+        headerTitleIconPanel.BackColor = Color.Transparent;
+        headerTitleIconPanel.FillColor = LegibilidadeRecebimentoMercadoria.LaranjaFugaPet;
+        headerTitleIconPictureBox.Image = global::FugaPET_HML.Properties.Resources.production_title_icon;
+        headerTitleIconPictureBox.Tag = "FUGAPET_ICON_BRANCO";
+
+        // §6 Status SAP com destaque ALTO: badge preenchido (laranja) + texto branco. O cálculo/estado SAP
+        // (AtualizarEstadoVisualIntegracaoSap) só troca a cor do "dot" e o texto — este realce não é sobrescrito.
+        sapStatusPanel.FillColor = LegibilidadeRecebimentoMercadoria.LaranjaFugaPetEscuro;
+        sapStatusPanel.BorderColor = LegibilidadeRecebimentoMercadoria.LaranjaFugaPet;
+        sapStatusLabel.ForeColor = Color.White;
+        sapStatusLabel.Tag = "SAP_STATUS_DESTAQUE";
+
+        // §7/§8 Tipografia 2.0x + geometria proporcional (ícones/logo mantêm tamanho; bordas preservadas).
+        Size clienteBase = ClientSize;
+        LegibilidadeRecebimentoMercadoria.AplicarEscala(this, LegibilidadeRecebimentoMercadoria.Escala);
+
+        // §9/§10 A janela cresce apenas o necessário para acomodar a tipografia; limitada à área de trabalho,
+        // com rolagem para permanecer utilizável na resolução operacional atual.
+        Size alvo = new(
+            (int)Math.Round(clienteBase.Width * LegibilidadeRecebimentoMercadoria.Escala),
+            (int)Math.Round(clienteBase.Height * LegibilidadeRecebimentoMercadoria.Escala));
+        AutoScroll = true;
+        AutoScrollMinSize = alvo;
+        Rectangle areaTrabalho = Screen.FromControl(this).WorkingArea;
+        ClientSize = new Size(
+            Math.Min(alvo.Width, areaTrabalho.Width),
+            Math.Min(alvo.Height, areaTrabalho.Height));
+        StartPosition = FormStartPosition.CenterScreen;
+
+        ResumeLayout(true);
     }
 
     private static DadosLoteEntrada? SolicitarDadosLotePadrao(IWin32Window owner, ModoEntradaMaterial modoEntrada)
