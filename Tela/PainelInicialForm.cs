@@ -1287,10 +1287,8 @@ public partial class PainelInicialForm : Form
             e.Handled = true;
         }
 
-        // GATE 073: F2 não abre mais "Entrada de Químicos" (porta removida; ROH+HIBE vão pelo F1 =
-        // Recebimento de Mercadoria). F2 fica sem rota. F3..F9 permanecem exatamente como estavam.
-
-        if (e.KeyCode == Keys.F3 && _currentContentView == _processoProducaoForm)
+        // GATE 077: a porta removida permanece ausente e os módulos visíveis ocupam F1..F8 sem lacunas.
+        if (e.KeyCode == Keys.F2 && _currentContentView == _processoProducaoForm)
         {
             if (!await PodeAcessarModuloAsync(PermissoesSistema.Modulos.ProcessoProducao, "Leitura de Produção"))
             {
@@ -1302,7 +1300,7 @@ public partial class PainelInicialForm : Form
             e.Handled = true;
         }
 
-        if (e.KeyCode == Keys.F4 && _currentContentView == _processoProducaoForm)
+        if (e.KeyCode == Keys.F3 && _currentContentView == _processoProducaoForm)
         {
             if (!await PodeAcessarModuloAsync(PermissoesSistema.Modulos.ProcessoProducao, "Leitura de Produção"))
             {
@@ -1314,7 +1312,7 @@ public partial class PainelInicialForm : Form
             e.Handled = true;
         }
 
-        if (e.KeyCode == Keys.F5 && _currentContentView == _processoProducaoForm)
+        if (e.KeyCode == Keys.F4 && _currentContentView == _processoProducaoForm)
         {
             if (!await PodeAcessarModuloAsync(PermissoesSistema.Modulos.ProcessoProducao, "Leitura de Produção"))
             {
@@ -1326,7 +1324,7 @@ public partial class PainelInicialForm : Form
             e.Handled = true;
         }
 
-        if (e.KeyCode == Keys.F6 && _currentContentView == _processoProducaoForm)
+        if (e.KeyCode == Keys.F5 && _currentContentView == _processoProducaoForm)
         {
             if (!await PodeAcessarModuloAsync(PermissoesSistema.Modulos.ProcessoProducao, "Leitura de Produção"))
             {
@@ -1338,7 +1336,7 @@ public partial class PainelInicialForm : Form
             e.Handled = true;
         }
 
-        if (e.KeyCode == Keys.F7 && _currentContentView == _processoProducaoForm)
+        if (e.KeyCode == Keys.F6 && _currentContentView == _processoProducaoForm)
         {
             if (!await PodeAcessarModuloAsync(PermissoesSistema.Modulos.ProcessoProducao, "Leitura de Produção"))
             {
@@ -1350,7 +1348,7 @@ public partial class PainelInicialForm : Form
             e.Handled = true;
         }
 
-        if (e.KeyCode == Keys.F8 && _currentContentView == _processoProducaoForm)
+        if (e.KeyCode == Keys.F7 && _currentContentView == _processoProducaoForm)
         {
             if (!await PodeAcessarModuloAsync(PermissoesSistema.Modulos.ProcessoProducao, "Leitura de Produção"))
             {
@@ -1361,7 +1359,7 @@ public partial class PainelInicialForm : Form
             await OpenControleApontamentosAsync();
             e.Handled = true;
         }
-        if (e.KeyCode == Keys.F9 && _currentContentView == _processoProducaoForm)
+        if (e.KeyCode == Keys.F8 && _currentContentView == _processoProducaoForm)
         {
             if (!await PodeAcessarModuloAsync(PermissoesSistema.Modulos.ProcessoProducao, "Leitura de Produção"))
             {

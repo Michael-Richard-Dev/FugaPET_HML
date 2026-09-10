@@ -295,7 +295,7 @@ partial class ProcessoProducaoForm
         semiAcabadoShortcutLabel.Name = "semiAcabadoShortcutLabel";
         semiAcabadoShortcutLabel.Size = new Size(38, 28);
         semiAcabadoShortcutLabel.TabIndex = 4;
-        semiAcabadoShortcutLabel.Text = "F5";
+        semiAcabadoShortcutLabel.Text = "F4";
         semiAcabadoShortcutLabel.TextAlign = ContentAlignment.MiddleCenter;
         // 
         // semiAcabadoArrowLabel
@@ -408,7 +408,7 @@ partial class ProcessoProducaoForm
         processShortcutLabel.Name = "processShortcutLabel";
         processShortcutLabel.Size = new Size(38, 28);
         processShortcutLabel.TabIndex = 4;
-        processShortcutLabel.Text = "F6";
+        processShortcutLabel.Text = "F5";
         processShortcutLabel.TextAlign = ContentAlignment.MiddleCenter;
         // 
         // processArrowLabel
@@ -521,7 +521,7 @@ partial class ProcessoProducaoForm
         pesagemShortcutLabel.Name = "pesagemShortcutLabel";
         pesagemShortcutLabel.Size = new Size(38, 28);
         pesagemShortcutLabel.TabIndex = 4;
-        pesagemShortcutLabel.Text = "F3";
+        pesagemShortcutLabel.Text = "F2";
         pesagemShortcutLabel.TextAlign = ContentAlignment.MiddleCenter;
         // 
         // pesagemArrowLabel
@@ -633,7 +633,7 @@ partial class ProcessoProducaoForm
         quimicosShortcutLabel.Name = "quimicosShortcutLabel";
         quimicosShortcutLabel.Size = new Size(38, 28);
         quimicosShortcutLabel.TabIndex = 4;
-        quimicosShortcutLabel.Text = "F4";
+        quimicosShortcutLabel.Text = "F3";
         quimicosShortcutLabel.TextAlign = ContentAlignment.MiddleCenter;
         //
         // quimicosArrowLabel
@@ -745,7 +745,7 @@ partial class ProcessoProducaoForm
         ordensShortcutLabel.Name = "ordensShortcutLabel";
         ordensShortcutLabel.Size = new Size(38, 28);
         ordensShortcutLabel.TabIndex = 4;
-        ordensShortcutLabel.Text = "F7";
+        ordensShortcutLabel.Text = "F6";
         ordensShortcutLabel.TextAlign = ContentAlignment.MiddleCenter;
         //
         // ordensArrowLabel
@@ -857,7 +857,7 @@ partial class ProcessoProducaoForm
         apontamentosShortcutLabel.Name = "apontamentosShortcutLabel";
         apontamentosShortcutLabel.Size = new Size(38, 28);
         apontamentosShortcutLabel.TabIndex = 4;
-        apontamentosShortcutLabel.Text = "F8";
+        apontamentosShortcutLabel.Text = "F7";
         apontamentosShortcutLabel.TextAlign = ContentAlignment.MiddleCenter;
         //
         // apontamentosArrowLabel
@@ -1084,7 +1084,7 @@ partial class ProcessoProducaoForm
         entradaQuimicosShortcutLabel.Name = "entradaQuimicosShortcutLabel";
         entradaQuimicosShortcutLabel.Size = new Size(38, 28);
         entradaQuimicosShortcutLabel.TabIndex = 4;
-        entradaQuimicosShortcutLabel.Text = "F2";
+        entradaQuimicosShortcutLabel.Text = "";
         entradaQuimicosShortcutLabel.TextAlign = ContentAlignment.MiddleCenter;
         //
         // entradaQuimicosArrowLabel

@@ -33,6 +33,7 @@ public partial class ProcessoProducaoForm : UserControl
     {
         InitializeComponent();
         AddPaletizacaoCard();
+        CompactarCardsVisiveis();
         ApplyProductionIcons();
         AddHistoricoConsumoButton();
         AddDiagnosticoConsumoButton();
@@ -89,7 +90,7 @@ public partial class ProcessoProducaoForm : UserControl
             new Point(28, 602),
             "Paletização por\r\nHU",
             "Formação de paletes\r\npor HU de caixas",
-            "F9",
+            "F8",
             out paletizacaoIconLabel,
             out paletizacaoTitleLabel,
             out paletizacaoDescriptionLabel,
@@ -99,6 +100,30 @@ public partial class ProcessoProducaoForm : UserControl
 
         contentPanel.Controls.Add(paletizacaoCard);
         paletizacaoCard.BringToFront();
+    }
+
+    private void CompactarCardsVisiveis()
+    {
+        Control[] cards =
+        [
+            entradaProdutoCard,
+            entradaQuimicosCard,
+            processoConsumoMaterialCard,
+            processoConsumoQuimicosCard,
+            processoSemiAcabadoCard,
+            processoProdutoAcabadoCard,
+            ordensAndamentoCard,
+            controleApontamentosCard,
+            paletizacaoCard!
+        ];
+
+        Control[] cardsVisiveis = cards.Where(card => card.Visible).ToArray();
+        for (int indice = 0; indice < cardsVisiveis.Length; indice++)
+        {
+            int coluna = indice % 4;
+            int linha = indice / 4;
+            cardsVisiveis[indice].Location = new Point(28 + (coluna * 256), 70 + (linha * 266));
+        }
     }
 
     private static RoundedPanel CriarModuloCard(

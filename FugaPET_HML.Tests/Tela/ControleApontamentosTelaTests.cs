@@ -8,7 +8,7 @@ public sealed class ControleApontamentosTelaTests
     // ---------- Card no menu ----------
 
     [Fact]
-    public void ProcessoProducao_DeveTerCardControleApontamentosComF8()
+    public void ProcessoProducao_DeveTerCardControleApontamentosComF7()
     {
         string designer = LerArquivoProjeto("Tela", "ProcessoProducaoForm.Designer.cs");
 
@@ -18,7 +18,7 @@ public sealed class ControleApontamentosTelaTests
             "apontamentosDescriptionLabel.Text = \"Leitura e controle das\\r\\noperações da ordem de produção.\";",
             designer,
             StringComparison.Ordinal);
-        Assert.Contains("apontamentosShortcutLabel.Text = \"F8\";", designer, StringComparison.Ordinal);
+        Assert.Contains("apontamentosShortcutLabel.Text = \"F7\";", designer, StringComparison.Ordinal);
         // Card colocado no slot livre da grade de cards (mesmo tamanho dos demais).
         Assert.Contains("controleApontamentosCard.Location = new Point(796, 336);", designer, StringComparison.Ordinal);
         Assert.Contains("controleApontamentosCard.Size = new Size(240, 250);", designer, StringComparison.Ordinal);
@@ -58,7 +58,7 @@ public sealed class ControleApontamentosTelaTests
         Assert.Contains("using Processo.ProcessoControleApontamentosForm form = new();", painel, StringComparison.Ordinal);
         // Permissão + padrão de esconder/restaurar painel.
         Assert.Contains("PermiteAbrirTelaAsync(", painel, StringComparison.Ordinal);
-        Assert.Contains("if (e.KeyCode == Keys.F8 && _currentContentView == _processoProducaoForm)", painel, StringComparison.Ordinal);
+        Assert.Contains("if (e.KeyCode == Keys.F7 && _currentContentView == _processoProducaoForm)", painel, StringComparison.Ordinal);
 
         string abertura = ExtrairMetodo(painel, "private async Task OpenControleApontamentosAsync()");
         Assert.Contains("Hide();", abertura, StringComparison.Ordinal);

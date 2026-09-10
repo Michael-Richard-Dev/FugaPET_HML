@@ -275,7 +275,7 @@ public sealed class EntradaSeparacaoModo241Tests
         Assert.Contains("if (!resultado.PedidoTemItensDoModo)", tela, StringComparison.Ordinal);
     }
 
-    // GATE 073: porta única — F1 = "Recebimento de Mercadoria"; card de Químicos oculto; F3..F8 inalterados.
+    // GATE 073/077: porta única em F1; card de entrada de Químicos oculto; módulos restantes compactados.
     [Fact]
     public void ProcessoProducao_PrimeiroCardEhRecebimentoMercadoria_QuimicosOculto()
     {
@@ -292,13 +292,12 @@ public sealed class EntradaSeparacaoModo241Tests
         // TEST_13: card de Químicos oculto (não navegável).
         Assert.Contains("entradaQuimicosCard.Visible = false", designer, StringComparison.Ordinal);
 
-        // TEST_15: F3..F8 NÃO foram renumerados.
-        Assert.Contains("pesagemShortcutLabel.Text = \"F3\"", designer, StringComparison.Ordinal);
-        Assert.Contains("quimicosShortcutLabel.Text = \"F4\"", designer, StringComparison.Ordinal);
-        Assert.Contains("semiAcabadoShortcutLabel.Text = \"F5\"", designer, StringComparison.Ordinal);
-        Assert.Contains("processShortcutLabel.Text = \"F6\"", designer, StringComparison.Ordinal);
-        Assert.Contains("ordensShortcutLabel.Text = \"F7\"", designer, StringComparison.Ordinal);
-        Assert.Contains("apontamentosShortcutLabel.Text = \"F8\"", designer, StringComparison.Ordinal);
+        Assert.Contains("pesagemShortcutLabel.Text = \"F2\"", designer, StringComparison.Ordinal);
+        Assert.Contains("quimicosShortcutLabel.Text = \"F3\"", designer, StringComparison.Ordinal);
+        Assert.Contains("semiAcabadoShortcutLabel.Text = \"F4\"", designer, StringComparison.Ordinal);
+        Assert.Contains("processShortcutLabel.Text = \"F5\"", designer, StringComparison.Ordinal);
+        Assert.Contains("ordensShortcutLabel.Text = \"F6\"", designer, StringComparison.Ordinal);
+        Assert.Contains("apontamentosShortcutLabel.Text = \"F7\"", designer, StringComparison.Ordinal);
 
         Assert.Contains("EntradaMateriaPrimaRequested", form, StringComparison.Ordinal);
     }
@@ -312,18 +311,17 @@ public sealed class EntradaSeparacaoModo241Tests
         // TEST_12: a entrada pública (card F1) abre RecebimentoMercadoria.
         Assert.Contains("EntradaMateriaPrimaRequested += async (_, _) => await OpenProcessoEntradaProdutoAsync(global::FugaPET_HML.Modelo.Processo.ModoEntradaMaterial.RecebimentoMercadoria)", painel, StringComparison.Ordinal);
 
-        // TEST_13/14: nenhuma rota pública para Químicos (nem assinatura, nem atalho F2).
+        // TEST_13/14: nenhuma rota pública para Entrada de Químicos.
         Assert.DoesNotContain("EntradaQuimicosRequested += async", painel, StringComparison.Ordinal);
         Assert.DoesNotContain("OpenProcessoEntradaProdutoAsync(global::FugaPET_HML.Modelo.Processo.ModoEntradaMaterial.Quimico)", painel, StringComparison.Ordinal);
 
         // TEST_12: F1 abre a porta única (default = RecebimentoMercadoria).
         AssertAtalhoProcesso(painel, "F1", "OpenProcessoEntradaProdutoAsync()");
-        // TEST_15: F3..F7 inalterados.
-        AssertAtalhoProcesso(painel, "F3", "OpenProcessoConsumoMaterialAsync()");
-        AssertAtalhoProcesso(painel, "F4", "OpenProcessoConsumoMaterialAsync(global::FugaPET_HML.Modelo.Processo.ModoConsumoMaterial.Quimico)");
-        AssertAtalhoProcesso(painel, "F5", "OpenProcessoSemiAcabadoAsync()");
-        AssertAtalhoProcesso(painel, "F6", "OpenProcessoProdutoAcabadoAsync()");
-        AssertAtalhoProcesso(painel, "F7", "OpenConsultaOrdemProducaoAsync()");
+        AssertAtalhoProcesso(painel, "F2", "OpenProcessoConsumoMaterialAsync()");
+        AssertAtalhoProcesso(painel, "F3", "OpenProcessoConsumoMaterialAsync(global::FugaPET_HML.Modelo.Processo.ModoConsumoMaterial.Quimico)");
+        AssertAtalhoProcesso(painel, "F4", "OpenProcessoSemiAcabadoAsync()");
+        AssertAtalhoProcesso(painel, "F5", "OpenProcessoProdutoAcabadoAsync()");
+        AssertAtalhoProcesso(painel, "F6", "OpenConsultaOrdemProducaoAsync()");
     }
 
     // ---- Ajuste 6/9/12/14: controller classifica/filtra/bloqueia sem quebrar 23.1/payload ----
