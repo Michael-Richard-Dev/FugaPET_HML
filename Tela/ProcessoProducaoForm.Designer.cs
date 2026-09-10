@@ -930,7 +930,7 @@ partial class ProcessoProducaoForm
         entradaTitleLabel.Name = "entradaTitleLabel";
         entradaTitleLabel.Size = new Size(202, 62);
         entradaTitleLabel.TabIndex = 1;
-        entradaTitleLabel.Text = "Entrada de\r\nMatéria-Prima";
+        entradaTitleLabel.Text = "Recebimento de\r\nMercadoria";
         entradaTitleLabel.TextAlign = ContentAlignment.MiddleCenter;
         //
         // entradaDescriptionLabel
@@ -943,7 +943,7 @@ partial class ProcessoProducaoForm
         entradaDescriptionLabel.Name = "entradaDescriptionLabel";
         entradaDescriptionLabel.Size = new Size(175, 46);
         entradaDescriptionLabel.TabIndex = 2;
-        entradaDescriptionLabel.Text = "Entrada 101 de matéria-prima\r\nvia pedido de compra / SAP.";
+        entradaDescriptionLabel.Text = "Pesagem e recebimento de mercadorias\r\nvia pedido de compra / SAP.";
         entradaDescriptionLabel.TextAlign = ContentAlignment.MiddleCenter;
         //
         // entradaStatusLabel
@@ -1002,6 +1002,9 @@ partial class ProcessoProducaoForm
         entradaQuimicosCard.ShadowOffsetY = 0;
         entradaQuimicosCard.Size = new Size(240, 250);
         entradaQuimicosCard.TabIndex = 10;
+        // GATE 073: a porta de "Entrada de Químicos" deixa de existir para o operador (Recebimento de
+        // Mercadoria absorve ROH+HIBE). Card oculto e não navegável; F3..F9 permanecem inalterados.
+        entradaQuimicosCard.Visible = false;
         //
         // entradaQuimicosIconPanel
         //

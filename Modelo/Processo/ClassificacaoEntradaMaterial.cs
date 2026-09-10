@@ -58,9 +58,18 @@ public static class ClassificadorItemEntradaMaterial
         };
     }
 
-    /// <summary>True quando a classificação do item corresponde ao modo atual da tela de Entrada.</summary>
+    /// <summary>
+    /// True quando a classificação do item corresponde ao modo atual da tela de Entrada.
+    /// GATE 073: RecebimentoMercadoria aceita MatériaPrima (ROH) OU Químico (HIBE) — nunca
+    /// Embalagem/ProdutoAcabado/Semiacabado/Outro e nunca Indefinido (fail-closed preservado).
+    /// </summary>
     public static bool ItemPertenceAoModo(ClassificacaoEntradaMaterial classificacao, ModoEntradaMaterial modo)
-        => modo == ModoEntradaMaterial.Quimico
-            ? classificacao == ClassificacaoEntradaMaterial.Quimico
-            : classificacao == ClassificacaoEntradaMaterial.MateriaPrima;
+        => modo switch
+        {
+            ModoEntradaMaterial.RecebimentoMercadoria =>
+                classificacao is ClassificacaoEntradaMaterial.MateriaPrima
+                    or ClassificacaoEntradaMaterial.Quimico,
+            ModoEntradaMaterial.Quimico => classificacao == ClassificacaoEntradaMaterial.Quimico,
+            _ => classificacao == ClassificacaoEntradaMaterial.MateriaPrima
+        };
 }

@@ -867,8 +867,9 @@ public partial class PainelInicialForm : Form
             Dock = DockStyle.Fill
         };
 
-        view.EntradaMateriaPrimaRequested += async (_, _) => await OpenProcessoEntradaProdutoAsync(global::FugaPET_HML.Modelo.Processo.ModoEntradaMaterial.MateriaPrima);
-        view.EntradaQuimicosRequested += async (_, _) => await OpenProcessoEntradaProdutoAsync(global::FugaPET_HML.Modelo.Processo.ModoEntradaMaterial.Quimico);
+        // GATE 073: porta única. O primeiro card (F1) abre o Recebimento de Mercadoria (ROH+HIBE). A antiga
+        // rota pública de "Entrada de Químicos" foi removida — o evento do card oculto não é mais assinado.
+        view.EntradaMateriaPrimaRequested += async (_, _) => await OpenProcessoEntradaProdutoAsync(global::FugaPET_HML.Modelo.Processo.ModoEntradaMaterial.RecebimentoMercadoria);
         view.ProcessoProdutoAcabadoRequested += async (_, _) => await OpenProcessoProdutoAcabadoAsync();
         view.ProcessoSemiAcabadoRequested += async (_, _) => await OpenProcessoSemiAcabadoAsync();
         view.ProcessoConsumoMaterialRequested += async (_, _) => await OpenProcessoConsumoMaterialAsync(global::FugaPET_HML.Modelo.Processo.ModoConsumoMaterial.MateriaPrima);
@@ -886,11 +887,10 @@ public partial class PainelInicialForm : Form
     // houver permissão específica de Entrada de Químicos, ambos os módulos usam a permissão de Entrada atual.
     private async Task OpenProcessoEntradaProdutoAsync(
         global::FugaPET_HML.Modelo.Processo.ModoEntradaMaterial modo =
-            global::FugaPET_HML.Modelo.Processo.ModoEntradaMaterial.MateriaPrima)
+            global::FugaPET_HML.Modelo.Processo.ModoEntradaMaterial.RecebimentoMercadoria)
     {
-        string nomeTela = modo == global::FugaPET_HML.Modelo.Processo.ModoEntradaMaterial.Quimico
-            ? "Entrada de Químicos"
-            : "Entrada de Matéria-Prima";
+        string nomeTela =
+            global::FugaPET_HML.Modelo.Processo.ConfiguracaoTelaEntradaMaterialFactory.Criar(modo).NomeModulo;
 
         if (!AutorizacaoEntradaProdutoServico.PossuiPermissao(PermissoesSistema.Acoes.Consultar)
             && !await PermiteAbrirTelaAsync(
@@ -1287,17 +1287,8 @@ public partial class PainelInicialForm : Form
             e.Handled = true;
         }
 
-        if (e.KeyCode == Keys.F2 && _currentContentView == _processoProducaoForm)
-        {
-            if (!await PodeAcessarModuloAsync(PermissoesSistema.Modulos.ProcessoProducao, "Leitura de Produção"))
-            {
-                e.Handled = true;
-                return;
-            }
-
-            await OpenProcessoEntradaProdutoAsync(global::FugaPET_HML.Modelo.Processo.ModoEntradaMaterial.Quimico);
-            e.Handled = true;
-        }
+        // GATE 073: F2 não abre mais "Entrada de Químicos" (porta removida; ROH+HIBE vão pelo F1 =
+        // Recebimento de Mercadoria). F2 fica sem rota. F3..F9 permanecem exatamente como estavam.
 
         if (e.KeyCode == Keys.F3 && _currentContentView == _processoProducaoForm)
         {

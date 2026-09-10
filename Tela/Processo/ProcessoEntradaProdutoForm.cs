@@ -575,9 +575,7 @@ public partial class ProcessoEntradaProdutoForm : Form
 
     private void ConfigurarBuscaFiltroEstadoVazioEntrada()
     {
-        productionSearchTextBox.PlaceholderText = _modoEntrada == global::FugaPET_HML.Modelo.Processo.ModoEntradaMaterial.Quimico
-            ? "Pesquisar itens de químicos..."
-            : "Pesquisar itens de matéria-prima...";
+        productionSearchTextBox.PlaceholderText = _configuracaoTela.PlaceholderPesquisa;
         productionSearchTextBox.MaxLength = 120;
         productionSearchTextBox.TextChanged += (_, _) => AplicarFiltroItensPedido();
 

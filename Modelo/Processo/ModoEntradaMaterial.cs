@@ -7,5 +7,11 @@
 public enum ModoEntradaMaterial
 {
     MateriaPrima = 1,
-    Quimico = 2
+    Quimico = 2,
+
+    /// <summary>
+    /// GATE 073 — porta única "Recebimento de Mercadoria": aceita simultaneamente ROH (MatériaPrima) e
+    /// HIBE (Químico) no mesmo pedido. MateriaPrima/Quimico permanecem para compatibilidade/testes.
+    /// </summary>
+    RecebimentoMercadoria = 3
 }

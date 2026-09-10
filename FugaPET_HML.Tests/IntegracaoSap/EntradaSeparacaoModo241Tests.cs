@@ -1,6 +1,7 @@
 ﻿using FugaPET_HML.Modelo.IntegracaoSap;
 using FugaPET_HML.Modelo.Processo;
 using FugaPET_HML.Servicos.IntegracaoSap;
+using FugaPET_HML.Servicos.Seguranca;
 
 namespace FugaPET_HML.Tests.IntegracaoSap;
 
@@ -62,6 +63,103 @@ public sealed class EntradaSeparacaoModo241Tests
     [InlineData(ClassificacaoEntradaMaterial.Indefinido, ModoEntradaMaterial.MateriaPrima, false)]
     public void ItemPertenceAoModo(ClassificacaoEntradaMaterial classificacao, ModoEntradaMaterial modo, bool esperado)
         => Assert.Equal(esperado, ClassificadorItemEntradaMaterial.ItemPertenceAoModo(classificacao, modo));
+
+    // ================= GATE 073 — Recebimento de Mercadoria (porta única ROH+HIBE) =================
+
+    // TEST_01/02/04/05/06/07/08: RecebimentoMercadoria aceita ROH e HIBE; exclui VERP/FERT/HALB/Outro;
+    // Indefinido permanece fail-closed.
+    [Theory]
+    [InlineData(ClassificacaoEntradaMaterial.MateriaPrima, true)]   // ROH
+    [InlineData(ClassificacaoEntradaMaterial.Quimico, true)]        // HIBE
+    [InlineData(ClassificacaoEntradaMaterial.Embalagem, false)]     // VERP
+    [InlineData(ClassificacaoEntradaMaterial.ProdutoAcabado, false)] // FERT
+    [InlineData(ClassificacaoEntradaMaterial.Semiacabado, false)]   // HALB
+    [InlineData(ClassificacaoEntradaMaterial.Outro, false)]         // Outro
+    [InlineData(ClassificacaoEntradaMaterial.Indefinido, false)]    // fail-closed
+    public void Recebimento_AceitaRohEHibe_ExcluiOResto(ClassificacaoEntradaMaterial classe, bool esperado)
+        => Assert.Equal(esperado,
+            ClassificadorItemEntradaMaterial.ItemPertenceAoModo(classe, ModoEntradaMaterial.RecebimentoMercadoria));
+
+    // TEST_03: PO mista ROH+HIBE retorna AMBOS no modo Recebimento de Mercadoria.
+    [Fact]
+    public void Recebimento_PedidoMisto_RetornaRohEHibe()
+    {
+        List<PedidoCompraSapItem> itens =
+        [
+            Item("10", ClassificacaoEntradaMaterial.MateriaPrima),
+            Item("20", ClassificacaoEntradaMaterial.Quimico),
+            Item("30", ClassificacaoEntradaMaterial.Embalagem),
+            Item("40", ClassificacaoEntradaMaterial.Indefinido)
+        ];
+        IReadOnlyList<PedidoCompraSapItem> filtrados =
+            FiltroItensEntradaMaterial.FiltrarItensPorModo(itens, ModoEntradaMaterial.RecebimentoMercadoria);
+        Assert.Equal(2, filtrados.Count);
+        Assert.Contains(filtrados, i => i.NumeroItem == "10");
+        Assert.Contains(filtrados, i => i.NumeroItem == "20");
+        Assert.DoesNotContain(filtrados, i => i.NumeroItem == "30");
+        Assert.DoesNotContain(filtrados, i => i.NumeroItem == "40");
+    }
+
+    // TEST_08 (cascata): pedido só com Indefinidos permanece fail-closed também no modo unificado.
+    [Fact]
+    public void Recebimento_TodosIndefinidos_ContinuaFailClosed()
+        => Assert.True(FiltroItensEntradaMaterial.TodosIndefinidos([Item("10", ClassificacaoEntradaMaterial.Indefinido)]));
+
+    // TEST_09/10: nomenclatura visível da porta única (título, subtítulo, módulo, placeholder e lote).
+    [Fact]
+    public void Config_RecebimentoMercadoria_TextosEsperados()
+    {
+        ConfiguracaoTelaEntradaMaterial c =
+            ConfiguracaoTelaEntradaMaterialFactory.Criar(ModoEntradaMaterial.RecebimentoMercadoria);
+        Assert.Equal("Recebimento de Mercadoria", c.TituloTela);
+        Assert.Equal("Recebimento de Mercadoria", c.NomeModulo);
+        Assert.Equal("Pesagem e recebimento de mercadorias por pedido de compra / SAP", c.SubtituloTela);
+        Assert.Equal("Pesquisar itens do pedido...", c.PlaceholderPesquisa);
+        Assert.Equal("Informe o lote da mercadoria antes da pesagem.", c.MensagemLote);
+        // §10: reutiliza infraestrutura de balança existente (não cria tipo físico novo).
+        Assert.Equal("ENTRADA_MATERIA_PRIMA", c.TipoBalancaPreferencial);
+    }
+
+    // TEST_10 (mensagem sem itens): não referencia as telas separadas ("Use a tela de ...").
+    [Fact]
+    public void Recebimento_MensagemSemItens_SemReferenciaTelasSeparadas()
+    {
+        string m = FiltroItensEntradaMaterial.MontarMensagemSemItensDoModo(
+            ModoEntradaMaterial.RecebimentoMercadoria, "4500000005", 3);
+        Assert.Contains("mercadoria", m, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Use a tela de", m, StringComparison.Ordinal);
+    }
+
+    // TEST_16/§9: nenhuma permissão nova (RECEBIMENTO_MERCADORIA / ENTRADA_QUIMICOS); rota pública usa ENTRADA_PRODUTO;
+    // permissões críticas preservadas.
+    [Fact]
+    public void Permissao_ContinuaEntradaProduto_SemNovasAcoes()
+    {
+        string permissoes = File.ReadAllText(Path.Combine(RaizProjeto(), "Servicos", "Seguranca", "PermissoesSistema.cs"));
+        Assert.DoesNotContain("RECEBIMENTO_MERCADORIA", permissoes, StringComparison.Ordinal);
+        Assert.DoesNotContain("ENTRADA_QUIMICOS", permissoes, StringComparison.Ordinal);
+        Assert.Equal("EXCLUIR_PESAGEM", PermissoesSistema.Acoes.ExcluirPesagem);
+
+        string painel = File.ReadAllText(Path.Combine(RaizProjeto(), "Tela", "PainelInicialForm.cs"));
+        Assert.Contains("PermissoesSistema.Rotinas.EntradaProduto", painel, StringComparison.Ordinal);
+    }
+
+    // TEST_17/18/19: SAP 101 e persistência inalterados (modo é só classificação); Excluir Pesagem intacto.
+    [Fact]
+    public void ContratoSap101_Persistencia_ExcluirPesagem_Inalterados()
+    {
+        string controller = File.ReadAllText(Path.Combine(RaizProjeto(), "Controle", "Processo", "EntradaProdutoController.cs"));
+        // TEST_17: payload 101 preservado.
+        Assert.Contains("GoodsMovementRefDocType = \"B\"", controller, StringComparison.Ordinal);
+        Assert.Contains("EntryUnit = \"KG\"", controller, StringComparison.Ordinal);
+        // TEST_18: consulta compartilhada parametrizada por modo (mesma Form/controller/persistência).
+        Assert.Contains("EnriquecerEClassificarItensAsync(", controller, StringComparison.Ordinal);
+        // TEST_19: safe-delete de pesagem preservado (arquivo congelado do gate 067).
+        string repoExclusao = File.ReadAllText(Path.Combine(RaizProjeto(), "AcessoDados", "Repositorio", "ExclusaoPesagemRepositorio.cs"));
+        Assert.Contains("fn_entrada_produto_sap_guard_counts", repoExclusao, StringComparison.Ordinal);
+        Assert.Contains("IsolationLevel.Serializable", repoExclusao, StringComparison.Ordinal);
+        Assert.Contains("status_pesagem = 'CANCELADA'", repoExclusao, StringComparison.Ordinal);
+    }
 
     // ---- Ajuste 9/10/13: filtro por modo em pedido misto ----
 
@@ -177,47 +275,50 @@ public sealed class EntradaSeparacaoModo241Tests
         Assert.Contains("if (!resultado.PedidoTemItensDoModo)", tela, StringComparison.Ordinal);
     }
 
+    // GATE 073: porta única — F1 = "Recebimento de Mercadoria"; card de Químicos oculto; F3..F8 inalterados.
     [Fact]
-    public void ProcessoProducao_DeveExibirCardsEntradaMateriaPrimaEQuimicos()
+    public void ProcessoProducao_PrimeiroCardEhRecebimentoMercadoria_QuimicosOculto()
     {
         string designer = File.ReadAllText(Path.Combine(RaizProjeto(), "Tela", "ProcessoProducaoForm.Designer.cs"));
         string form = File.ReadAllText(Path.Combine(RaizProjeto(), "Tela", "ProcessoProducaoForm.cs"));
 
+        // TEST_11: F1 representa Recebimento de Mercadoria (título + descrição genérica).
         Assert.Contains("entradaProdutoCard.Location = new Point(28, 70)", designer, StringComparison.Ordinal);
-        Assert.Contains("Entrada de\\r\\nMat", designer, StringComparison.Ordinal);
-        Assert.Contains("Entrada 101 de mat", designer, StringComparison.Ordinal);
+        Assert.Contains("Recebimento de\\r\\nMercadoria", designer, StringComparison.Ordinal);
+        Assert.Contains("Pesagem e recebimento de mercadorias", designer, StringComparison.Ordinal);
         Assert.Contains("entradaShortcutLabel.Text = \"F1\"", designer, StringComparison.Ordinal);
-        Assert.Contains("entradaQuimicosCard.Location = new Point(284, 70)", designer, StringComparison.Ordinal);
-        Assert.Contains("Entrada de\\r\\nQu", designer, StringComparison.Ordinal);
-        Assert.Contains("Entrada 101 de qu", designer, StringComparison.Ordinal);
-        Assert.Contains("entradaQuimicosShortcutLabel.Text = \"F2\"", designer, StringComparison.Ordinal);
-        Assert.Contains("processoConsumoMaterialCard.Location = new Point(540, 70)", designer, StringComparison.Ordinal);
+        Assert.DoesNotContain("Entrada de\\r\\nMat", designer, StringComparison.Ordinal);
+
+        // TEST_13: card de Químicos oculto (não navegável).
+        Assert.Contains("entradaQuimicosCard.Visible = false", designer, StringComparison.Ordinal);
+
+        // TEST_15: F3..F8 NÃO foram renumerados.
         Assert.Contains("pesagemShortcutLabel.Text = \"F3\"", designer, StringComparison.Ordinal);
-        Assert.Contains("processoConsumoQuimicosCard.Location = new Point(796, 70)", designer, StringComparison.Ordinal);
         Assert.Contains("quimicosShortcutLabel.Text = \"F4\"", designer, StringComparison.Ordinal);
-        Assert.Contains("processoSemiAcabadoCard.Location = new Point(28, 336)", designer, StringComparison.Ordinal);
         Assert.Contains("semiAcabadoShortcutLabel.Text = \"F5\"", designer, StringComparison.Ordinal);
-        Assert.Contains("processoProdutoAcabadoCard.Location = new Point(284, 336)", designer, StringComparison.Ordinal);
         Assert.Contains("processShortcutLabel.Text = \"F6\"", designer, StringComparison.Ordinal);
-        Assert.Contains("ordensAndamentoCard.Location = new Point(540, 336)", designer, StringComparison.Ordinal);
         Assert.Contains("ordensShortcutLabel.Text = \"F7\"", designer, StringComparison.Ordinal);
+        Assert.Contains("apontamentosShortcutLabel.Text = \"F8\"", designer, StringComparison.Ordinal);
+
         Assert.Contains("EntradaMateriaPrimaRequested", form, StringComparison.Ordinal);
-        Assert.Contains("EntradaQuimicosRequested", form, StringComparison.Ordinal);
-        Assert.Contains("OnEntradaMateriaPrimaClick", form, StringComparison.Ordinal);
-        Assert.Contains("OnEntradaQuimicosClick", form, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Painel_AbreEntradaPorModo()
+    public void Painel_PortaUnica_AbreRecebimentoMercadoria_SemRotaQuimicos()
     {
         string painel = File.ReadAllText(Path.Combine(RaizProjeto(), "Tela", "PainelInicialForm.cs"));
-        Assert.Contains("OpenProcessoEntradaProdutoAsync(", painel, StringComparison.Ordinal);
         Assert.Contains("ProcessoEntradaProdutoForm form = new(modo)", painel, StringComparison.Ordinal);
-        Assert.Contains("ModoEntradaMaterial modo", painel, StringComparison.Ordinal);
-        Assert.Contains("EntradaMateriaPrimaRequested += async (_, _) => await OpenProcessoEntradaProdutoAsync(global::FugaPET_HML.Modelo.Processo.ModoEntradaMaterial.MateriaPrima)", painel, StringComparison.Ordinal);
-        Assert.Contains("EntradaQuimicosRequested += async (_, _) => await OpenProcessoEntradaProdutoAsync(global::FugaPET_HML.Modelo.Processo.ModoEntradaMaterial.Quimico)", painel, StringComparison.Ordinal);
+
+        // TEST_12: a entrada pública (card F1) abre RecebimentoMercadoria.
+        Assert.Contains("EntradaMateriaPrimaRequested += async (_, _) => await OpenProcessoEntradaProdutoAsync(global::FugaPET_HML.Modelo.Processo.ModoEntradaMaterial.RecebimentoMercadoria)", painel, StringComparison.Ordinal);
+
+        // TEST_13/14: nenhuma rota pública para Químicos (nem assinatura, nem atalho F2).
+        Assert.DoesNotContain("EntradaQuimicosRequested += async", painel, StringComparison.Ordinal);
+        Assert.DoesNotContain("OpenProcessoEntradaProdutoAsync(global::FugaPET_HML.Modelo.Processo.ModoEntradaMaterial.Quimico)", painel, StringComparison.Ordinal);
+
+        // TEST_12: F1 abre a porta única (default = RecebimentoMercadoria).
         AssertAtalhoProcesso(painel, "F1", "OpenProcessoEntradaProdutoAsync()");
-        AssertAtalhoProcesso(painel, "F2", "OpenProcessoEntradaProdutoAsync(global::FugaPET_HML.Modelo.Processo.ModoEntradaMaterial.Quimico)");
+        // TEST_15: F3..F7 inalterados.
         AssertAtalhoProcesso(painel, "F3", "OpenProcessoConsumoMaterialAsync()");
         AssertAtalhoProcesso(painel, "F4", "OpenProcessoConsumoMaterialAsync(global::FugaPET_HML.Modelo.Processo.ModoConsumoMaterial.Quimico)");
         AssertAtalhoProcesso(painel, "F5", "OpenProcessoSemiAcabadoAsync()");
