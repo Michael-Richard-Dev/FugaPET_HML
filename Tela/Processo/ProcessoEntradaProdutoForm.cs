@@ -237,14 +237,18 @@ public partial class ProcessoEntradaProdutoForm : Form
 
         SuspendLayout();
 
-        // §4 Identidade FugaPET (substitui o branding local Fuga Couros pelo logo FugaPET aprovado no projeto).
-        companyLogoPictureBox.Image = global::FugaPET_HML.Properties.Resources.fuga_2026_logo;
+        // §4 Identidade FugaPET (substitui o branding local Fuga Couros pelo logo FugaPET aprovado). O logo é
+        // renderizado em BRANCO sobre o laranja (não cinza), preservando a transparência; a barrinha divisória
+        // do cabeçalho também vai a branco.
+        companyLogoPictureBox.Image = CarregarLogoFugaPetBranco();
         companyLogoPictureBox.Tag = "FUGAPET_LOGO";
+        logoSaLabel.ForeColor = Color.White;
+        headerDividerLabel.BackColor = Color.White;
 
         // §5 Ícone do título: fundo LARANJA FugaPET + desenho de TRAÇOS BRANCOS (asset aprovado). Sem vermelho/rosa.
         headerTitleIconPanel.BackColor = Color.Transparent;
-        headerTitleIconPanel.FillColor = LegibilidadeRecebimentoMercadoria.LaranjaFugaPet;
-        headerTitleIconPictureBox.Image = global::FugaPET_HML.Properties.Resources.production_title_icon;
+        headerTitleIconPanel.FillColor = Color.Transparent;
+        headerTitleIconPictureBox.Image = ExtrairTracosBrancos(global::FugaPET_HML.Properties.Resources.production_title_icon);
         headerTitleIconPictureBox.Tag = "FUGAPET_ICON_BRANCO";
 
         // §6 Status SAP com destaque ALTO: badge preenchido (laranja) + texto branco. O cálculo/estado SAP
@@ -254,23 +258,30 @@ public partial class ProcessoEntradaProdutoForm : Form
         sapStatusLabel.ForeColor = Color.White;
         sapStatusLabel.Tag = "SAP_STATUS_DESTAQUE";
 
-        // §7 Tipografia 2.0x SEM escalar geometria: a tela usa TableLayoutPanel + Anchor/Dock +
-        // AutoScaleMode.Font, então o layout se readapta ao viewport quando a fonte cresce. Ícones/logo
-        // mantêm o tamanho e as bordas são preservadas (§9). GATE 082-FIX1: removida a escala de geometria
-        // do 081, que estourava o viewport e forçava barras de rolagem.
-        LegibilidadeRecebimentoMercadoria.AplicarEscalaFonte(this, LegibilidadeRecebimentoMercadoria.Escala);
+        // FIX4: a ampliação 2.0x é aplicada SOMENTE à ÁREA INTERNA (cards/grid/painel direito). O CABEÇALHO
+        // (customTitleBarPanel) e o RODAPÉ (footerBar) permanecem no tamanho PADRÃO das demais telas — não são
+        // escalados nem têm suas linhas de altura crescidas. Só a identidade FugaPET/ícone/status SAP acima é
+        // aplicada ao cabeçalho (não altera tamanho).
+        LegibilidadeRecebimentoMercadoria.AplicarEscalaFonte(rootTableLayoutPanel, LegibilidadeRecebimentoMercadoria.Escala);
+        LegibilidadeRecebimentoMercadoria.AplicarEscalaFonte(sidePanel, LegibilidadeRecebimentoMercadoria.Escala);
+        LegibilidadeRecebimentoMercadoria.AdaptarAlturasParaFonte(rootTableLayoutPanel);
+        LegibilidadeRecebimentoMercadoria.AdaptarAlturasParaFonte(sidePanel);
 
-        // §4/§8 (FIX2) Adapta a GEOMETRIA ao CONTEÚDO: cresce alturas de controles de texto e de linhas de
-        // altura absoluta dos TableLayoutPanels o necessário para a fonte 2.0x caber (cabeçalho, cards, ComboBox,
-        // toolbar, painel direito, rodapé). Larguras não são multiplicadas; a grade absorve o espaço vertical
-        // restante e permanece a região elástica. Corrige o clipping observado no runtime do FIX1.
-        LegibilidadeRecebimentoMercadoria.AdaptarAlturasParaFonte(this);
-
-        // §3/§4/§5 (FIX3) Orçamento de altura por CONTEÚDO: os tetos FIXOS que a adaptação de filhos não
-        // alcança — a faixa dos cards (linha 0 ABSOLUTA do rootTableLayoutPanel) e o host do cabeçalho — são
-        // crescidos até a altura de conteúdo medida (fontes já 2.0x). A grade (linha Percent) cede o espaço,
-        // permanecendo a região elástica. Corrige o clipping de cards/cabeçalho do FIX2.
+        // Orçamento de altura: só a faixa interna dos cards (linha 0 ABSOLUTA do rootTableLayoutPanel) cresce
+        // até caber o conteúdo 2.0x; a grade (linha Percent) cede o espaço. Cabeçalho/rodapé ficam no padrão.
         AjustarOrcamentoAlturaRecebimento();
+
+        // Painel lateral (Status/Qtde/Peso/Iniciar Leitura): alarga a coluna, alarga o conteúdo (empurrando pra
+        // dentro), aumenta o botão e reempilha para a fonte 2.0x não quebrar/cortar.
+        AjustarPainelLateralRecebimento();
+
+        // Grade: alarga as colunas fixas para caber os cabeçalhos 2.0x (Material/Quantidade/Unidade/Peso/Pesagens)
+        // e reduz o peso da coluna "Descrição do Material" (Fill) para ela não dominar — assim todas aparecem.
+        AjustarColunasGridRecebimento();
+
+        // Toolbar acima da grade: aumenta busca + botões (harmonia com a fonte 2.0x) e os traz para a esquerda,
+        // logo após o título, alinhados verticalmente.
+        AjustarToolbarGridRecebimento();
 
         // §8/§9/§13 Sem AutoScroll: a janela permanece Maximizada, cabendo integralmente na área de trabalho
         // (1920x1080 / 100%). A grade é a região elástica; nenhuma barra de rolagem de janela é necessária.
@@ -281,32 +292,380 @@ public partial class ProcessoEntradaProdutoForm : Form
         PerformLayout();
     }
 
-    // GATE 082-FIX3: redistribui a altura reservando o necessário para as faixas de conteúdo (cards + cabeçalho)
-    // e deixando a grade absorver o restante. Mede PreferredSize (já com fonte 2.0x) — só CRESCE tetos fixos.
+    private static Image CarregarLogoFugaPetBranco()
+    {
+        string caminho = Path.Combine(
+            AppContext.BaseDirectory,
+            "Servicos\\image\\FugaPet branco sem fundo.png");
+
+        if (!File.Exists(caminho))
+        {
+            return global::FugaPET_HML.Properties.Resources.fuga_2026_logo;
+        }
+
+        using Image imagem = Image.FromFile(caminho);
+        return new Bitmap(imagem);
+    }
+
+    private static Bitmap ExtrairTracosBrancos(Bitmap origem)
+    {
+        Bitmap resultado = new(origem.Width, origem.Height);
+
+        for (int x = 0; x < origem.Width; x++)
+        {
+            for (int y = 0; y < origem.Height; y++)
+            {
+                Color pixel = origem.GetPixel(x, y);
+                resultado.SetPixel(
+                    x,
+                    y,
+                    pixel.A > 0 && pixel.G >= 160 && pixel.B >= 160
+                        ? Color.FromArgb(pixel.A, Color.White)
+                        : Color.Transparent);
+            }
+        }
+
+        return resultado;
+    }
+
+    // GATE 082-FIX3: redistribui a altura reservando o necessário para as faixas de conteúdo e deixando a grade
+    // absorver o restante. Os tetos FIXOS reais são linhas ABSOLUTAS: tableLayoutPanel2 linha 0 (cabeçalho, 52),
+    // tableLayoutPanel2 linha 2 (rodapé, 38) e rootTableLayoutPanel linha 0 (cards, 86). Medimos pela BASE dos
+    // controles-filho (já crescidos com a fonte 2.0x), não pelo PreferredSize do painel (que devolve ~1x quando
+    // AutoSize=false). Só CRESCE. A linha Percent (grade + painel direito) cede o espaço.
     private void AjustarOrcamentoAlturaRecebimento()
     {
-        // Faixa dos cards superiores: teto = linha 0 ABSOLUTA do rootTableLayoutPanel.
+        // CARDS — linha 0 ABSOLUTA de rootTableLayoutPanel (faixa interna). A grade (linha Percent) cede o espaço;
+        // o cabeçalho/rodapé ficam no padrão.
+
+        // O container dos 4 cards (tableLayoutPanel3) tinha Anchor Top|Left|Right com ALTURA FIXA (69px), então
+        // não crescia quando a faixa aumentava — as caixas ficavam curtas e o texto transbordava por baixo.
+        // Anexa Bottom para o container esticar na vertical e preencher toda a faixa dos cards.
+        tableLayoutPanel3.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+
+        // A linha dos cards ocupa 100% da altura (a 2ª linha do tableLayoutPanel3 está vazia → vai a 0), assim as
+        // caixas (RoundedPanel Dock=Fill) crescem e contornam legenda + valor por inteiro.
+        if (tableLayoutPanel3.RowStyles.Count >= 2)
+        {
+            tableLayoutPanel3.RowStyles[0].SizeType = SizeType.Percent;
+            tableLayoutPanel3.RowStyles[0].Height = 100f;
+            tableLayoutPanel3.RowStyles[1].SizeType = SizeType.Percent;
+            tableLayoutPanel3.RowStyles[1].Height = 0f;
+        }
+
         int alturaCards = 0;
         foreach (Control card in new Control[]
                  { productionOrderShadowPanel, lotCardPanel, stepCardPanel, finishedProductCardPanel })
         {
-            alturaCards = Math.Max(alturaCards, card.PreferredSize.Height + card.Margin.Top + card.Margin.Bottom);
-        }
-        if (alturaCards > 0)
-        {
-            LegibilidadeRecebimentoMercadoria.CrescerTetoDeConteudo(rootTableLayoutPanel, 0, alturaCards + 12);
+            int baseCard = 0;
+            foreach (Control filho in card.Controls)
+            {
+                baseCard = Math.Max(baseCard, filho.Bottom);
+            }
+            alturaCards = Math.Max(alturaCards, baseCard + card.Padding.Bottom + 12);
         }
 
-        // Cabeçalho: o host do customTitleBarPanel (barra superior) cresce até o conteúdo (título+subtítulo 2.0x).
-        Control? hostCabecalho = customTitleBarPanel.Parent;
-        if (hostCabecalho is not null && hostCabecalho is not Form)
+        // Piso confortável: a faixa dos cards ~dobra para acomodar a fonte 2.0x (o grid diminui).
+        alturaCards = Math.Max(alturaCards, 160);
+        LegibilidadeRecebimentoMercadoria.CrescerTetoDeConteudo(rootTableLayoutPanel, 0, alturaCards);
+
+        // Harmoniza o conteúdo interno de cada card: ícone no topo-direito; legenda + valor(es) alargados (não
+        // cortam horizontal), com altura garantida (não cortam embaixo) e o grupo centralizado verticalmente na
+        // caixa — reaplicado no resize (vale também ao maximizar).
+        foreach (Control card in new Control[]
+                 { productionOrderShadowPanel, lotCardPanel, stepCardPanel, finishedProductCardPanel })
         {
-            int alturaHeader = customTitleBarPanel.PreferredSize.Height;
-            if (alturaHeader > hostCabecalho.Height)
+            HarmonizarConteudoCard(card);
+        }
+    }
+
+    private void AjustarToolbarGridRecebimento()
+    {
+        const int y = 6;
+        const int altura = 34;
+        const int gap = 12;
+        const int margemDir = 16;
+
+        // Remove o traço laranja de sublinhado abaixo de "ITENS DO PEDIDO".
+        productionReadingsUnderlineLabel.Visible = false;
+
+        // Título "ITENS DO PEDIDO" à esquerda, sem cortar, centralizado na linha.
+        productionReadingsTitleLabel.Left = 34;
+        int largTitulo = productionReadingsTitleLabel.PreferredSize.Width;
+        if (largTitulo > productionReadingsTitleLabel.Width)
+        {
+            productionReadingsTitleLabel.Width = largTitulo;
+        }
+        productionReadingsTitleLabel.Top = y + Math.Max(0, (altura - productionReadingsTitleLabel.Height) / 2);
+
+        // Dimensiona busca + botões (mesmos tamanhos), mas ENCOSTA o grupo na direita da caixa.
+        productionSearchPanel.Size = new Size(340, altura);
+        productionSearchTextBox.Height = Math.Min(productionSearchTextBox.PreferredSize.Height, altura - 8);
+        productionSearchTextBox.Top = Math.Max(2, (altura - productionSearchTextBox.Height) / 2);
+
+        productionFilterButton.Height = altura;
+        productionFilterButton.Width = Math.Max(productionFilterButton.Width, TextRenderer.MeasureText(productionFilterButton.Text, productionFilterButton.Font).Width + 44);
+        productionActionsButton.Height = altura;
+        productionActionsButton.Width = Math.Max(productionActionsButton.Width, TextRenderer.MeasureText(productionActionsButton.Text, productionActionsButton.Font).Width + 44);
+
+        // Alinha à direita: [busca] [Filtros] [Enviar] — todos ancorados à direita (acompanham o resize).
+        int direita = productionReadingsPanel.ClientSize.Width - margemDir;
+        PosicionarADireita(productionActionsButton, ref direita, y, gap);
+        PosicionarADireita(productionFilterButton, ref direita, y, gap);
+        PosicionarADireita(productionSearchPanel, ref direita, y, gap);
+    }
+
+    private static void PosicionarADireita(Control controle, ref int direita, int y, int gap)
+    {
+        controle.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        controle.Location = new Point(direita - controle.Width, y);
+        direita = controle.Left - gap;
+    }
+
+    private void AjustarColunasGridRecebimento()
+    {
+        Font fonteHeader = productionDataGridView.ColumnHeadersDefaultCellStyle.Font ?? productionDataGridView.Font;
+
+        foreach (DataGridViewColumn coluna in productionDataGridView.Columns)
+        {
+            if (!coluna.Visible || coluna.AutoSizeMode == DataGridViewAutoSizeColumnMode.Fill)
             {
-                hostCabecalho.Height = alturaHeader;
+                continue; // a coluna "Descrição" (Fill) permanece elástica e cede a largura.
+            }
+
+            // Largura mínima para o cabeçalho 2.0x caber (texto medido + folga p/ borda/ordenação).
+            int larguraHeader = TextRenderer.MeasureText(coluna.HeaderText, fonteHeader).Width + 32;
+            if (larguraHeader > coluna.Width)
+            {
+                coluna.Width = larguraHeader;
             }
         }
+
+        // "Descrição do Material" deixa de dominar: menor peso de preenchimento (encolhe, mas continua a maior).
+        if (productionProductColumn.AutoSizeMode == DataGridViewAutoSizeColumnMode.Fill)
+        {
+            productionProductColumn.FillWeight = 120F;
+        }
+    }
+
+    private static void HarmonizarConteudoCard(Control card)
+    {
+        void Reflow()
+        {
+            const int margem = 16;
+            const int gap = 4;
+            int largura = card.ClientSize.Width;
+            int altura = card.ClientSize.Height;
+            if (largura <= 0 || altura <= 0)
+            {
+                return;
+            }
+
+            Control? icone = null;
+            List<Control> conteudo = [];
+            foreach (Control filho in card.Controls)
+            {
+                if (filho.Name.IndexOf("Icon", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    icone = filho;
+                }
+                else
+                {
+                    conteudo.Add(filho);
+                }
+            }
+            if (conteudo.Count == 0)
+            {
+                return;
+            }
+
+            conteudo.Sort((a, b) => a.Top.CompareTo(b.Top));
+
+            // Chip de ícone (RoundedPanel vermelho-claro) vira "resquício" visual nos cards — oculta.
+            if (icone is not null)
+            {
+                icone.Visible = false;
+            }
+
+            int larguraUtil = largura - (margem * 2);
+
+            // Empilha legenda + valor(es): largura útil (sem cortar horizontal) e altura preferida (sem cortar embaixo).
+            int total = 0;
+            int[] alturas = new int[conteudo.Count];
+            for (int i = 0; i < conteudo.Count; i++)
+            {
+                Control c = conteudo[i];
+                c.Left = margem;
+                if (c.Width < larguraUtil)
+                {
+                    c.Width = larguraUtil;
+                }
+                int preferida = c.PreferredSize.Height;
+                if (preferida > c.Height)
+                {
+                    c.Height = preferida;
+                }
+                alturas[i] = c.Height;
+                total += c.Height + gap;
+            }
+            total -= gap;
+
+            // Centraliza o grupo verticalmente na caixa.
+            int y = Math.Max(margem, (altura - total) / 2);
+            for (int i = 0; i < conteudo.Count; i++)
+            {
+                conteudo[i].Top = y;
+                y += alturas[i] + gap;
+            }
+        }
+
+        card.Resize += (_, _) => Reflow();
+        Reflow();
+    }
+
+    // Painel lateral com fonte 2.0x: alarga a coluna e o conteúdo, aumenta a altura do botão Iniciar Leitura e
+    // reempilha os itens (todos são absolutos, sem Anchor). Só CRESCE larguras/alturas — empurra o texto pra dentro.
+    private const int LarguraPainelLateralRecebimento = 320;
+    private const int MargemPainelLateralRecebimento = 18;
+    private const int AlturaBotaoLateralRecebimento = 64;
+
+    private void AjustarPainelLateralRecebimento()
+    {
+        // (1) Alarga a coluna do painel lateral (coluna 1 ABSOLUTA de tableLayoutPanel2).
+        if (tableLayoutPanel2.ColumnStyles.Count > 1 &&
+            tableLayoutPanel2.ColumnStyles[1].SizeType == SizeType.Absolute &&
+            tableLayoutPanel2.ColumnStyles[1].Width < LarguraPainelLateralRecebimento)
+        {
+            tableLayoutPanel2.ColumnStyles[1].Width = LarguraPainelLateralRecebimento;
+        }
+
+        int larguraUtil = LarguraPainelLateralRecebimento - (MargemPainelLateralRecebimento * 2);
+
+        void Alargar(Control c)
+        {
+            c.Left = MargemPainelLateralRecebimento;
+            if (c.Width < larguraUtil)
+            {
+                c.Width = larguraUtil;
+            }
+        }
+
+        // (2) Alarga títulos/cards e empurra pra dentro; alarga os rótulos internos (valores) dos cards.
+        Alargar(sideStatusTitleLabel);
+        Alargar(statusCard);
+        Alargar(groupBox4);
+        AlargarFilhos(statusCard);
+        AlargarFilhos(groupBox4);
+
+        // (3a) Card de STATUS (vermelho): valor + ícone na linha de cima, dica logo abaixo — sem sobrepor/cortar.
+        statusCardIcon.Top = 12;
+        statusCardIcon.Height = Math.Max(statusCardIcon.Height, statusCardIcon.PreferredSize.Height);
+        statusValueLabel.Top = 12;
+        statusValueLabel.Left = statusCardIcon.Right + 8;
+        statusValueLabel.Height = Math.Max(statusValueLabel.Height, statusValueLabel.PreferredSize.Height);
+        statusHintLabel.Left = 13;
+        statusHintLabel.Width = statusCard.ClientSize.Width - statusHintLabel.Left - 8;
+        statusHintLabel.Height = Math.Max(statusHintLabel.Height, statusHintLabel.PreferredSize.Height);
+        statusHintLabel.Top = Math.Max(statusCardIcon.Bottom, statusValueLabel.Bottom) + 8;
+
+        // (3b) Alinha o bloco "Qtde Total" IGUAL ao "Peso" (centralizado): espelha Left/Width/Anchor dos rótulos.
+        boxesCaptionLabel.Anchor = packagesCaptionLabel.Anchor;
+        boxesCaptionLabel.Left = packagesCaptionLabel.Left;
+        boxesCaptionLabel.Width = packagesCaptionLabel.Width;
+        boxesCounterLabel.Anchor = packagesCounterLabel.Anchor;
+        boxesCounterLabel.Left = packagesCounterLabel.Left;
+        boxesCounterLabel.Width = packagesCounterLabel.Width;
+
+        // (3c) Centraliza VERTICALMENTE o par legenda+valor em cada metade (Qtde e Peso), inclusive ao redimensionar.
+        CentralizarVerticalmente(weightSummaryForecastPanel, boxesCaptionLabel, boxesCounterLabel);
+        CentralizarVerticalmente(weightSummaryUsedPanel, packagesCaptionLabel, packagesCounterLabel);
+
+        // (3d) Cresce a altura dos cards para o conteúdo 2.0x (pela base dos filhos já reempilhados/ampliados).
+        statusCard.Height = Math.Max(statusCard.Height, FundoDosFilhos(statusCard) + 14);
+        groupBox4.Height = Math.Max(groupBox4.Height, FundoDosFilhos(groupBox4) + 14);
+
+        // (4) Botões maiores (cabem "INICIAR LEITURA" 2.0x) e na largura do painel.
+        foreach (Control botao in new Control[] { iniciarLeituraButton, lerEtiquetaButton, leituraManualButton })
+        {
+            botao.Left = MargemPainelLateralRecebimento;
+            botao.Width = larguraUtil;
+            botao.Height = AlturaBotaoLateralRecebimento;
+        }
+
+        // (5) Reempilha verticalmente. Os 3 botões são pré-empilhados SEMPRE (mesmo ocultos): "Iniciar/Parar
+        // Leitura" começa visível, mas "Ler Etiqueta"/"Digitar Peso" só aparecem após iniciar — se não fossem
+        // posicionados aqui, surgiriam no lugar antigo e sobrepunham. A troca de estado só altera Visible.
+        int y = 16;
+        sideStatusTitleLabel.Top = y; y = sideStatusTitleLabel.Bottom + 8;
+        statusCard.Top = y;           y = statusCard.Bottom + 12;
+        groupBox4.Top = y;            y = groupBox4.Bottom + 16;
+        iniciarLeituraButton.Top = y; y = iniciarLeituraButton.Bottom + 10;
+        lerEtiquetaButton.Top = y;    y = lerEtiquetaButton.Bottom + 10;
+        leituraManualButton.Top = y;
+    }
+
+    private static void AlargarFilhos(Control pai)
+    {
+        int largura = pai.ClientSize.Width;
+        foreach (Control filho in pai.Controls)
+        {
+            int disponivel = largura - filho.Left - 8;
+            if (disponivel > filho.Width)
+            {
+                filho.Width = disponivel;
+            }
+        }
+    }
+
+    private static int FundoDosFilhos(Control pai)
+    {
+        int fundo = 0;
+        foreach (Control filho in pai.Controls)
+        {
+            fundo = Math.Max(fundo, filho.Bottom);
+        }
+        return fundo;
+    }
+
+    // Centraliza verticalmente o par (legenda em cima, valor embaixo) dentro do painel — reaplica no resize.
+    private static void CentralizarVerticalmente(Control painel, Control legenda, Control valor)
+    {
+        void Reposicionar()
+        {
+            const int espaco = 2;
+            int total = legenda.Height + espaco + valor.Height;
+            int topo = Math.Max(0, (painel.ClientSize.Height - total) / 2);
+            legenda.Top = topo;
+            valor.Top = legenda.Bottom + espaco;
+        }
+
+        painel.Resize += (_, _) => Reposicionar();
+        Reposicionar();
+    }
+
+    // Tinge a imagem inteiramente de BRANCO preservando o canal alfa (silhueta branca) — usado para o logo
+    // FugaPET aparecer em branco sobre o cabeçalho laranja, em vez de cinza.
+    private static Image TingirDeBranco(Image origem)
+    {
+        Bitmap destino = new(origem.Width, origem.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using Graphics grafico = Graphics.FromImage(destino);
+        System.Drawing.Imaging.ColorMatrix matriz = new(new[]
+        {
+            new float[] { 0, 0, 0, 0, 0 },
+            new float[] { 0, 0, 0, 0, 0 },
+            new float[] { 0, 0, 0, 0, 0 },
+            new float[] { 0, 0, 0, 1, 0 },
+            new float[] { 1, 1, 1, 0, 1 }
+        });
+        using System.Drawing.Imaging.ImageAttributes atributos = new();
+        atributos.SetColorMatrix(matriz);
+        grafico.DrawImage(
+            origem,
+            new Rectangle(0, 0, destino.Width, destino.Height),
+            0, 0, origem.Width, origem.Height,
+            GraphicsUnit.Pixel,
+            atributos);
+        return destino;
     }
 
     private static DadosLoteEntrada? SolicitarDadosLotePadrao(IWin32Window owner, ModoEntradaMaterial modoEntrada)
@@ -447,9 +806,9 @@ public partial class ProcessoEntradaProdutoForm : Form
         maximizeWindowLabel.Click += (_, _) => ToggleWindowState();
         closeWindowLabel.Click += (_, _) => Close();
 
-        ConfigureTitleButtonHover(minimizeWindowLabel, Color.FromArgb(36, 46, 61));
-        ConfigureTitleButtonHover(maximizeWindowLabel, Color.FromArgb(36, 46, 61));
-        ConfigureTitleButtonHover(closeWindowLabel, Color.FromArgb(200, 78, 10));
+        ConfigureTitleButtonHover(minimizeWindowLabel, Color.FromArgb(160, 55, 5));
+        ConfigureTitleButtonHover(maximizeWindowLabel, Color.FromArgb(160, 55, 5));
+        ConfigureTitleButtonHover(closeWindowLabel, Color.FromArgb(160, 55, 5));
     }
 
     private void AtualizarEstadoVisualLocal(EstadoVisualLocalEntrada estado, string detalhe)

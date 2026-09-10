@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Reflection;
 using System.Windows.Forms;
 using FugaPET_HML.Tela.Processo;
 
@@ -123,14 +124,17 @@ public sealed class LegibilidadeRecebimentoMercadoria081Tests
 
     // ---------------- fiação na tela ----------------
 
-    [Fact] // TEST_02/14/15: fonte 2.0x SEM geometria, SEM AutoScroll, janela Maximizada (cabe no viewport).
-    public void Tela_FonteApenas_SemAutoScroll_Maximizada()
+    [Fact] // FIX4: escala 2.0x SOMENTE na área interna (rootTableLayoutPanel + sidePanel); cabeçalho/rodapé padrão.
+    public void Tela_EscalaApenasAreaInterna_SemAutoScroll_Maximizada()
     {
         string src = FonteTela();
-        Assert.Contains("LegibilidadeRecebimentoMercadoria.AplicarEscalaFonte(this, LegibilidadeRecebimentoMercadoria.Escala);", src, StringComparison.Ordinal);
+        Assert.Contains("AplicarEscalaFonte(rootTableLayoutPanel, LegibilidadeRecebimentoMercadoria.Escala);", src, StringComparison.Ordinal);
+        Assert.Contains("AplicarEscalaFonte(sidePanel, LegibilidadeRecebimentoMercadoria.Escala);", src, StringComparison.Ordinal);
         Assert.Contains("AutoScroll = false;", src, StringComparison.Ordinal);
         Assert.Contains("WindowState = FormWindowState.Maximized;", src, StringComparison.Ordinal);
-        // regressão do defeito 081: nada de escala de geometria nem AutoScroll ligado / crescimento de janela.
+        // cabeçalho e rodapé NÃO são escalados como a tela inteira (não escala o Form todo).
+        Assert.DoesNotContain("AplicarEscalaFonte(this,", src, StringComparison.Ordinal);
+        // regressão do defeito 081: nada de escala de geometria nem AutoScroll ligado.
         Assert.DoesNotContain("AplicarEscala(this", src, StringComparison.Ordinal);
         Assert.DoesNotContain("AutoScroll = true;", src, StringComparison.Ordinal);
         Assert.DoesNotContain("AutoScrollMinSize", src, StringComparison.Ordinal);
@@ -162,22 +166,60 @@ public sealed class LegibilidadeRecebimentoMercadoria081Tests
     {
         string src = FonteTela();
         Assert.Contains("if (_modoEntrada != global::FugaPET_HML.Modelo.Processo.ModoEntradaMaterial.RecebimentoMercadoria)", src, StringComparison.Ordinal);
-        Assert.Contains("companyLogoPictureBox.Image = global::FugaPET_HML.Properties.Resources.fuga_2026_logo;", src, StringComparison.Ordinal);
+        Assert.Contains("CarregarLogoFugaPetBranco()", src, StringComparison.Ordinal);
+        Assert.Contains("Servicos\\\\image\\\\FugaPet branco sem fundo.png", src, StringComparison.Ordinal);
+        Assert.Contains("headerDividerLabel.BackColor = Color.White;", src, StringComparison.Ordinal);
         Assert.Contains("_controller.ConsultarPedidoAsync(numeroPedido, _modoEntrada", src, StringComparison.Ordinal);
     }
 
-    [Fact] // TEST_17: ícone laranja + traços brancos; sem vermelho/rosa.
-    public void Tela_IconeLaranjaTracosBrancos_SemVermelhoRosa()
+    [Fact] // Ícone do recebimento mantém somente os traços brancos, sem fundo colorido.
+    public void Tela_IconeRecebimentoSomenteBranco_SemFundoColorido()
     {
         string src = FonteTela();
         int ini = src.IndexOf("private void AplicarLegibilidadeRecebimentoMercadoria()", StringComparison.Ordinal);
         int fim = src.IndexOf("PerformLayout();", ini, StringComparison.Ordinal);
         string corpo = src[ini..fim];
-        Assert.Contains("headerTitleIconPanel.FillColor = LegibilidadeRecebimentoMercadoria.LaranjaFugaPet;", corpo, StringComparison.Ordinal);
-        Assert.Contains("headerTitleIconPictureBox.Image = global::FugaPET_HML.Properties.Resources.production_title_icon;", corpo, StringComparison.Ordinal);
+        Assert.Contains("headerTitleIconPanel.FillColor = Color.Transparent;", corpo, StringComparison.Ordinal);
+        Assert.Contains("headerTitleIconPictureBox.Image = ExtrairTracosBrancos(global::FugaPET_HML.Properties.Resources.production_title_icon);", corpo, StringComparison.Ordinal);
         Assert.DoesNotContain("Red", corpo, StringComparison.Ordinal);
         Assert.DoesNotContain("Pink", corpo, StringComparison.Ordinal);
-        Assert.Contains("FromArgb(250, 105, 26)", FonteHelper(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ExtrairTracosBrancos_RemoveFundoVermelhoDoIcone()
+    {
+        MethodInfo? metodo = typeof(ProcessoEntradaProdutoForm).GetMethod(
+            "ExtrairTracosBrancos",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        Assert.NotNull(metodo);
+        using Bitmap resultado = Assert.IsType<Bitmap>(metodo.Invoke(
+            null,
+            [global::FugaPET_HML.Properties.Resources.production_title_icon]));
+
+        Color[] pixels = Enumerable.Range(0, resultado.Width)
+            .SelectMany(x => Enumerable.Range(0, resultado.Height).Select(y => resultado.GetPixel(x, y)))
+            .ToArray();
+
+        Assert.Contains(pixels, pixel => pixel.A == 0);
+        Assert.Contains(pixels, pixel => pixel.A > 0);
+        Assert.All(pixels.Where(pixel => pixel.A > 0), pixel =>
+        {
+            Assert.Equal(255, pixel.R);
+            Assert.Equal(255, pixel.G);
+            Assert.Equal(255, pixel.B);
+        });
+    }
+
+    [Fact]
+    public void Tela_BotoesJanelaUsamMesmoHoverLaranjaEscuro()
+    {
+        string src = FonteTela();
+        const string hover = "Color.FromArgb(160, 55, 5)";
+
+        Assert.Contains($"ConfigureTitleButtonHover(minimizeWindowLabel, {hover});", src, StringComparison.Ordinal);
+        Assert.Contains($"ConfigureTitleButtonHover(maximizeWindowLabel, {hover});", src, StringComparison.Ordinal);
+        Assert.Contains($"ConfigureTitleButtonHover(closeWindowLabel, {hover});", src, StringComparison.Ordinal);
     }
 
     [Fact] // TEST_18: status SAP destacado (badge preenchido + texto branco).
@@ -248,13 +290,15 @@ public sealed class LegibilidadeRecebimentoMercadoria081Tests
             Assert.True(combo.Height >= preferida, $"ComboBox {combo.Height} < preferida {preferida}");
         });
 
-    [Fact] // a tela chama a adaptação de alturas APÓS a escala de fonte (fiação FIX2).
+    [Fact] // a adaptação de alturas da área interna vem após a escala de fonte da área interna (FIX4).
     public void Tela_AdaptaAlturasAposEscalaFonte()
     {
         string src = FonteTela();
-        int iEscala = src.IndexOf("AplicarEscalaFonte(this,", StringComparison.Ordinal);
-        int iAdaptar = src.IndexOf("AdaptarAlturasParaFonte(this);", StringComparison.Ordinal);
+        int iEscala = src.IndexOf("AplicarEscalaFonte(rootTableLayoutPanel,", StringComparison.Ordinal);
+        int iAdaptar = src.IndexOf("AdaptarAlturasParaFonte(rootTableLayoutPanel);", StringComparison.Ordinal);
         Assert.True(iEscala >= 0 && iAdaptar > iEscala, "AdaptarAlturasParaFonte deve ser chamado após AplicarEscalaFonte");
+        // cabeçalho/rodapé não passam pela adaptação de alturas (permanecem padrão).
+        Assert.DoesNotContain("AdaptarAlturasParaFonte(this);", src, StringComparison.Ordinal);
     }
 
     // ---------------- FIX3: orçamento de altura (regiões de conteúdo + grade elástica) ----------------
@@ -290,16 +334,17 @@ public sealed class LegibilidadeRecebimentoMercadoria081Tests
             Assert.Equal(140f, mantida);
         });
 
-    [Fact] // fiação FIX3: o orçamento é aplicado APÓS a adaptação de alturas (cards/cabeçalho).
-    public void Tela_OrcamentoAposAdaptacao_TetoCardsECabecalho()
+    [Fact] // FIX4: o orçamento cresce SOMENTE o teto interno dos cards; cabeçalho/rodapé ficam no padrão.
+    public void Tela_OrcamentoCresceApenasCardsInternos()
     {
         string src = FonteTela();
-        int iAdaptar = src.IndexOf("AdaptarAlturasParaFonte(this);", StringComparison.Ordinal);
+        int iAdaptar = src.IndexOf("AdaptarAlturasParaFonte(rootTableLayoutPanel);", StringComparison.Ordinal);
         int iOrcamento = src.IndexOf("AjustarOrcamentoAlturaRecebimento();", StringComparison.Ordinal);
         Assert.True(iAdaptar >= 0 && iOrcamento > iAdaptar, "AjustarOrcamentoAlturaRecebimento deve vir após AdaptarAlturasParaFonte");
-        // cresce o teto ABSOLUTO da faixa de cards (root row0) e o host do cabeçalho.
+        // cresce só a faixa interna dos cards (rootTableLayoutPanel linha 0).
         Assert.Contains("CrescerTetoDeConteudo(rootTableLayoutPanel, 0,", src, StringComparison.Ordinal);
-        Assert.Contains("customTitleBarPanel.Parent", src, StringComparison.Ordinal);
-        Assert.Contains("customTitleBarPanel.PreferredSize.Height", src, StringComparison.Ordinal);
+        // cabeçalho/rodapé (tableLayoutPanel2) NÃO são crescidos — permanecem no tamanho padrão.
+        Assert.DoesNotContain("CrescerTetoDeConteudo(tableLayoutPanel2", src, StringComparison.Ordinal);
+        Assert.DoesNotContain("headerSubtitleLabel.Top = headerTitleLabel.Bottom", src, StringComparison.Ordinal);
     }
 }
