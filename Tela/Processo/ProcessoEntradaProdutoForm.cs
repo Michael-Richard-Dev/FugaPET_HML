@@ -266,6 +266,12 @@ public partial class ProcessoEntradaProdutoForm : Form
         // restante e permanece a região elástica. Corrige o clipping observado no runtime do FIX1.
         LegibilidadeRecebimentoMercadoria.AdaptarAlturasParaFonte(this);
 
+        // §3/§4/§5 (FIX3) Orçamento de altura por CONTEÚDO: os tetos FIXOS que a adaptação de filhos não
+        // alcança — a faixa dos cards (linha 0 ABSOLUTA do rootTableLayoutPanel) e o host do cabeçalho — são
+        // crescidos até a altura de conteúdo medida (fontes já 2.0x). A grade (linha Percent) cede o espaço,
+        // permanecendo a região elástica. Corrige o clipping de cards/cabeçalho do FIX2.
+        AjustarOrcamentoAlturaRecebimento();
+
         // §8/§9/§13 Sem AutoScroll: a janela permanece Maximizada, cabendo integralmente na área de trabalho
         // (1920x1080 / 100%). A grade é a região elástica; nenhuma barra de rolagem de janela é necessária.
         AutoScroll = false;
@@ -273,6 +279,34 @@ public partial class ProcessoEntradaProdutoForm : Form
 
         ResumeLayout(true);
         PerformLayout();
+    }
+
+    // GATE 082-FIX3: redistribui a altura reservando o necessário para as faixas de conteúdo (cards + cabeçalho)
+    // e deixando a grade absorver o restante. Mede PreferredSize (já com fonte 2.0x) — só CRESCE tetos fixos.
+    private void AjustarOrcamentoAlturaRecebimento()
+    {
+        // Faixa dos cards superiores: teto = linha 0 ABSOLUTA do rootTableLayoutPanel.
+        int alturaCards = 0;
+        foreach (Control card in new Control[]
+                 { productionOrderShadowPanel, lotCardPanel, stepCardPanel, finishedProductCardPanel })
+        {
+            alturaCards = Math.Max(alturaCards, card.PreferredSize.Height + card.Margin.Top + card.Margin.Bottom);
+        }
+        if (alturaCards > 0)
+        {
+            LegibilidadeRecebimentoMercadoria.CrescerTetoDeConteudo(rootTableLayoutPanel, 0, alturaCards + 12);
+        }
+
+        // Cabeçalho: o host do customTitleBarPanel (barra superior) cresce até o conteúdo (título+subtítulo 2.0x).
+        Control? hostCabecalho = customTitleBarPanel.Parent;
+        if (hostCabecalho is not null && hostCabecalho is not Form)
+        {
+            int alturaHeader = customTitleBarPanel.PreferredSize.Height;
+            if (alturaHeader > hostCabecalho.Height)
+            {
+                hostCabecalho.Height = alturaHeader;
+            }
+        }
     }
 
     private static DadosLoteEntrada? SolicitarDadosLotePadrao(IWin32Window owner, ModoEntradaMaterial modoEntrada)

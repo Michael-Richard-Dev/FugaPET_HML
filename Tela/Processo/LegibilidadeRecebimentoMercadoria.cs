@@ -190,4 +190,44 @@ public static class LegibilidadeRecebimentoMercadoria
             }
         }
     }
+
+    /// <summary>Altura mínima operacional que a grade (região elástica) deve manter após o orçamento (§17).</summary>
+    public const int AlturaMinimaGradeOperacional = 200;
+
+    /// <summary>
+    /// GATE 082-FIX3 — orçamento de altura (puro/testável): dado o total do viewport e as alturas necessárias
+    /// das regiões de conteúdo (cabeçalho, cards, toolbar, rodapé...), retorna quanto SOBRA para a grade. Se o
+    /// resultado for menor que <see cref="AlturaMinimaGradeOperacional"/>, o layout não cabe sem reduzir fonte.
+    /// </summary>
+    public static int AlturaRestanteParaGrade(int alturaClienteTotal, params int[] alturasReservadas)
+    {
+        int reservado = 0;
+        foreach (int altura in alturasReservadas)
+        {
+            reservado += Math.Max(0, altura);
+        }
+
+        return alturaClienteTotal - reservado;
+    }
+
+    /// <summary>
+    /// GATE 082-FIX3 — cresce o teto de uma linha ABSOLUTA (faixa de conteúdo, ex.: cards) até
+    /// <paramref name="alturaNecessaria"/>, SÓ CRESCE. A linha elástica (Percent) da grade cede o espaço.
+    /// Retorna a nova altura efetiva da linha de conteúdo.
+    /// </summary>
+    public static float CrescerTetoDeConteudo(TableLayoutPanel raiz, int indiceLinha, int alturaNecessaria)
+    {
+        if (raiz is null || indiceLinha < 0 || indiceLinha >= raiz.RowStyles.Count)
+        {
+            return 0f;
+        }
+
+        RowStyle estilo = raiz.RowStyles[indiceLinha];
+        if (estilo.SizeType == SizeType.Absolute && alturaNecessaria > estilo.Height)
+        {
+            estilo.Height = alturaNecessaria;
+        }
+
+        return estilo.Height;
+    }
 }

@@ -256,4 +256,50 @@ public sealed class LegibilidadeRecebimentoMercadoria081Tests
         int iAdaptar = src.IndexOf("AdaptarAlturasParaFonte(this);", StringComparison.Ordinal);
         Assert.True(iEscala >= 0 && iAdaptar > iEscala, "AdaptarAlturasParaFonte deve ser chamado após AplicarEscalaFonte");
     }
+
+    // ---------------- FIX3: orçamento de altura (regiões de conteúdo + grade elástica) ----------------
+
+    // TOTAL_HEIGHT_BUDGET_VALID: com regiões de conteúdo 2x típicas, sobra para a grade > mínimo operacional.
+    [Fact]
+    public void Orcamento_GradeRecebeRestante_AcimaDoMinimo()
+    {
+        int alturaCliente = 1040;   // WorkingArea típica em 1920x1080/100%
+        int header = 76, cards = 140, toolbar = 64, footer = 48; // conteúdo 2x
+        int restante = LegibilidadeRecebimentoMercadoria.AlturaRestanteParaGrade(alturaCliente, header, cards, toolbar, footer);
+        Assert.Equal(1040 - 76 - 140 - 64 - 48, restante);
+        Assert.True(restante > LegibilidadeRecebimentoMercadoria.AlturaMinimaGradeOperacional,
+            $"grade restante {restante} <= mínimo {LegibilidadeRecebimentoMercadoria.AlturaMinimaGradeOperacional}");
+    }
+
+    // CrescerTetoDeConteudo: linha ABSOLUTA de cards cresce até o necessário; só cresce; grade (Percent) intacta.
+    [Fact]
+    public void Orcamento_CresceTetoAbsolutoDosCards_SoCresce()
+        => ExecutarEmSta(() =>
+        {
+            using TableLayoutPanel raiz = new() { ColumnCount = 1, RowCount = 2 };
+            raiz.RowStyles.Add(new RowStyle(SizeType.Absolute, 86f));  // faixa de cards (subdimensionada p/ 2x)
+            raiz.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));  // grade elástica
+
+            float nova = LegibilidadeRecebimentoMercadoria.CrescerTetoDeConteudo(raiz, 0, 140);
+            Assert.Equal(140f, nova);                        // cresceu para o necessário
+            Assert.Equal(140f, raiz.RowStyles[0].Height);
+            Assert.Equal(SizeType.Percent, raiz.RowStyles[1].SizeType); // grade continua elástica
+
+            // não reduz quando o necessário é menor que o atual
+            float mantida = LegibilidadeRecebimentoMercadoria.CrescerTetoDeConteudo(raiz, 0, 100);
+            Assert.Equal(140f, mantida);
+        });
+
+    [Fact] // fiação FIX3: o orçamento é aplicado APÓS a adaptação de alturas (cards/cabeçalho).
+    public void Tela_OrcamentoAposAdaptacao_TetoCardsECabecalho()
+    {
+        string src = FonteTela();
+        int iAdaptar = src.IndexOf("AdaptarAlturasParaFonte(this);", StringComparison.Ordinal);
+        int iOrcamento = src.IndexOf("AjustarOrcamentoAlturaRecebimento();", StringComparison.Ordinal);
+        Assert.True(iAdaptar >= 0 && iOrcamento > iAdaptar, "AjustarOrcamentoAlturaRecebimento deve vir após AdaptarAlturasParaFonte");
+        // cresce o teto ABSOLUTO da faixa de cards (root row0) e o host do cabeçalho.
+        Assert.Contains("CrescerTetoDeConteudo(rootTableLayoutPanel, 0,", src, StringComparison.Ordinal);
+        Assert.Contains("customTitleBarPanel.Parent", src, StringComparison.Ordinal);
+        Assert.Contains("customTitleBarPanel.PreferredSize.Height", src, StringComparison.Ordinal);
+    }
 }
