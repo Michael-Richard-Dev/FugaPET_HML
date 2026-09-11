@@ -62,7 +62,6 @@ public sealed class ControleApontamentosRepositorio : RepositorioBase, IControle
         const string sql = """
             SELECT codigo_configuracao, centro, tipo_ordem, sequencia_sap, operacao_sap, suboperacao_sap,
                    centro_trabalho, tipo_processo, tela_destino, exige_operacao_anterior, ativo,
-                   codigo_perfil_resultado,
                    (centro <> '')::int + (tipo_ordem <> '')::int + (sequencia_sap <> '')::int
                  + (suboperacao_sap <> '')::int + (centro_trabalho <> '')::int AS especificidade
               FROM operacao_producao_configuracao
@@ -90,7 +89,7 @@ public sealed class ControleApontamentosRepositorio : RepositorioBase, IControle
         {
             while (await leitor.ReadAsync(cancellationToken))
             {
-                candidatas.Add((LerConfiguracao(leitor), leitor.GetInt32(12)));
+                candidatas.Add((LerConfiguracao(leitor), leitor.GetInt32(11)));
             }
         }
 
@@ -113,8 +112,7 @@ public sealed class ControleApontamentosRepositorio : RepositorioBase, IControle
     {
         const string sql = """
             SELECT codigo_configuracao, centro, tipo_ordem, sequencia_sap, operacao_sap, suboperacao_sap,
-                   centro_trabalho, tipo_processo, tela_destino, exige_operacao_anterior, ativo,
-                   codigo_perfil_resultado
+                   centro_trabalho, tipo_processo, tela_destino, exige_operacao_anterior, ativo
               FROM operacao_producao_configuracao
              WHERE ativo = true
                AND (centro = @centro OR centro = '')
@@ -150,7 +148,11 @@ public sealed class ControleApontamentosRepositorio : RepositorioBase, IControle
             TelaDestino = leitor.IsDBNull(8) ? string.Empty : leitor.GetString(8),
             ExigeOperacaoAnterior = leitor.GetBoolean(9),
             Ativo = leitor.GetBoolean(10),
-            CodigoPerfilResultado = leitor.IsDBNull(11) ? null : leitor.GetInt64(11)
+            // GATE 089A (drift fix): a coluna codigo_perfil_resultado NÃO existe em operacao_producao_configuracao
+            // (provado em 087A/087C — causaria SQLSTATE 42703). O perfil de resultado deixa de ser lido daqui e
+            // passa a ser resolvido pela fonte normalizada (operacao_resultado_perfil); enquanto esse lookup não
+            // existe no runtime, permanece null → RESULTADO_APONTAMENTO opera FAIL-CLOSED. Sem fallback/default.
+            CodigoPerfilResultado = null
         };
 
     // ---------------- Consultas de apontamento ----------------
