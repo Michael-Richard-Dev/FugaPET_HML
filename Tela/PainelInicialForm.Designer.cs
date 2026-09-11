@@ -16,9 +16,6 @@ partial class PainelInicialForm
     private Panel headerBar;
     private Label headerTitleLabel;
     private Label headerSubtitleLabel;
-    private FugaPET_HML.Tela.Controls.RoundedPanel sapStatusPanel;
-    private Label sapStatusDotLabel;
-    private Label sapStatusLabel;
     private Label minimizeWindowLabel;
     private Label maximizeWindowLabel;
     private Label closeWindowLabel;
@@ -332,9 +329,6 @@ partial class PainelInicialForm
         rightAreaLayout = new TableLayoutPanel();
         headerBar = new Panel();
         headerSubtitleLabel = new Label();
-        sapStatusPanel = new FugaPET_HML.Tela.Controls.RoundedPanel();
-        sapStatusDotLabel = new Label();
-        sapStatusLabel = new Label();
         minimizeWindowLabel = new Label();
         maximizeWindowLabel = new Label();
         closeWindowLabel = new Label();
@@ -565,7 +559,6 @@ partial class PainelInicialForm
         sidebarUserPanel.SuspendLayout();
         rightAreaLayout.SuspendLayout();
         headerBar.SuspendLayout();
-        sapStatusPanel.SuspendLayout();
         contentScrollPanel.SuspendLayout();
         contentLayout.SuspendLayout();
         contentBrandHeaderPanel.SuspendLayout();
@@ -1097,7 +1090,6 @@ partial class PainelInicialForm
         // 
         headerBar.BackColor = Color.FromArgb(200, 78, 10);
         headerBar.Controls.Add(headerSubtitleLabel);
-        headerBar.Controls.Add(sapStatusPanel);
         headerBar.Controls.Add(minimizeWindowLabel);
         headerBar.Controls.Add(maximizeWindowLabel);
         headerBar.Controls.Add(closeWindowLabel);
@@ -1120,47 +1112,6 @@ partial class PainelInicialForm
         headerSubtitleLabel.TabIndex = 3;
         headerSubtitleLabel.Text = "Visão geral da operação / Integração SAP";
         headerSubtitleLabel.TextAlign = ContentAlignment.MiddleLeft;
-        // 
-        // sapStatusPanel
-        // 
-        sapStatusPanel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        sapStatusPanel.BackColor = Color.Transparent;
-        sapStatusPanel.BorderColor = Color.FromArgb(200, 78, 10);
-        sapStatusPanel.BorderRadius = 12;
-        sapStatusPanel.Controls.Add(sapStatusDotLabel);
-        sapStatusPanel.Controls.Add(sapStatusLabel);
-        sapStatusPanel.FillColor = Color.FromArgb(200, 78, 10);
-        sapStatusPanel.Location = new Point(685, 12);
-        sapStatusPanel.Name = "sapStatusPanel";
-        sapStatusPanel.ShadowBlur = 0;
-        sapStatusPanel.ShadowOffsetY = 0;
-        sapStatusPanel.Size = new Size(190, 27);
-        sapStatusPanel.TabIndex = 4;
-        // 
-        // sapStatusDotLabel
-        // 
-        sapStatusDotLabel.BackColor = Color.Transparent;
-        sapStatusDotLabel.Font = new Font("Segoe UI Symbol", 10F, FontStyle.Bold, GraphicsUnit.Point, 0);
-        sapStatusDotLabel.ForeColor = Color.FromArgb(34, 197, 94);
-        sapStatusDotLabel.Location = new Point(11, 4);
-        sapStatusDotLabel.Name = "sapStatusDotLabel";
-        sapStatusDotLabel.Size = new Size(14, 18);
-        sapStatusDotLabel.TabIndex = 0;
-        sapStatusDotLabel.Text = "●";
-        sapStatusDotLabel.TextAlign = ContentAlignment.MiddleCenter;
-        // 
-        // sapStatusLabel
-        // 
-        sapStatusLabel.BackColor = Color.Transparent;
-        sapStatusLabel.Font = new Font("Cascadia Code", 7.25F, FontStyle.Bold, GraphicsUnit.Point, 0);
-        sapStatusLabel.ForeColor = Color.White;
-        sapStatusLabel.Location = new Point(27, 5);
-        sapStatusLabel.Name = "sapStatusLabel";
-        sapStatusLabel.Size = new Size(151, 17);
-        sapStatusLabel.TabIndex = 1;
-        sapStatusLabel.Text = "Verificando banco";
-        sapStatusLabel.TextAlign = ContentAlignment.MiddleLeft;
-        // 
         // minimizeWindowLabel
         // 
         minimizeWindowLabel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
@@ -3867,7 +3818,6 @@ partial class PainelInicialForm
         sidebarUserPanel.ResumeLayout(false);
         rightAreaLayout.ResumeLayout(false);
         headerBar.ResumeLayout(false);
-        sapStatusPanel.ResumeLayout(false);
         contentScrollPanel.ResumeLayout(false);
         contentLayout.ResumeLayout(false);
         contentBrandHeaderPanel.ResumeLayout(false);

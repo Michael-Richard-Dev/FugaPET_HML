@@ -110,6 +110,7 @@ public partial class PainelInicialForm : Form
             // Altura + espaçamento dos itens (o reempilhamento vertical funciona em runtime): dá altura para o
             // item de 2 linhas ("Processo de Produção") e separa os módulos. Larguras/rotulos já vêm do Designer.
             ReempilharSidebar();
+            AjustarRodapeSidebar();
         };
 
         // Sidebar 2.0x SEM cortar: os rótulos ficam em AutoSize (crescem com a fonte e nunca cortam). A largura
@@ -131,39 +132,72 @@ public partial class PainelInicialForm : Form
     {
         const int altura = 62;
         const int espaco = 16;
+        const int larguraIcone = 44;
 
-        (Control item, Control texto)[] itens =
+        (Control item, Control icone, Control texto)[] itens =
         [
-            (menuItemInicio, menuInicioText),
-            (menuItemCadastro, menuCadastroText),
-            (menuItemLeitura, menuLeituraText),
-            (menuItemEtiquetas, menuEtiquetasText),
-            (menuItemHistorico, menuHistoricoText),
-            (menuItemRelatorios, menuRelatoriosText),
-            (menuItemSap, menuSapText),
-            (menuItemConfig, menuConfigText),
-            (menuItemSeguranca, menuSegurancaText),
+            (menuItemInicio, menuInicioIcon, menuInicioText),
+            (menuItemCadastro, menuCadastroIcon, menuCadastroText),
+            (menuItemLeitura, menuLeituraIcon, menuLeituraText),
+            (menuItemEtiquetas, menuEtiquetasIcon, menuEtiquetasText),
+            (menuItemHistorico, menuHistoricoIcon, menuHistoricoText),
+            (menuItemRelatorios, menuRelatoriosIcon, menuRelatoriosText),
+            (menuItemSap, menuSapIcon, menuSapText),
+            (menuItemConfig, menuConfigIcon, menuConfigText),
+            (menuItemSeguranca, menuSegurancaIcon, menuSegurancaText),
         ];
 
+        int larguraTextoMaxima = itens.Max(item => item.texto.GetPreferredSize(Size.Empty).Width);
+        int larguraItem = 64 + larguraTextoMaxima + 16;
+
+        // A coluna da sidebar abraça o conteúdo (item + margem) em vez de uma largura fixa folgada — barra justa,
+        // sem espaço vazio à direita e sem cortar o maior nome.
+        if (bodyLayout.ColumnStyles.Count > 0 && bodyLayout.ColumnStyles[0].SizeType == SizeType.Absolute)
+        {
+            bodyLayout.ColumnStyles[0].Width = Math.Min(420, larguraItem + 18);
+        }
         int y = menuItemInicio.Top + 16;
-        foreach ((Control item, Control texto) in itens)
+        foreach ((Control item, Control icone, Control texto) in itens)
         {
             item.Height = altura;
+            item.Width = larguraItem;
             item.Top = y;
             y += altura + espaco;
 
-            foreach (Control filho in item.Controls)
-            {
-                if (!ReferenceEquals(filho, texto))
-                {
-                    filho.Height = altura;   // ícone centraliza via TextAlign
-                }
-            }
+            icone.SetBounds(10, 0, larguraIcone, altura);
+            texto.Left = 64;
 
             // Medição FRESCA (GetPreferredSize) — o PreferredSize em cache pode vir de 1 linha e desalinhar o
             // item de 2 linhas ("Processo de Produção"), fazendo a 2ª linha vazar por baixo.
             int alturaTexto = texto.GetPreferredSize(Size.Empty).Height;
             texto.Top = Math.Max(4, (altura - alturaTexto) / 2);
+
+            ApplyRoundedRegion(item, 6);
+        }
+    }
+
+    private void AjustarRodapeSidebar()
+    {
+        const int alturaUsuario = 84;
+        int larguraTexto = Math.Max(80, sidebarPanel.ClientSize.Width - 106);
+
+        sidebarUserPanel.Height = alturaUsuario;
+        sidebarUserPanel.Top = sidebarPanel.ClientSize.Height - alturaUsuario;
+        sidebarUserAvatarLabel.SetBounds(18, 20, 44, 44);
+        // Glyph do avatar em tamanho fixo adequado ao círculo (não a fonte 2.0x, que estourava) e círculo
+        // reaplicado JÁ no tamanho 44px (a região vinha calculada em 32px e recortava torto).
+        sidebarUserAvatarLabel.Font = new Font("Segoe MDL2 Assets", 20F);
+        sidebarUserAvatarLabel.Text = "";   // "Contact" (pessoa) — avatar de usuário
+        ApplyRoundedRegion(sidebarUserAvatarLabel, sidebarUserAvatarLabel.Width / 2);
+        sidebarUserNameLabel.SetBounds(74, 18, larguraTexto, 26);
+        sidebarUserStatusLabel.SetBounds(74, 44, larguraTexto, 22);
+        sidebarUserChevronLabel.Visible = false;   // seta ">" removida
+
+        if (_preCarregamentoStatusLabel is not null)
+        {
+            _preCarregamentoStatusLabel.Left = 18;
+            _preCarregamentoStatusLabel.Top = sidebarUserPanel.Top - 24;
+            _preCarregamentoStatusLabel.Width = Math.Max(40, sidebarPanel.ClientSize.Width - 36);
         }
     }
 
@@ -229,15 +263,18 @@ public partial class PainelInicialForm : Form
         _preCarregamentoStatusLabel = new Label
         {
             Name = "preCarregamentoStatusLabel",
-            AutoSize = true,
+            AutoSize = false,
+            AutoEllipsis = true,
             BackColor = Color.Transparent,
             ForeColor = Color.FromArgb(148, 163, 184),
             Font = new Font("Segoe UI", 7.5f, FontStyle.Regular),
             Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
+            Size = new Size(Math.Max(40, sidebarPanel.ClientSize.Width - 36), 18),
+            TextAlign = ContentAlignment.MiddleLeft,
             Visible = false
         };
-        Controls.Add(_preCarregamentoStatusLabel);
-        _preCarregamentoStatusLabel.Location = new Point(16, ClientSize.Height - 22);
+        sidebarPanel.Controls.Add(_preCarregamentoStatusLabel);
+        _preCarregamentoStatusLabel.Location = new Point(18, sidebarUserPanel.Top - 24);
         _preCarregamentoStatusLabel.BringToFront();
     }
 
@@ -268,9 +305,6 @@ public partial class PainelInicialForm : Form
 
     private async Task AtualizarStatusIndustrialAsync()
     {
-        sapStatusLabel.Text = "Verificando banco";
-        sapStatusDotLabel.ForeColor = Color.FromArgb(250, 204, 21);
-        sapStatusPanel.BorderColor = Color.FromArgb(250, 204, 21);
         cellBancoText.Text = $"{FugaPET_HML.Tela.Comum.RodapeBancoHelper.ObterTextoBancoDados()} | Verificando";
 
         StatusIndustrial statusIndustrial = await new StatusIndustrialServico().ObterStatusAsync();
@@ -288,13 +322,7 @@ public partial class PainelInicialForm : Form
             ? "N/A"
             : statusBanco.Identificador;
 
-        Color corStatus = ObterCorStatusBanco(statusBanco);
-
         cellBancoText.Text = $"Banco de Dados:  {nomeBanco} | {statusBanco.Ambiente} | {statusBanco.Situacao}";
-        sapStatusLabel.Text = $"Banco {statusBanco.Ambiente} {statusBanco.Situacao}";
-        sapStatusDotLabel.ForeColor = corStatus;
-        sapStatusPanel.BorderColor = corStatus;
-        sapStatusPanel.Invalidate();
     }
 
     private void AtualizarStatusTerminalLocal(
@@ -309,18 +337,6 @@ public partial class PainelInicialForm : Form
 
         cellTerminalText.Text =
             $"Terminal:  {nomeTerminal} | Bal.: {statusBalancaConfigurada.Situacao} | Imp.: {statusImpressoraConfigurada.Situacao} | SAP: {statusCacheSapLocal.Situacao}";
-    }
-
-    private static Color ObterCorStatusBanco(ItemStatusIndustrial status)
-    {
-        if (!status.Habilitado)
-        {
-            return Color.FromArgb(250, 204, 21);
-        }
-
-        return status.Online
-            ? Color.FromArgb(34, 197, 94)
-            : Color.FromArgb(239, 68, 68);
     }
 
     private static string? ResolveIconPath(string relativePath)
@@ -595,7 +611,18 @@ public partial class PainelInicialForm : Form
         headerTitleLabel.Text = "Leitura de Produção";
         headerSubtitleLabel.Text = "Módulos de leitura / Integração SAP";
 
+        bool primeiraExibicao = _processoProducaoForm is null;
         _processoProducaoForm ??= CreateProcessoProducaoForm();
+
+        // Reentrada: na PRIMEIRA exibição o WinForms auto-escala o form (AutoScaleMode.Font) uma única vez,
+        // porque sua fonte é ambiente e herda a 2.0x do contentScrollPanel — resultado 2x aprovado. Ao navegar
+        // para fora e voltar, o Controls.Add re-parenteia o form no painel ainda 2x e o PerformAutoScale roda de
+        // novo (2x sobre 2x → cards gigantes). Congelar a auto-escala após a primeira renderização preserva o
+        // visual aprovado e elimina a composição nas reentradas.
+        if (!primeiraExibicao)
+        {
+            _processoProducaoForm.AutoScaleMode = AutoScaleMode.None;
+        }
 
         contentScrollPanel.Controls.Clear();
         contentScrollPanel.AutoScroll = false;
@@ -1519,9 +1546,18 @@ public partial class PainelInicialForm : Form
         maximizeWindowLabel.Click += (_, _) => ToggleWindowState();
         closeWindowLabel.Click += (_, _) => Close();
 
-        ConfigureTitleButtonHover(minimizeWindowLabel, Color.FromArgb(200, 78, 10));
-        ConfigureTitleButtonHover(maximizeWindowLabel, Color.FromArgb(200, 78, 10));
-        ConfigureTitleButtonHover(closeWindowLabel, Color.FromArgb(200, 78, 10));
+        // Hover mais escuro (igual ao Recebimento de Mercadoria) — visível sobre o laranja do cabeçalho.
+        ConfigureTitleButtonHover(minimizeWindowLabel, Color.FromArgb(160, 55, 5));
+        ConfigureTitleButtonHover(maximizeWindowLabel, Color.FromArgb(160, 55, 5));
+        ConfigureTitleButtonHover(closeWindowLabel, Color.FromArgb(160, 55, 5));
+
+        // Os botões preenchem TODA a altura do cabeçalho (antes 52px em 60px, sobrando uma faixa laranja clara
+        // embaixo). Assim o hover escuro vai de cima até encontrar o branco do conteúdo.
+        foreach (Control botao in new[] { minimizeWindowLabel, maximizeWindowLabel, closeWindowLabel })
+        {
+            botao.Top = 0;
+            botao.Height = headerBar.Height;
+        }
     }
 
     private void CustomTitleBar_MouseDown(object? sender, MouseEventArgs e)
