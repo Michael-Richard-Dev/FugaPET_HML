@@ -278,20 +278,21 @@ public sealed class ConfiguracaoSap
     {
         get
         {
-            string derivadoDoMaterialDocument = DerivarUrlServicoSap(MaterialDocumentBaseUrl, "API_PRODUCTION_ROUTING");
+            // GATE 095F (095D/095E-R1): fonte ÚNICA V3 — API_PRODUCTION_ROUTING;v=3. Sem API_PRODUCTION_VERSION.
+            string derivadoDoMaterialDocument = DerivarUrlServicoSap(MaterialDocumentBaseUrl, "API_PRODUCTION_ROUTING;v=3");
             return !string.IsNullOrWhiteSpace(derivadoDoMaterialDocument)
                 ? derivadoDoMaterialDocument
-                : DerivarUrlServicoSap(BaseUrl, "API_PRODUCTION_ROUTING");
+                : DerivarUrlServicoSap(BaseUrl, "API_PRODUCTION_ROUTING;v=3");
         }
     }
 
     /// <summary>
-    /// True quando ha URL (derivada) das DUAS APIs do roteiro (versao + roteiro) + credenciais + allowlist.
-    /// Sem isso a resolucao do marcador PP_FORM fica indisponivel (fail-closed no Controle de Apontamentos).
+    /// GATE 095F: readiness do roteiro V3 = URL efetiva de API_PRODUCTION_ROUTING;v=3 + credenciais + allowlist.
+    /// NÃO depende mais de ProductionVersion (removida do fluxo do Controle de Apontamentos). Sem isso a
+    /// resolução do marcador PP_FORM fica indisponível (fail-closed no Controle de Apontamentos).
     /// </summary>
     public bool ProductionRoutingConfigurado =>
-        !string.IsNullOrWhiteSpace(ProductionVersionBaseUrlEfetiva)
-        && !string.IsNullOrWhiteSpace(ProductionRoutingBaseUrlEfetiva)
+        !string.IsNullOrWhiteSpace(ProductionRoutingBaseUrlEfetiva)
         && !string.IsNullOrWhiteSpace(Usuario)
         && !string.IsNullOrWhiteSpace(Senha)
         && HostsPermitidos.Count > 0;

@@ -152,7 +152,9 @@ public sealed class ControleApontamentosWorkCenterCode05Tests
         string servico = LerArquivoProjeto("Servicos", "Processo", "ProcessoControleApontamentosServico.cs");
 
         Assert.Contains("ResolverOperacao(ordemSap, codigo.Operacao)", servico, StringComparison.Ordinal);
-        Assert.Contains("ClassificarOperacao(roteiro, operacao.Operacao)", servico, StringComparison.Ordinal);
+        // GATE 095F / seam 095E-R1: o Marcador recebe o roteiro REDUZIDO (pós-correlação Op+Plant+WorkCenter),
+        // não mais o roteiro completo. O barcode continua sendo usado só para resolver a operação real.
+        Assert.Contains("ClassificarOperacao(correlacao.RoteiroReduzido, operacao.Operacao)", servico, StringComparison.Ordinal);
         Assert.Contains("ObterConfiguracaoRotaPorWorkCenterAsync", servico, StringComparison.Ordinal);
     }
 

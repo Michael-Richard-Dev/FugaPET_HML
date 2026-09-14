@@ -163,21 +163,45 @@ public sealed class ProcessoControleApontamentosServico
         // GATE 048-E: SOMENTE operações com marcador PP_FORM (OperationStandardTextCode, via roteiro
         // AUTORITATIVO da ProductionVersion) são manuais. O serviço é o DONO ÚNICO da regra; o roteiro
         // não resolvido/ambíguo é fail-closed; a operação automática não gera apontamento nem abre tela.
+        // GATE 095F (095D/095E-R1): roteiro V3 COMPLETO da OP (API_PRODUCTION_ROUTING;v=3; sem ProductionVersion).
         RoteiroProducaoSap? roteiro = await _roteiroServico.ResolverRoteiroDaOrdemAsync(ordemSap, cancellationToken);
         IReadOnlyList<OperacaoOrdemProducaoSap> operacoesManuais =
             MarcadorOperacaoManualSap.FiltrarOperacoesManuais(ordemSap, roteiro);
         OrdemProducaoSap ordemManual = ordemSap with { Operacoes = operacoesManuais };
+
+        const string mensagemRoteiroNaoResolvido =
+            "Não foi possível resolver o roteiro (marcador PP_FORM) desta operação no SAP. "
+            + "O apontamento manual está bloqueado até a regularização.";
+
+        // Seam autoritativo 095E-R1: correlaciona a OCORRÊNCIA corrente (Operation+Plant+WorkCenter) ANTES do
+        // Marcador. Plant efetivo = operacao.Centro ?? ordemSap.Centro (mesmo do routing local). O Marcador NÃO
+        // recebe o roteiro completo — recebe o roteiro REDUZIDO a uma operação. Fail-closed em 0/>1 exatos.
+        OperacaoOrdemProducaoSap ocorrenciaParaCorrelacao = operacao with
+        {
+            Centro = string.IsNullOrWhiteSpace(operacao.Centro) ? ordemSap.Centro : operacao.Centro
+        };
+        ResultadoCorrelacaoOcorrencia correlacao =
+            CorrelacionadorOcorrenciaRoteiroSap.Correlacionar(roteiro, ocorrenciaParaCorrelacao);
+        if (correlacao.Estado != EstadoCorrelacaoOcorrencia.Correlacionada)
+        {
+            string codigoDiagnostico = correlacao.Estado == EstadoCorrelacaoOcorrencia.Ambigua
+                ? "OPERATION_OCCURRENCE_AMBIGUOUS"
+                : "OPERATION_OCCURRENCE_NOT_FOUND";
+            await AuditarAsync(codigo, usuario, estacao, codigoDiagnostico, mensagemRoteiroNaoResolvido, cancellationToken);
+            return ResultadoLeituraApontamento.Falha(
+                CenarioLeituraApontamento.ContratoRoteiroNaoResolvido, mensagemRoteiroNaoResolvido, codigo, ordemManual);
+        }
+
+        // Roteiro reduzido a EXATAMENTE uma operação; o Marcador (Op-only, PP_FORM) decide a manualidade.
         ClassificacaoOperacaoManual classificacao =
-            MarcadorOperacaoManualSap.ClassificarOperacao(roteiro, operacao.Operacao);
+            MarcadorOperacaoManualSap.ClassificarOperacao(correlacao.RoteiroReduzido, operacao.Operacao);
 
         if (classificacao == ClassificacaoOperacaoManual.ContratoNaoResolvido)
         {
-            const string mensagem =
-                "Não foi possível resolver o roteiro (marcador PP_FORM) desta operação no SAP. "
-                + "O apontamento manual está bloqueado até a regularização.";
-            await AuditarAsync(codigo, usuario, estacao, "ROTEIRO_NAO_RESOLVIDO", mensagem, cancellationToken);
+            // Correlação já passou (1 operação): o único ContratoNaoResolvido aqui é StandardTextCode não obtido.
+            await AuditarAsync(codigo, usuario, estacao, "STANDARD_TEXT_NAO_OBTIDO", mensagemRoteiroNaoResolvido, cancellationToken);
             return ResultadoLeituraApontamento.Falha(
-                CenarioLeituraApontamento.ContratoRoteiroNaoResolvido, mensagem, codigo, ordemManual);
+                CenarioLeituraApontamento.ContratoRoteiroNaoResolvido, mensagemRoteiroNaoResolvido, codigo, ordemManual);
         }
 
         if (classificacao == ClassificacaoOperacaoManual.Automatica)

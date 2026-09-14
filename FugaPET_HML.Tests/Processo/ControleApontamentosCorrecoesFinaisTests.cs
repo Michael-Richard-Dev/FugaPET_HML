@@ -805,6 +805,9 @@ public sealed class ControleApontamentosCorrecoesFinaisTests
                     .Select(o => new OperacaoRoteiroSap
                     {
                         Operacao = o.Operacao,
+                        // GATE 095F: rota V3 carrega Plant/WorkCenter da ocorrência (correlação Op+Plant+WC).
+                        Plant = string.IsNullOrWhiteSpace(o.Centro) ? ordem.Centro : o.Centro,
+                        WorkCenter = o.CentroTrabalho,
                         CodigoTextoPadrao = "PP_FORM",
                         TextoPadraoObtido = true
                     })

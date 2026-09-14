@@ -147,7 +147,7 @@ public static class ValidadorAmbienteQ
             configuracao.ProductBaseUrl,
             configuracao.ProductMasterBaseUrlEfetiva,
             configuracao.HandlingUnitBaseUrl,
-            configuracao.ProductionVersionBaseUrlEfetiva,
+            // GATE 095F: ProductionVersion removida do readiness do Controle (roteiro agora é V3 direto).
             configuracao.ProductionRoutingBaseUrlEfetiva
         ];
 
