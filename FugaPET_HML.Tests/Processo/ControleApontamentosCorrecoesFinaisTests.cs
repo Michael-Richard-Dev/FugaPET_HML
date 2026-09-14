@@ -844,7 +844,19 @@ public sealed class ControleApontamentosCorrecoesFinaisTests
         public Task<ResultadoConfiguracaoOperacao> ObterConfiguracaoOperacaoAsync(
             string centro, string tipoOrdem, string sequencia, string operacao, string suboperacao,
             string centroTrabalho, CancellationToken cancellationToken = default)
-            => Task.FromResult(new ResultadoConfiguracaoOperacao(
+            => Task.FromResult(RotaPreset());
+
+        // GATE 093D — rota por Plant+WorkCenter + perfil normalizado.
+        public Task<ResultadoConfiguracaoOperacao> ObterConfiguracaoRotaPorWorkCenterAsync(
+            string centro, string centroTrabalho, CancellationToken cancellationToken = default)
+            => Task.FromResult(RotaPreset());
+
+        public Task<ResultadoPerfilResultado> ObterPerfilResultadoAsync(
+            long codigoConfiguracaoRota, int ordemOcorrenciaWorkCenter, CancellationToken cancellationToken = default)
+            => Task.FromResult(new ResultadoPerfilResultado(10, false, 1));
+
+        private static ResultadoConfiguracaoOperacao RotaPreset()
+            => new(
                 new ConfiguracaoOperacaoProcesso
                 {
                     CodigoConfiguracao = 1,
@@ -854,7 +866,7 @@ public sealed class ControleApontamentosCorrecoesFinaisTests
                     Ativo = true
                 },
                 false,
-                1));
+                1);
 
         public Task<IReadOnlyList<ConfiguracaoOperacaoProcesso>> ListarConfiguracoesAtivasAsync(
             string centro, string tipoOrdem, CancellationToken cancellationToken = default)

@@ -12,6 +12,16 @@ public sealed record ResultadoConfiguracaoOperacao(
     int Empatadas);
 
 /// <summary>
+/// GATE 093D — resolução do perfil de resultado normalizado. Fonte exclusiva: operacao_resultado_perfil,
+/// por (codigo_configuracao_rota + ordem_ocorrencia_workcenter). 0 linhas = ausente, 1 = resolvido,
+/// &gt;1 = ambíguo (fail-closed). NUNCA lê operacao_producao_configuracao.codigo_perfil_resultado.
+/// </summary>
+public sealed record ResultadoPerfilResultado(
+    long? CodigoPerfilResultado,
+    bool Ambiguo,
+    int Encontrados);
+
+/// <summary>
 /// Persistência do Controle de Apontamentos. Enquanto o pacote Gaia não for aplicado,
 /// <see cref="EstruturaDisponivelAsync"/> devolve false e a tela opera em modo consulta
 /// (interpreta código, consulta OP, exibe operações) com o início BLOQUEADO.
@@ -38,6 +48,25 @@ public interface IControleApontamentosRepositorio
     Task<IReadOnlyList<ConfiguracaoOperacaoProcesso>> ListarConfiguracoesAtivasAsync(
         string centro,
         string tipoOrdem,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// GATE 093D — rota funcional por Plant + WorkCenter (centro + centro_trabalho), ativo = true.
+    /// Operation/Sequence/SubOperation NÃO participam da decisão da rota. 0 linhas = MapeamentoNaoConfigurado,
+    /// 1 = rota válida, &gt;1 = ambígua (fail-closed). O código do WorkCenter é usado LITERALMENTE (sem transformação).
+    /// </summary>
+    Task<ResultadoConfiguracaoOperacao> ObterConfiguracaoRotaPorWorkCenterAsync(
+        string centro,
+        string centroTrabalho,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// GATE 093D — perfil de resultado normalizado por (codigo_configuracao_rota + ordem_ocorrencia_workcenter),
+    /// exclusivamente de operacao_resultado_perfil. Ausente/ambíguo = fail-closed.
+    /// </summary>
+    Task<ResultadoPerfilResultado> ObterPerfilResultadoAsync(
+        long codigoConfiguracaoRota,
+        int ordemOcorrenciaWorkCenter,
         CancellationToken cancellationToken = default);
 
     /// <summary>Apontamento ATIVO (EM_ANDAMENTO/AGUARDANDO_FINALIZACAO) da operação, ou null.</summary>

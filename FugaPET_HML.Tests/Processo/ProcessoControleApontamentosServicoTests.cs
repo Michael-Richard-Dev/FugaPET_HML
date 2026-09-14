@@ -269,8 +269,10 @@ public sealed class ProcessoControleApontamentosServicoTests
     }
 
     [Fact]
-    public async Task SemExigenciaDeAnterior_NaoBloqueiaMesmoComAnteriorPendente()
+    public async Task AnteriorTecnicoPendente_BloqueiaIndependenteDoFlagExigeOperacaoAnterior()
     {
+        // GATE 093D (WC03): a operação anterior na ordenação técnica é SEMPRE exigida — o flag
+        // ExigeOperacaoAnterior da configuração não a desliga mais (contrato golden restaurado).
         RepositorioFake repo = new()
         {
             Configuracao = ConfigComExigencia(false),
@@ -280,12 +282,14 @@ public sealed class ProcessoControleApontamentosServicoTests
 
         ResultadoLeituraApontamento r = await servico.ProcessarLeituraAsync(CodigoInicio, Usuario, Estacao, SempreConfirma);
 
-        Assert.Equal(CenarioLeituraApontamento.SucessoInicio, r.Cenario);
+        Assert.Equal(CenarioLeituraApontamento.OperacaoAnteriorNaoConcluida, r.Cenario);
+        Assert.Empty(repo.Iniciados);
     }
 
     [Fact]
-    public async Task Operacao0050_NaoExige0040QuandoConfiguracaoNaoExigeAnterior()
+    public async Task Operacao0050_ExigeAnterior0040ConcluidaMesmoSemFlag()
     {
+        // 0040 pendente bloqueia o início de 0050 mesmo com exigeOperacaoAnterior:false (WC03).
         RepositorioFake repo = new()
         {
             Configuracao = ConfiguracaoDestino(
@@ -300,8 +304,8 @@ public sealed class ProcessoControleApontamentosServicoTests
         ResultadoLeituraApontamento r = await servico.ProcessarLeituraAsync(
             CodigoInicio, Usuario, Estacao, SempreConfirma);
 
-        Assert.Equal(CenarioLeituraApontamento.SucessoInicio, r.Cenario);
-        Assert.Equal("0050", Assert.Single(repo.Iniciados).Operacao);
+        Assert.Equal(CenarioLeituraApontamento.OperacaoAnteriorNaoConcluida, r.Cenario);
+        Assert.Empty(repo.Iniciados);
     }
 
     [Fact]
@@ -889,6 +893,138 @@ public sealed class ProcessoControleApontamentosServicoTests
 
     private static bool NuncaConfirma(ConfirmacaoApontamento c) => false;
 
+    // =========================== GATE 093D — perfil normalizado + snapshot + recovery ===========================
+
+    [Fact]
+    public async Task ResultadoApontamento_PerfilAusente_FailClosed_NaoCriaApontamento()
+    {
+        RepositorioFake repo = new()
+        {
+            Configuracao = ConfiguracaoDestino("0050", TipoProcessoOperacao.ResultadoApontamento),
+            PerfilResultado = new ResultadoPerfilResultado(null, false, 0),
+            ApontamentosOrdem = []
+        };
+        ProcessoControleApontamentosServico servico = Criar(new SapFake(OrdemComOperacoes("0050")), repo);
+
+        ResultadoLeituraApontamento r = await servico.ProcessarLeituraAsync(CodigoInicio, Usuario, Estacao, SempreConfirma);
+
+        Assert.Equal(CenarioLeituraApontamento.MapeamentoNaoConfigurado, r.Cenario);
+        Assert.Empty(repo.Iniciados);
+    }
+
+    [Fact]
+    public async Task ResultadoApontamento_PerfilAmbiguo_FailClosed_NaoCriaApontamento()
+    {
+        RepositorioFake repo = new()
+        {
+            Configuracao = ConfiguracaoDestino("0050", TipoProcessoOperacao.ResultadoApontamento),
+            PerfilResultado = new ResultadoPerfilResultado(null, true, 2),
+            ApontamentosOrdem = []
+        };
+        ProcessoControleApontamentosServico servico = Criar(new SapFake(OrdemComOperacoes("0050")), repo);
+
+        ResultadoLeituraApontamento r = await servico.ProcessarLeituraAsync(CodigoInicio, Usuario, Estacao, SempreConfirma);
+
+        Assert.Equal(CenarioLeituraApontamento.MapeamentoNaoConfigurado, r.Cenario);
+        Assert.Empty(repo.Iniciados);
+    }
+
+    [Fact]
+    public async Task ResultadoApontamento_PerfilResolvido_PersisteSnapshotNoApontamentoENoContexto()
+    {
+        RepositorioFake repo = new()
+        {
+            Configuracao = ConfiguracaoDestino("0050", TipoProcessoOperacao.ResultadoApontamento),
+            PerfilResultado = new ResultadoPerfilResultado(77, false, 1),
+            ApontamentosOrdem = []
+        };
+        ProcessoControleApontamentosServico servico = Criar(new SapFake(OrdemComOperacoes("0050")), repo);
+
+        ResultadoLeituraApontamento r = await servico.ProcessarLeituraAsync(CodigoInicio, Usuario, Estacao, SempreConfirma);
+
+        Assert.Equal(CenarioLeituraApontamento.SucessoInicio, r.Cenario);
+        Assert.Equal(77, Assert.Single(repo.Iniciados).CodigoPerfilResultado);   // snapshot persistido (INSERT)
+        Assert.Equal(77, r.Contexto!.CodigoPerfilResultado);                     // carregado no contexto
+    }
+
+    [Fact]
+    public async Task Consumo_NaoResolvePerfil_IniciaComSnapshotNulo()
+    {
+        // Só RESULTADO_APONTAMENTO resolve perfil; Consumo não depende de codigo_perfil_resultado.
+        RepositorioFake repo = new()
+        {
+            Configuracao = ConfiguracaoDestino("0050", TipoProcessoOperacao.ConsumoMateriaPrima),
+            PerfilResultado = new ResultadoPerfilResultado(999, false, 1), // não deve ser usado
+            ApontamentosOrdem = []
+        };
+        ProcessoControleApontamentosServico servico = Criar(new SapFake(OrdemComOperacoes("0050")), repo);
+
+        ResultadoLeituraApontamento r = await servico.ProcessarLeituraAsync(CodigoInicio, Usuario, Estacao, SempreConfirma);
+
+        Assert.Equal(CenarioLeituraApontamento.SucessoInicio, r.Cenario);
+        Assert.Null(Assert.Single(repo.Iniciados).CodigoPerfilResultado);
+    }
+
+    [Fact]
+    public async Task Retomada_ResultadoApontamento_ReidrataPerfilNormalizado()
+    {
+        OperacaoProducaoApontamento ativo = AtivoResultadoApontamento(codigoPerfilPersistido: null);
+        RepositorioFake repo = new()
+        {
+            Configuracao = ConfiguracaoDestino("0050", TipoProcessoOperacao.ResultadoApontamento),
+            PerfilResultado = new ResultadoPerfilResultado(55, false, 1),
+            AtivoPorOperacao = ativo,
+            ApontamentosOrdem = [ativo]
+        };
+        ProcessoControleApontamentosServico servico = Criar(new SapFake(OrdemComOperacoes("0050")), repo);
+
+        ResultadoLeituraApontamento r = await servico.ProcessarLeituraAsync(CodigoInicio, Usuario, Estacao, SempreConfirma);
+
+        Assert.Equal(CenarioLeituraApontamento.RetomadaDisponivel, r.Cenario);
+        Assert.Equal(55, r.Contexto!.CodigoPerfilResultado);   // reidratado da fonte normalizada
+        Assert.Empty(repo.Iniciados);                          // recovery NÃO cria novo apontamento
+    }
+
+    [Fact]
+    public async Task Retomada_ResultadoApontamento_SnapshotDivergente_FailClosed()
+    {
+        // Snapshot histórico (55) diverge do perfil re-resolvido (99) => fail-closed, sem trocar silenciosamente.
+        OperacaoProducaoApontamento ativo = AtivoResultadoApontamento(codigoPerfilPersistido: 55);
+        RepositorioFake repo = new()
+        {
+            Configuracao = ConfiguracaoDestino("0050", TipoProcessoOperacao.ResultadoApontamento),
+            PerfilResultado = new ResultadoPerfilResultado(99, false, 1),
+            AtivoPorOperacao = ativo,
+            ApontamentosOrdem = [ativo]
+        };
+        ProcessoControleApontamentosServico servico = Criar(new SapFake(OrdemComOperacoes("0050")), repo);
+
+        ResultadoLeituraApontamento r = await servico.ProcessarLeituraAsync(CodigoInicio, Usuario, Estacao, SempreConfirma);
+
+        Assert.Equal(CenarioLeituraApontamento.MapeamentoNaoConfigurado, r.Cenario);
+        Assert.Empty(repo.Iniciados);
+    }
+
+    private static OperacaoProducaoApontamento AtivoResultadoApontamento(long? codigoPerfilPersistido)
+        => new()
+        {
+            CodigoApontamento = 42,
+            NumeroOrdem = "1001710",
+            Sequencia = "000000",
+            Operacao = "0050",
+            Suboperacao = string.Empty,
+            UsuarioInicio = Usuario,
+            EstacaoInicio = "EST-ORIGINAL",
+            IniciadoEm = RepositorioFake.HorarioBanco,
+            Status = StatusApontamentoOperacao.EmAndamento,
+            CodigoBarrasInicio = CodigoInicio,
+            TipoProcesso = TipoProcessoOperacao.ResultadoApontamento,
+            TelaDestino = "ProcessoResultadoApontamentoForm",
+            CentroTrabalho = "CT01",
+            CodigoPerfilResultado = codigoPerfilPersistido,
+            CorrelationId = "corr"
+        };
+
     private static ResultadoConfiguracaoOperacao ConfiguracaoDestino(
         string operacao,
         string tipoProcesso,
@@ -1052,6 +1188,20 @@ public sealed class ProcessoControleApontamentosServicoTests
             CentroTrabalhoConsultado = centroTrabalho;
             return Task.FromResult(Configuracao);
         }
+
+        // GATE 093D — rota por Plant+WorkCenter (a decisão de rota é delegada ao preset Configuracao).
+        public ResultadoPerfilResultado PerfilResultado { get; init; } = new(10, false, 1);
+
+        public Task<ResultadoConfiguracaoOperacao> ObterConfiguracaoRotaPorWorkCenterAsync(
+            string centro, string centroTrabalho, CancellationToken cancellationToken = default)
+        {
+            CentroTrabalhoConsultado = centroTrabalho;
+            return Task.FromResult(Configuracao);
+        }
+
+        public Task<ResultadoPerfilResultado> ObterPerfilResultadoAsync(
+            long codigoConfiguracaoRota, int ordemOcorrenciaWorkCenter, CancellationToken cancellationToken = default)
+            => Task.FromResult(PerfilResultado);
 
         public Task<IReadOnlyList<ConfiguracaoOperacaoProcesso>> ListarConfiguracoesAtivasAsync(
             string centro, string tipoOrdem, CancellationToken cancellationToken = default)

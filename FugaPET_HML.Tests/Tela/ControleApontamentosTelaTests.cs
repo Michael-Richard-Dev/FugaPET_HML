@@ -196,7 +196,9 @@ public sealed class ControleApontamentosTelaTests
         Assert.Contains("TipoProcessoOperacao.ConsumoQuimicos =>", form, StringComparison.Ordinal);
         Assert.DoesNotContain("Descricao.Contains", form, StringComparison.Ordinal);
         Assert.DoesNotContain("Descricao.Contains", servico, StringComparison.Ordinal);
-        Assert.Contains("ObterConfiguracaoOperacaoAsync", servico, StringComparison.Ordinal);
+        // GATE 093D: a rota funcional é resolvida por Plant + WorkCenter (dado da configuração), nunca por
+        // texto/descrição da operação nem pela operação como chave primária.
+        Assert.Contains("ObterConfiguracaoRotaPorWorkCenterAsync", servico, StringComparison.Ordinal);
     }
 
     [Fact]

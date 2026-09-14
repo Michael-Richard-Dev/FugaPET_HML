@@ -24,7 +24,8 @@ public sealed class ControleApontamentosRepositorio : RepositorioBase, IControle
         usuario_inicio, estacao_inicio, iniciado_em, codigo_barras_inicio,
         usuario_termino, estacao_termino, terminado_em, codigo_barras_termino,
         correlation_id, idempotency_key,
-        resultado_operacional, codigo_registro_processo, concluido_operacional_em, mensagem_resultado_operacional
+        resultado_operacional, codigo_registro_processo, concluido_operacional_em, mensagem_resultado_operacional,
+        codigo_perfil_resultado
         """;
 
     public ControleApontamentosRepositorio(IFabricaConexaoBanco fabricaConexaoBanco)
@@ -132,6 +133,83 @@ public sealed class ControleApontamentosRepositorio : RepositorioBase, IControle
         }
 
         return configuracoes;
+    }
+
+    // GATE 093D — rota funcional por Plant + WorkCenter (centro + centro_trabalho). Operation/Sequence NÃO
+    // participam da decisão da rota; o WorkCenter é usado LITERALMENTE (sem transformação). 0 = não configurado,
+    // 1 = rota, >1 = ambígua (fail-closed).
+    public async Task<ResultadoConfiguracaoOperacao> ObterConfiguracaoRotaPorWorkCenterAsync(
+        string centro,
+        string centroTrabalho,
+        CancellationToken cancellationToken = default)
+    {
+        const string sql = """
+            SELECT codigo_configuracao, centro, tipo_ordem, sequencia_sap, operacao_sap, suboperacao_sap,
+                   centro_trabalho, tipo_processo, tela_destino, exige_operacao_anterior, ativo
+              FROM operacao_producao_configuracao
+             WHERE ativo = true
+               AND centro = @centro
+               AND centro_trabalho = @centro_trabalho
+             ORDER BY codigo_configuracao;
+            """;
+
+        List<ConfiguracaoOperacaoProcesso> candidatas = [];
+        await using NpgsqlConnection conexao = await CriarConexaoAbertaAsync(cancellationToken);
+        await using NpgsqlCommand comando = new(sql, conexao);
+        comando.Parameters.Add(ParametroTexto("@centro", centro));
+        comando.Parameters.Add(ParametroTexto("@centro_trabalho", centroTrabalho));
+        await using (NpgsqlDataReader leitor = await comando.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await leitor.ReadAsync(cancellationToken))
+            {
+                candidatas.Add(LerConfiguracao(leitor));
+            }
+        }
+
+        return candidatas.Count switch
+        {
+            0 => new ResultadoConfiguracaoOperacao(null, false, 0),
+            1 => new ResultadoConfiguracaoOperacao(candidatas[0], false, 1),
+            _ => new ResultadoConfiguracaoOperacao(null, true, candidatas.Count)
+        };
+    }
+
+    // GATE 093D — perfil de resultado normalizado, exclusivamente de operacao_resultado_perfil, por
+    // (codigo_configuracao_rota + ordem_ocorrencia_workcenter). NUNCA lê
+    // operacao_producao_configuracao.codigo_perfil_resultado. 0 = ausente, 1 = resolvido, >1 = ambíguo.
+    public async Task<ResultadoPerfilResultado> ObterPerfilResultadoAsync(
+        long codigoConfiguracaoRota,
+        int ordemOcorrenciaWorkCenter,
+        CancellationToken cancellationToken = default)
+    {
+        const string sql = """
+            SELECT codigo_perfil_resultado
+              FROM operacao_resultado_perfil
+             WHERE ativo = true
+               AND codigo_configuracao_rota = @codigo_configuracao_rota
+               AND ordem_ocorrencia_workcenter = @ordem_ocorrencia_workcenter
+             ORDER BY codigo_perfil_resultado;
+            """;
+
+        List<long> perfis = [];
+        await using NpgsqlConnection conexao = await CriarConexaoAbertaAsync(cancellationToken);
+        await using NpgsqlCommand comando = new(sql, conexao);
+        comando.Parameters.Add(ParametroLongo("@codigo_configuracao_rota", codigoConfiguracaoRota));
+        comando.Parameters.Add(ParametroInteiro("@ordem_ocorrencia_workcenter", ordemOcorrenciaWorkCenter));
+        await using (NpgsqlDataReader leitor = await comando.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await leitor.ReadAsync(cancellationToken))
+            {
+                perfis.Add(leitor.GetInt64(0));
+            }
+        }
+
+        return perfis.Count switch
+        {
+            0 => new ResultadoPerfilResultado(null, false, 0),
+            1 => new ResultadoPerfilResultado(perfis[0], false, 1),
+            _ => new ResultadoPerfilResultado(null, true, perfis.Count)
+        };
     }
 
     private static ConfiguracaoOperacaoProcesso LerConfiguracao(NpgsqlDataReader leitor)
@@ -267,7 +345,9 @@ public sealed class ControleApontamentosRepositorio : RepositorioBase, IControle
             ResultadoOperacional = TextoOuVazio(leitor, 22),
             CodigoRegistroProcesso = leitor.IsDBNull(23) ? null : leitor.GetInt64(23),
             ConcluidoOperacionalEm = leitor.IsDBNull(24) ? null : leitor.GetFieldValue<DateTimeOffset>(24),
-            MensagemResultadoOperacional = TextoOuVazio(leitor, 25)
+            MensagemResultadoOperacional = TextoOuVazio(leitor, 25),
+            // GATE 093D: snapshot do perfil de resultado (054). Null quando não aplicável/legado pré-054.
+            CodigoPerfilResultado = leitor.IsDBNull(26) ? null : leitor.GetInt64(26)
         };
 
     private static string TextoOuVazio(NpgsqlDataReader leitor, int indice)
@@ -307,12 +387,12 @@ public sealed class ControleApontamentosRepositorio : RepositorioBase, IControle
                     INSERT INTO operacao_producao_apontamento
                     (
                         numero_ordem, item_ordem, produto, sequencia, operacao, suboperacao, descricao_operacao,
-                        centro_trabalho, tipo_processo, tela_destino, status, usuario_inicio, estacao_inicio,
+                        centro_trabalho, tipo_processo, tela_destino, codigo_perfil_resultado, status, usuario_inicio, estacao_inicio,
                         iniciado_em, codigo_barras_inicio, correlation_id, idempotency_key, criado_em, atualizado_em
                     )
                     SELECT
                         @numero_ordem, @item_ordem, @produto, @sequencia, @operacao, @suboperacao, @descricao_operacao,
-                        @centro_trabalho, @tipo_processo, @tela_destino, 'EM_ANDAMENTO', @usuario_inicio, @estacao_inicio,
+                        @centro_trabalho, @tipo_processo, @tela_destino, @codigo_perfil_resultado, 'EM_ANDAMENTO', @usuario_inicio, @estacao_inicio,
                         now(), @codigo_barras_inicio, @correlation_id, @idempotency_key, now(), now()
                     WHERE NOT EXISTS (
                         SELECT 1 FROM operacao_producao_apontamento
@@ -337,6 +417,7 @@ public sealed class ControleApontamentosRepositorio : RepositorioBase, IControle
                 comando.Parameters.Add(ParametroTexto("@centro_trabalho", apontamento.CentroTrabalho));
                 comando.Parameters.Add(ParametroTexto("@tipo_processo", apontamento.TipoProcesso));
                 comando.Parameters.Add(ParametroTexto("@tela_destino", apontamento.TelaDestino));
+                comando.Parameters.Add(ParametroLongoNulo("@codigo_perfil_resultado", apontamento.CodigoPerfilResultado));
                 comando.Parameters.Add(ParametroTexto("@usuario_inicio", apontamento.UsuarioInicio));
                 comando.Parameters.Add(ParametroTexto("@estacao_inicio", apontamento.EstacaoInicio));
                 comando.Parameters.Add(ParametroTexto("@codigo_barras_inicio", apontamento.CodigoBarrasInicio));

@@ -236,10 +236,11 @@ public sealed class ProcessoControleApontamentosServico
                 apontamentosOrdem, configuracoesOrdem, operacao);
         }
 
-        // ---- Destino: SEMPRE por configuração ----
-        ResultadoConfiguracaoOperacao resultadoConfig = await repositorio.ObterConfiguracaoOperacaoAsync(
-            ordemSap.Centro, ordemSap.TipoOrdem, operacao.Sequencia, operacao.Operacao,
-            operacao.Suboperacao, operacao.CentroTrabalho, cancellationToken);
+        // ---- Destino: SEMPRE por rota Plant + WorkCenter (GATE 093D) ----
+        // Operation/Sequence/SubOperation NÃO participam da decisão da rota; o WorkCenter é usado literalmente.
+        string plantRota = string.IsNullOrWhiteSpace(operacao.Centro) ? ordemSap.Centro : operacao.Centro;
+        ResultadoConfiguracaoOperacao resultadoConfig =
+            await repositorio.ObterConfiguracaoRotaPorWorkCenterAsync(plantRota, operacao.CentroTrabalho, cancellationToken);
 
         if (resultadoConfig.Ambigua)
         {
@@ -272,21 +273,50 @@ public sealed class ProcessoControleApontamentosServico
                 apontamentosOrdem, configuracoesOrdem, operacao);
         }
 
-        // ---- Sequência: a operação anterior obrigatória precisa estar CONCLUIDA ----
-        if (configuracao.ExigeOperacaoAnterior)
+        // ---- Sequência: a operação anterior (ordenação técnica) precisa estar CONCLUIDA (GATE 093D: WC03) ----
+        OperacaoOrdemProducaoSap? anterior = ObterOperacaoAnterior(ordemSap, operacao);
+        if (anterior is not null && !OperacaoConcluida(apontamentosOrdem, anterior))
         {
-            OperacaoOrdemProducaoSap? anterior = ObterOperacaoAnterior(ordemSap, operacao);
-            if (anterior is not null && !OperacaoConcluida(apontamentosOrdem, anterior))
+            string mensagem =
+                $"A operação {anterior.Operacao} (sequência {DescreverSequencia(anterior)}) precisa estar "
+                + $"concluída antes de iniciar a operação {operacao.Operacao}.";
+            await AuditarAsync(codigo, usuario, estacao, "SEQUENCIA_BLOQUEADA", mensagem, cancellationToken);
+            return ComEstado(
+                ResultadoLeituraApontamento.Falha(
+                    CenarioLeituraApontamento.OperacaoAnteriorNaoConcluida, mensagem, codigo, ordemSap),
+                apontamentosOrdem, configuracoesOrdem, operacao);
+        }
+
+        // ---- Ocorrência do WorkCenter (chave do perfil por rota + ocorrência) ----
+        int ordemOcorrenciaWorkCenter = CalcularOrdemOcorrenciaWorkCenter(ordemSap, operacao);
+        if (ordemOcorrenciaWorkCenter <= 0)
+        {
+            const string mensagem = "Não foi possível calcular a ocorrência da operação neste WorkCenter.";
+            await AuditarAsync(codigo, usuario, estacao, "ORDEM_WORKCENTER_NAO_RESOLVIDA", mensagem, cancellationToken);
+            return ComEstado(
+                ResultadoLeituraApontamento.Falha(
+                    CenarioLeituraApontamento.ContratoRoteiroNaoResolvido, mensagem, codigo, ordemSap),
+                apontamentosOrdem, configuracoesOrdem, operacao);
+        }
+
+        // ---- Perfil de resultado (somente RESULTADO_APONTAMENTO): normalizado por rota + ocorrência, fail-closed ----
+        long? codigoPerfilResultado = null;
+        if (string.Equals(configuracao.TipoProcesso, TipoProcessoOperacao.ResultadoApontamento, StringComparison.Ordinal))
+        {
+            ResultadoPerfilResultado perfil = await repositorio.ObterPerfilResultadoAsync(
+                configuracao.CodigoConfiguracao, ordemOcorrenciaWorkCenter, cancellationToken);
+            if (perfil.Ambiguo || !perfil.CodigoPerfilResultado.HasValue)
             {
-                string mensagem =
-                    $"A operação {anterior.Operacao} (sequência {DescreverSequencia(anterior)}) precisa estar "
-                    + $"concluída antes de iniciar a operação {operacao.Operacao}.";
-                await AuditarAsync(codigo, usuario, estacao, "SEQUENCIA_BLOQUEADA", mensagem, cancellationToken);
+                string mensagem = perfil.Ambiguo
+                    ? $"Há {perfil.Encontrados} perfis de resultado ativos para esta rota/ocorrência de WorkCenter."
+                    : "Não há perfil de resultado ativo para esta rota/ocorrência de WorkCenter.";
+                await AuditarAsync(codigo, usuario, estacao, "PERFIL_RESULTADO_NAO_RESOLVIDO", mensagem, cancellationToken);
                 return ComEstado(
                     ResultadoLeituraApontamento.Falha(
-                        CenarioLeituraApontamento.OperacaoAnteriorNaoConcluida, mensagem, codigo, ordemSap),
+                        CenarioLeituraApontamento.MapeamentoNaoConfigurado, mensagem, codigo, ordemSap),
                     apontamentosOrdem, configuracoesOrdem, operacao);
             }
+            codigoPerfilResultado = perfil.CodigoPerfilResultado;
         }
 
         ItemOrdemProducaoSap? item = ordemSap.Itens.FirstOrDefault();
@@ -302,6 +332,7 @@ public sealed class ProcessoControleApontamentosServico
             CentroTrabalho = operacao.CentroTrabalho,
             TipoProcesso = configuracao.TipoProcesso,
             TelaDestino = configuracao.TelaDestino,
+            CodigoPerfilResultado = codigoPerfilResultado,
             UsuarioInicio = usuario,
             EstacaoInicio = estacao,
             CodigoBarrasInicio = codigo.CodigoOriginal,
@@ -332,6 +363,9 @@ public sealed class ProcessoControleApontamentosServico
                 apontamentosOrdem, configuracoesOrdem, operacao);
         }
 
+        // Snapshot do perfil também no objeto em memória (o RETURNING já traz a coluna; garante consistência).
+        criado.CodigoPerfilResultado = codigoPerfilResultado;
+
         // Recarrega o estado da OP já com o apontamento criado (grid a partir do persistido).
         apontamentosOrdem = await repositorio.ListarApontamentosDaOrdemAsync(ordemSap.NumeroOrdem, cancellationToken);
 
@@ -344,7 +378,7 @@ public sealed class ProcessoControleApontamentosServico
             Operacao = operacao,
             Configuracao = configuracao,
             Apontamento = criado,
-            Contexto = MontarContexto(criado, configuracao.TipoProcesso, configuracao.CodigoPerfilResultado),
+            Contexto = MontarContexto(criado, configuracao.TipoProcesso),
             ApontamentosDaOrdem = apontamentosOrdem,
             ConfiguracoesDaOrdem = configuracoesOrdem
         };
@@ -407,6 +441,16 @@ public sealed class ProcessoControleApontamentosServico
                 apontamentosOrdem, configuracoesOrdem, operacao);
         }
 
+        // GATE 093D — RESULTADO_APONTAMENTO: reidrata rota/ocorrência/perfil e valida consistência do
+        // WorkCenter persistido ANTES de reabrir. Fail-closed em divergência; não cria novo apontamento.
+        ResultadoLeituraApontamento? reidratacao = await ReidratarContextoResultadoApontamentoRetomadaAsync(
+            repositorio, codigo, ordem, operacao, ativo, usuario, estacao,
+            apontamentosOrdem, configuracoesOrdem, cancellationToken);
+        if (reidratacao is not null)
+        {
+            return reidratacao;
+        }
+
         // RETOMADA do mesmo usuário: reabre a MESMA tela com os dados PERSISTIDOS.
         if (!confirmar(ConfirmacaoApontamento.ParaRetomada(codigo, ordem, operacao, ativo)))
         {
@@ -438,6 +482,119 @@ public sealed class ProcessoControleApontamentosServico
             ApontamentosDaOrdem = apontamentosOrdem,
             ConfiguracoesDaOrdem = configuracoesOrdem
         };
+    }
+
+    /// <summary>
+    /// GATE 093D — retomada de RESULTADO_APONTAMENTO: re-resolve Plant/WorkCenter, valida o WorkCenter
+    /// persistido, re-resolve a rota, recalcula a ocorrência e re-resolve o perfil normalizado, gravando o
+    /// snapshot no apontamento ativo. Retorna FALHA (fail-closed) em qualquer divergência; retorna null
+    /// quando não se aplica ou quando reidratou com sucesso. NÃO cria novo apontamento/resultado/item/vínculo.
+    /// ZERO SAP (LOCAL_ONLY).
+    /// </summary>
+    private async Task<ResultadoLeituraApontamento?> ReidratarContextoResultadoApontamentoRetomadaAsync(
+        IControleApontamentosRepositorio repositorio,
+        CodigoBarrasOperacao codigo,
+        OrdemProducaoSap ordem,
+        OperacaoOrdemProducaoSap operacao,
+        OperacaoProducaoApontamento ativo,
+        string usuario,
+        string estacao,
+        IReadOnlyList<OperacaoProducaoApontamento> apontamentosOrdem,
+        IReadOnlyList<ConfiguracaoOperacaoProcesso> configuracoesOrdem,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(ativo.TipoProcesso, TipoProcessoOperacao.ResultadoApontamento, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        string plantRota = string.IsNullOrWhiteSpace(operacao.Centro) ? ordem.Centro : operacao.Centro;
+        if (string.IsNullOrWhiteSpace(plantRota) || string.IsNullOrWhiteSpace(operacao.CentroTrabalho))
+        {
+            const string mensagem =
+                "Não foi possível resolver Plant/WorkCenter para retomar o resultado de apontamento.";
+            await AuditarAsync(codigo, usuario, estacao, "ROTA_WORKCENTER_NAO_RESOLVIDA", mensagem, cancellationToken);
+            return ComEstado(ResultadoLeituraApontamento.Falha(
+                CenarioLeituraApontamento.ContratoRoteiroNaoResolvido, mensagem, codigo, ordem),
+                apontamentosOrdem, configuracoesOrdem, operacao);
+        }
+
+        // WorkCenter persistido deve bater com o WorkCenter atual da operação.
+        if (!string.IsNullOrWhiteSpace(ativo.CentroTrabalho)
+            && !string.Equals(NormalizarChave(ativo.CentroTrabalho), NormalizarChave(operacao.CentroTrabalho),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            string mensagem =
+                $"WorkCenter persistido do apontamento diverge do WorkCenter atual da operação {operacao.Operacao}.";
+            await AuditarAsync(codigo, usuario, estacao, "ROTA_WORKCENTER_INCONSISTENTE", mensagem, cancellationToken);
+            return ComEstado(ResultadoLeituraApontamento.Falha(
+                CenarioLeituraApontamento.ContratoRoteiroNaoResolvido, mensagem, codigo, ordem),
+                apontamentosOrdem, configuracoesOrdem, operacao);
+        }
+
+        ResultadoConfiguracaoOperacao resultadoConfig =
+            await repositorio.ObterConfiguracaoRotaPorWorkCenterAsync(plantRota, operacao.CentroTrabalho, cancellationToken);
+        if (resultadoConfig.Ambigua)
+        {
+            string mensagem =
+                $"Há {resultadoConfig.Empatadas} configurações de mesma especificidade para retomar a operação "
+                + $"{operacao.Operacao}. Ajuste o cadastro para que apenas uma se aplique.";
+            await AuditarAsync(codigo, usuario, estacao, "CONFIGURACAO_AMBIGUA", mensagem, cancellationToken);
+            return ComEstado(ResultadoLeituraApontamento.Falha(
+                CenarioLeituraApontamento.ConfiguracaoAmbigua, mensagem, codigo, ordem),
+                apontamentosOrdem, configuracoesOrdem, operacao);
+        }
+
+        ConfiguracaoOperacaoProcesso? configuracao = resultadoConfig.Configuracao;
+        if (configuracao is null
+            || configuracao.TipoProcesso == TipoProcessoOperacao.SemDestinoConfigurado
+            || !string.Equals(configuracao.TipoProcesso, ativo.TipoProcesso, StringComparison.Ordinal))
+        {
+            string mensagem =
+                $"A rota Plant/WorkCenter da operação {operacao.Operacao} não resolve o destino persistido do apontamento.";
+            await AuditarAsync(codigo, usuario, estacao, "MAPEAMENTO_RETOMADA_INCONSISTENTE", mensagem, cancellationToken);
+            return ComEstado(ResultadoLeituraApontamento.Falha(
+                CenarioLeituraApontamento.MapeamentoNaoConfigurado, mensagem, codigo, ordem),
+                apontamentosOrdem, configuracoesOrdem, operacao);
+        }
+
+        int ordemOcorrenciaWorkCenter = CalcularOrdemOcorrenciaWorkCenter(ordem, operacao);
+        if (ordemOcorrenciaWorkCenter <= 0)
+        {
+            const string mensagem = "Não foi possível calcular a ocorrência da operação neste WorkCenter.";
+            await AuditarAsync(codigo, usuario, estacao, "ORDEM_WORKCENTER_NAO_RESOLVIDA", mensagem, cancellationToken);
+            return ComEstado(ResultadoLeituraApontamento.Falha(
+                CenarioLeituraApontamento.ContratoRoteiroNaoResolvido, mensagem, codigo, ordem),
+                apontamentosOrdem, configuracoesOrdem, operacao);
+        }
+
+        ResultadoPerfilResultado perfil = await repositorio.ObterPerfilResultadoAsync(
+            configuracao.CodigoConfiguracao, ordemOcorrenciaWorkCenter, cancellationToken);
+        if (perfil.Ambiguo || !perfil.CodigoPerfilResultado.HasValue)
+        {
+            string mensagem = perfil.Ambiguo
+                ? $"Há {perfil.Encontrados} perfis de resultado ativos para esta rota/ocorrência de WorkCenter."
+                : "Não há perfil de resultado ativo para esta rota/ocorrência de WorkCenter.";
+            await AuditarAsync(codigo, usuario, estacao, "PERFIL_RESULTADO_NAO_RESOLVIDO", mensagem, cancellationToken);
+            return ComEstado(ResultadoLeituraApontamento.Falha(
+                CenarioLeituraApontamento.MapeamentoNaoConfigurado, mensagem, codigo, ordem),
+                apontamentosOrdem, configuracoesOrdem, operacao);
+        }
+
+        // §12 — snapshot histórico divergente do perfil re-resolvido = FAIL_CLOSED (não troca silenciosamente).
+        // Snapshot NULL (legado pré-054) apenas reidrata, conforme comportamento golden.
+        if (ativo.CodigoPerfilResultado.HasValue
+            && ativo.CodigoPerfilResultado.Value != perfil.CodigoPerfilResultado.Value)
+        {
+            const string mensagem = "O perfil de resultado atual diverge do perfil registrado neste apontamento.";
+            await AuditarAsync(codigo, usuario, estacao, "PERFIL_RESULTADO_DIVERGENTE", mensagem, cancellationToken);
+            return ComEstado(ResultadoLeituraApontamento.Falha(
+                CenarioLeituraApontamento.MapeamentoNaoConfigurado, mensagem, codigo, ordem),
+                apontamentosOrdem, configuracoesOrdem, operacao);
+        }
+
+        ativo.CodigoPerfilResultado = perfil.CodigoPerfilResultado;
+        return null;
     }
 
     // =========================== TÉRMINO ===========================
@@ -654,6 +811,43 @@ public sealed class ProcessoControleApontamentosServico
             .ThenBy(o => o.OrderOperationInternalId, ComparadorCampoSap.Instancia)
             .ToList();
 
+    /// <summary>
+    /// GATE 093D — ordinal 1-based da OCORRÊNCIA da operação dentro do MESMO Plant+WorkCenter, na ordenação
+    /// técnica global da OP. Desambigua o MESMO WorkCenter repetido na rota (1ª ocorrência=1, 2ª=2, ...).
+    /// Comparação apenas por Trim/case (NUNCA transforma o código do WorkCenter). 0 quando Plant/WC vazios
+    /// ou a operação não é localizada.
+    /// </summary>
+    internal static int CalcularOrdemOcorrenciaWorkCenter(OrdemProducaoSap ordem, OperacaoOrdemProducaoSap atual)
+    {
+        string plantAlvo = NormalizarChave(string.IsNullOrWhiteSpace(atual.Centro) ? ordem.Centro : atual.Centro);
+        string wcAlvo = NormalizarChave(atual.CentroTrabalho);
+        if (string.IsNullOrWhiteSpace(plantAlvo) || string.IsNullOrWhiteSpace(wcAlvo))
+        {
+            return 0;
+        }
+
+        int ocorrencia = 0;
+        foreach (OperacaoOrdemProducaoSap op in OrdenarTecnicamente(ordem))
+        {
+            string plant = NormalizarChave(string.IsNullOrWhiteSpace(op.Centro) ? ordem.Centro : op.Centro);
+            string wc = NormalizarChave(op.CentroTrabalho);
+            if (string.Equals(plant, plantAlvo, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(wc, wcAlvo, StringComparison.OrdinalIgnoreCase))
+            {
+                ocorrencia++;
+            }
+
+            if (MesmaOperacao(op, atual))
+            {
+                return ocorrencia;
+            }
+        }
+
+        return 0;
+    }
+
+    private static string NormalizarChave(string? valor) => (valor ?? string.Empty).Trim();
+
     /// <summary>Operação imediatamente anterior na ordenação técnica; null quando é a primeira.</summary>
     internal static OperacaoOrdemProducaoSap? ObterOperacaoAnterior(
         OrdemProducaoSap ordem, OperacaoOrdemProducaoSap atual)
@@ -806,8 +1000,10 @@ public sealed class ProcessoControleApontamentosServico
         }
     }
 
+    // GATE 093D: o Contexto carrega o SNAPSHOT do perfil já persistido/reidratado no apontamento
+    // (apontamento.CodigoPerfilResultado) — nunca a coluna legada da configuração.
     private static ContextoApontamentoProcesso MontarContexto(
-        OperacaoProducaoApontamento apontamento, string tipoProcesso, long? codigoPerfilResultado = null)
+        OperacaoProducaoApontamento apontamento, string tipoProcesso)
         => new()
         {
             CodigoApontamento = apontamento.CodigoApontamento,
@@ -824,7 +1020,7 @@ public sealed class ProcessoControleApontamentosServico
             Estacao = apontamento.EstacaoInicio,
             IniciadoEm = apontamento.IniciadoEm?.LocalDateTime ?? DateTime.Now,
             CodigoBarrasInicio = apontamento.CodigoBarrasInicio,
-            CodigoPerfilResultado = codigoPerfilResultado
+            CodigoPerfilResultado = apontamento.CodigoPerfilResultado
         };
 
     private static ResultadoLeituraApontamento ComEstado(

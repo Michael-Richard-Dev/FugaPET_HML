@@ -31,7 +31,7 @@
          preservados fisicamente, fora da compilacao ativa do snapshot Q atual. -->
     <Compile Remove="Processo\ConsumoRecuperacaoLancamentoCode05Tests.cs" />
     <Compile Remove="IntegracaoSap\ProductionRoutingPpFormFixTests.cs" />
-    <Compile Remove="Processo\ControleApontamentosWorkCenterCode05Tests.cs" />
+    <!-- GATE 093D: reabilitado após implementar routing por WorkCenter + perfil normalizado no runtime produtivo. -->
     <Compile Remove="Processo\OutOfSnapshot\ControleApontamentosResultadoSemiAcabadoOutOfSnapshotTests.cs" />
   </ItemGroup>
 </Project>
