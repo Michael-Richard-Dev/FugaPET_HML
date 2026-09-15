@@ -67,7 +67,7 @@ public static class FiltroItensEntradaMaterial
                 + $"Pedido: {pedido}\r\n"
                 + $"Itens encontrados: {totalItens}\r\n"
                 + "Itens de mercadoria encontrados: 0\r\n\r\n"
-                + "Verifique o tipo do material no SAP (esperado ROH ou HIBE).";
+                + "Verifique o tipo do material no SAP (esperado ROH, HIBE, VERP ou HALB).";
         }
 
         bool quimico = modo == ModoEntradaMaterial.Quimico;

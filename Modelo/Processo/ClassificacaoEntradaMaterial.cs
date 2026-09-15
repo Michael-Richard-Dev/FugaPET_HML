@@ -60,15 +60,17 @@ public static class ClassificadorItemEntradaMaterial
 
     /// <summary>
     /// True quando a classificação do item corresponde ao modo atual da tela de Entrada.
-    /// GATE 073: RecebimentoMercadoria aceita MatériaPrima (ROH) OU Químico (HIBE) — nunca
-    /// Embalagem/ProdutoAcabado/Semiacabado/Outro e nunca Indefinido (fail-closed preservado).
+    /// GATE 097A: RecebimentoMercadoria aceita somente ROH, HIBE, VERP e HALB.
+    /// ProdutoAcabado/Outro/Indefinido permanecem fail-closed.
     /// </summary>
     public static bool ItemPertenceAoModo(ClassificacaoEntradaMaterial classificacao, ModoEntradaMaterial modo)
         => modo switch
         {
             ModoEntradaMaterial.RecebimentoMercadoria =>
                 classificacao is ClassificacaoEntradaMaterial.MateriaPrima
-                    or ClassificacaoEntradaMaterial.Quimico,
+                    or ClassificacaoEntradaMaterial.Quimico
+                    or ClassificacaoEntradaMaterial.Embalagem
+                    or ClassificacaoEntradaMaterial.Semiacabado,
             ModoEntradaMaterial.Quimico => classificacao == ClassificacaoEntradaMaterial.Quimico,
             _ => classificacao == ClassificacaoEntradaMaterial.MateriaPrima
         };

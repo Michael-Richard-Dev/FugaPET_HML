@@ -64,40 +64,39 @@ public sealed class EntradaSeparacaoModo241Tests
     public void ItemPertenceAoModo(ClassificacaoEntradaMaterial classificacao, ModoEntradaMaterial modo, bool esperado)
         => Assert.Equal(esperado, ClassificadorItemEntradaMaterial.ItemPertenceAoModo(classificacao, modo));
 
-    // ================= GATE 073 — Recebimento de Mercadoria (porta única ROH+HIBE) =================
+    // ================= GATE 097A — Recebimento de Mercadoria (ROH/HIBE/VERP/HALB) =================
 
-    // TEST_01/02/04/05/06/07/08: RecebimentoMercadoria aceita ROH e HIBE; exclui VERP/FERT/HALB/Outro;
-    // Indefinido permanece fail-closed.
+    // T01-T06/T08: aceita somente os quatro tipos homologados; demais permanecem fail-closed.
     [Theory]
     [InlineData(ClassificacaoEntradaMaterial.MateriaPrima, true)]   // ROH
     [InlineData(ClassificacaoEntradaMaterial.Quimico, true)]        // HIBE
-    [InlineData(ClassificacaoEntradaMaterial.Embalagem, false)]     // VERP
+    [InlineData(ClassificacaoEntradaMaterial.Embalagem, true)]      // VERP
     [InlineData(ClassificacaoEntradaMaterial.ProdutoAcabado, false)] // FERT
-    [InlineData(ClassificacaoEntradaMaterial.Semiacabado, false)]   // HALB
+    [InlineData(ClassificacaoEntradaMaterial.Semiacabado, true)]    // HALB
     [InlineData(ClassificacaoEntradaMaterial.Outro, false)]         // Outro
     [InlineData(ClassificacaoEntradaMaterial.Indefinido, false)]    // fail-closed
-    public void Recebimento_AceitaRohEHibe_ExcluiOResto(ClassificacaoEntradaMaterial classe, bool esperado)
+    public void Recebimento_AceitaTiposHomologados_ExcluiOResto(ClassificacaoEntradaMaterial classe, bool esperado)
         => Assert.Equal(esperado,
             ClassificadorItemEntradaMaterial.ItemPertenceAoModo(classe, ModoEntradaMaterial.RecebimentoMercadoria));
 
-    // TEST_03: PO mista ROH+HIBE retorna AMBOS no modo Recebimento de Mercadoria.
+    // T09: cenário de quatro itens elegíveis, incluindo VERP/HALB, não resulta em zero mercadorias.
     [Fact]
-    public void Recebimento_PedidoMisto_RetornaRohEHibe()
+    public void Recebimento_PedidoComQuatroTiposHomologados_RetornaTodos()
     {
         List<PedidoCompraSapItem> itens =
         [
             Item("10", ClassificacaoEntradaMaterial.MateriaPrima),
             Item("20", ClassificacaoEntradaMaterial.Quimico),
             Item("30", ClassificacaoEntradaMaterial.Embalagem),
-            Item("40", ClassificacaoEntradaMaterial.Indefinido)
+            Item("40", ClassificacaoEntradaMaterial.Semiacabado)
         ];
         IReadOnlyList<PedidoCompraSapItem> filtrados =
             FiltroItensEntradaMaterial.FiltrarItensPorModo(itens, ModoEntradaMaterial.RecebimentoMercadoria);
-        Assert.Equal(2, filtrados.Count);
+        Assert.Equal(4, filtrados.Count);
         Assert.Contains(filtrados, i => i.NumeroItem == "10");
         Assert.Contains(filtrados, i => i.NumeroItem == "20");
-        Assert.DoesNotContain(filtrados, i => i.NumeroItem == "30");
-        Assert.DoesNotContain(filtrados, i => i.NumeroItem == "40");
+        Assert.Contains(filtrados, i => i.NumeroItem == "30");
+        Assert.Contains(filtrados, i => i.NumeroItem == "40");
     }
 
     // TEST_08 (cascata): pedido só com Indefinidos permanece fail-closed também no modo unificado.
@@ -127,6 +126,7 @@ public sealed class EntradaSeparacaoModo241Tests
         string m = FiltroItensEntradaMaterial.MontarMensagemSemItensDoModo(
             ModoEntradaMaterial.RecebimentoMercadoria, "4500000005", 3);
         Assert.Contains("mercadoria", m, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ROH, HIBE, VERP ou HALB", m, StringComparison.Ordinal);
         Assert.DoesNotContain("Use a tela de", m, StringComparison.Ordinal);
     }
 
