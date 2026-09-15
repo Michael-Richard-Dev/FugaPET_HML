@@ -856,6 +856,119 @@ public sealed class ProcessoControleApontamentosServicoTests
     private static ProcessoControleApontamentosServico Criar(SapFake sap, RepositorioFake repo)
         => new(sap, () => repo, null, new AutorizacaoPermissiva(), new RoteiroManualFake());
 
+    // GATE 095F-R1: permite injetar um roteiro V3 FIXO (com linhas fantasmas) para provar, pelo CAMINHO
+    // PRODUTIVO, que a correlação (Operation+Plant+WorkCenter) acontece ANTES do Marcador.
+    private static ProcessoControleApontamentosServico Criar(
+        SapFake sap, RepositorioFake repo, RoteiroProducaoSap? roteiroFixo)
+        => new(sap, () => repo, null, new AutorizacaoPermissiva(), new RoteiroFixoFake(roteiroFixo));
+
+    private sealed class RoteiroFixoFake : IProductionRoutingSapServico
+    {
+        private readonly RoteiroProducaoSap? _roteiro;
+        public RoteiroFixoFake(RoteiroProducaoSap? roteiro) => _roteiro = roteiro;
+        public Task<RoteiroProducaoSap?> ResolverRoteiroDaOrdemAsync(
+            OrdemProducaoSap ordem, CancellationToken cancellationToken = default)
+            => Task.FromResult(_roteiro);
+    }
+
+    private const string CodigoInicio0040 = "000001001710004001";
+
+    private static OrdemProducaoSap OrdemOp0040(string workCenter)
+        => OrdemBase() with
+        {
+            Operacoes =
+            [
+                new OperacaoOrdemProducaoSap
+                {
+                    Operacao = "0040", Sequencia = "000000", Descricao = "Op 0040",
+                    Centro = "3007", CentroTrabalho = workCenter
+                }
+            ]
+        };
+
+    private static RoteiroProducaoSap RoteiroV3(params (string op, string plant, string wc, string std, bool obtido)[] linhas)
+        => new()
+        {
+            BillOfOperationsGroup = "50000000",
+            BillOfOperationsVariant = "1",
+            Operacoes = linhas.Select(l => new OperacaoRoteiroSap
+            {
+                Operacao = l.op, Plant = l.plant, WorkCenter = l.wc,
+                CodigoTextoPadrao = l.std, TextoPadraoObtido = l.obtido
+            }).ToList()
+        };
+
+    // §6 — roteiro completo tem DUAS linhas Operation=40 (WCs diferentes); a ocorrência casa exatamente UMA.
+    // No 0727da0 (Marcador recebia o roteiro completo) isto retornava ContratoNaoResolvido; agora deve iniciar.
+    [Fact]
+    public async Task R1_Orquestracao_DuplicateOperationDifferentWc_IniciaManual()
+    {
+        RepositorioFake repo = new()
+        {
+            Configuracao = ConfiguracaoDestino("0040", TipoProcessoOperacao.ConsumoMateriaPrima)
+        };
+        RoteiroProducaoSap roteiro = RoteiroV3(
+            ("40", "3007", "3007015", "PP_FORM", true),
+            ("40", "3007", "9999999", "", true));
+        ProcessoControleApontamentosServico servico = Criar(new SapFake(OrdemOp0040("3007015")), repo, roteiro);
+
+        ResultadoLeituraApontamento r = await servico.ProcessarLeituraAsync(CodigoInicio0040, Usuario, Estacao, SempreConfirma);
+
+        Assert.Equal(CenarioLeituraApontamento.SucessoInicio, r.Cenario);
+        Assert.Equal("0040", Assert.Single(repo.Iniciados).Operacao);
+    }
+
+    // §7 — duas linhas EXATAMENTE iguais (Operation+Plant+WorkCenter) ⇒ correlação ambígua ⇒ fail-closed.
+    [Fact]
+    public async Task R1_Orquestracao_DuplicateExact_FailClosed()
+    {
+        RepositorioFake repo = new()
+        {
+            Configuracao = ConfiguracaoDestino("0040", TipoProcessoOperacao.ConsumoMateriaPrima)
+        };
+        RoteiroProducaoSap roteiro = RoteiroV3(
+            ("40", "3007", "3007015", "PP_FORM", true),
+            ("40", "3007", "3007015", "PP_FORM", true));
+        ProcessoControleApontamentosServico servico = Criar(new SapFake(OrdemOp0040("3007015")), repo, roteiro);
+
+        ResultadoLeituraApontamento r = await servico.ProcessarLeituraAsync(CodigoInicio0040, Usuario, Estacao, SempreConfirma);
+
+        Assert.Equal(CenarioLeituraApontamento.ContratoRoteiroNaoResolvido, r.Cenario);
+        Assert.Empty(repo.Iniciados);
+    }
+
+    [Fact]
+    public async Task R1_Orquestracao_PlantDiferente_FailClosed()
+    {
+        RepositorioFake repo = new()
+        {
+            Configuracao = ConfiguracaoDestino("0040", TipoProcessoOperacao.ConsumoMateriaPrima)
+        };
+        RoteiroProducaoSap roteiro = RoteiroV3(("40", "9999", "3007015", "PP_FORM", true));
+        ProcessoControleApontamentosServico servico = Criar(new SapFake(OrdemOp0040("3007015")), repo, roteiro);
+
+        ResultadoLeituraApontamento r = await servico.ProcessarLeituraAsync(CodigoInicio0040, Usuario, Estacao, SempreConfirma);
+
+        Assert.Equal(CenarioLeituraApontamento.ContratoRoteiroNaoResolvido, r.Cenario);
+        Assert.Empty(repo.Iniciados);
+    }
+
+    [Fact]
+    public async Task R1_Orquestracao_WorkCenterDiferente_FailClosed()
+    {
+        RepositorioFake repo = new()
+        {
+            Configuracao = ConfiguracaoDestino("0040", TipoProcessoOperacao.ConsumoMateriaPrima)
+        };
+        RoteiroProducaoSap roteiro = RoteiroV3(("40", "3007", "9999999", "PP_FORM", true));
+        ProcessoControleApontamentosServico servico = Criar(new SapFake(OrdemOp0040("3007015")), repo, roteiro);
+
+        ResultadoLeituraApontamento r = await servico.ProcessarLeituraAsync(CodigoInicio0040, Usuario, Estacao, SempreConfirma);
+
+        Assert.Equal(CenarioLeituraApontamento.ContratoRoteiroNaoResolvido, r.Cenario);
+        Assert.Empty(repo.Iniciados);
+    }
+
     // GATE 048-E: roteiro que marca TODAS as operações da OP como manuais (PP_FORM). Estes testes exercitam
     // o FLUXO/sequência, não a regra PP_FORM (coberta em ControleApontamentosMarcadorPpFormTests).
     private sealed class RoteiroManualFake : IProductionRoutingSapServico

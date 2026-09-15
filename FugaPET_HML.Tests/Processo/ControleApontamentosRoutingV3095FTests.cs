@@ -241,6 +241,35 @@ public sealed class ControleApontamentosRoutingV3095FTests
             MarcadorOperacaoManualSap.ClassificarOperacao(correlacao.RoteiroReduzido, "0040"));
     }
 
+    // ============================ OBSERVABILIDADE — CONFIG_NAO_DISPONIVEL (095F-R1) ============================
+
+    [Fact]
+    public async Task R1_ConfigNaoDisponivel_FailClosed_ComCodigoSanitizado()
+    {
+        System.Text.StringBuilder capturado = new();
+        var listener = new System.Diagnostics.TextWriterTraceListener(new System.IO.StringWriter(capturado));
+        System.Diagnostics.Trace.Listeners.Add(listener);
+        RoteiroProducaoSap? roteiro;
+        try
+        {
+            // ConfiguracaoSap vazia ⇒ ProductionRoutingConfigurado = false ⇒ CONFIG_NAO_DISPONIVEL, fail-closed.
+            ProductionRoutingSapServico wrapper = new(new ConfiguracaoSap());
+            roteiro = await wrapper.ResolverRoteiroDaOrdemAsync(
+                new OrdemProducaoSap { MaterialProduzido = "2000205", Centro = "3007" }, CancellationToken.None);
+        }
+        finally
+        {
+            System.Diagnostics.Trace.Flush();
+            System.Diagnostics.Trace.Listeners.Remove(listener);
+        }
+
+        Assert.Null(roteiro);
+        string log = capturado.ToString();
+        Assert.Contains("CONFIG_NAO_DISPONIVEL", log, StringComparison.Ordinal);
+        Assert.DoesNotContain("Authorization", log, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Basic ", log, StringComparison.Ordinal);
+    }
+
     // ============================ helpers ============================
 
     private static RoteiroProducaoSap Correlacionar((string op, string plant, string wc, string std, bool obtido) linha)

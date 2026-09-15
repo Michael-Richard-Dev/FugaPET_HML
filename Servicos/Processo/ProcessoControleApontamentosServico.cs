@@ -165,8 +165,10 @@ public sealed class ProcessoControleApontamentosServico
         // não resolvido/ambíguo é fail-closed; a operação automática não gera apontamento nem abre tela.
         // GATE 095F (095D/095E-R1): roteiro V3 COMPLETO da OP (API_PRODUCTION_ROUTING;v=3; sem ProductionVersion).
         RoteiroProducaoSap? roteiro = await _roteiroServico.ResolverRoteiroDaOrdemAsync(ordemSap, cancellationToken);
+        // GATE 095F-R1 (Hermes): a manualidade de CADA ocorrência é decidida SÓ APÓS a correlação exata
+        // (Operation+Plant+WorkCenter) — o Marcador NUNCA recebe o roteiro completo no fluxo produtivo.
         IReadOnlyList<OperacaoOrdemProducaoSap> operacoesManuais =
-            MarcadorOperacaoManualSap.FiltrarOperacoesManuais(ordemSap, roteiro);
+            FiltrarOperacoesManuaisCorrelacionadas(ordemSap, roteiro);
         OrdemProducaoSap ordemManual = ordemSap with { Operacoes = operacoesManuais };
 
         const string mensagemRoteiroNaoResolvido =
@@ -871,6 +873,45 @@ public sealed class ProcessoControleApontamentosServico
     }
 
     private static string NormalizarChave(string? valor) => (valor ?? string.Empty).Trim();
+
+    /// <summary>
+    /// GATE 095F-R1 (seam 095E-R1) — operações MANUAIS da OP com a manualidade decidida por OCORRÊNCIA e
+    /// SEMPRE após a correlação exata (Operation+Plant+WorkCenter): para cada operação da OP, correlaciona o
+    /// roteiro V3 completo à ocorrência, reduz a UMA operação e só então aplica o Marcador (PP_FORM) sobre o
+    /// roteiro REDUZIDO. Correlação 0/&gt;1 exatos ⇒ a ocorrência não é manual resolvida (fail-closed por item).
+    /// O Marcador NUNCA recebe o roteiro completo. Plant efetivo = operacao.Centro ?? ordemSap.Centro.
+    /// </summary>
+    private static IReadOnlyList<OperacaoOrdemProducaoSap> FiltrarOperacoesManuaisCorrelacionadas(
+        OrdemProducaoSap ordemSap, RoteiroProducaoSap? roteiro)
+    {
+        if (roteiro is null || roteiro.Operacoes.Count == 0)
+        {
+            return [];
+        }
+
+        List<OperacaoOrdemProducaoSap> manuais = [];
+        foreach (OperacaoOrdemProducaoSap op in ordemSap.Operacoes)
+        {
+            OperacaoOrdemProducaoSap ocorrencia = op with
+            {
+                Centro = string.IsNullOrWhiteSpace(op.Centro) ? ordemSap.Centro : op.Centro
+            };
+            ResultadoCorrelacaoOcorrencia correlacao =
+                CorrelacionadorOcorrenciaRoteiroSap.Correlacionar(roteiro, ocorrencia);
+            if (correlacao.Estado != EstadoCorrelacaoOcorrencia.Correlacionada)
+            {
+                continue; // 0 ou >1 correlação exata: não é manual resolvida.
+            }
+
+            if (MarcadorOperacaoManualSap.ClassificarOperacao(correlacao.RoteiroReduzido, op.Operacao)
+                == ClassificacaoOperacaoManual.Manual)
+            {
+                manuais.Add(op with { CodigoTextoPadrao = MarcadorOperacaoManualSap.CodigoTextoPadraoManual });
+            }
+        }
+
+        return manuais;
+    }
 
     /// <summary>Operação imediatamente anterior na ordenação técnica; null quando é a primeira.</summary>
     internal static OperacaoOrdemProducaoSap? ObterOperacaoAnterior(
