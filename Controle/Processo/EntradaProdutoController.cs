@@ -47,7 +47,11 @@ public sealed class EntradaProdutoController
     private readonly Func<string, CancellationToken, Task<long?>> _recuperarLancamentoLocalPorPedido;
     // 054: EXCLUIR PESAGEM — cancelamento lógico local. Seam p/ teste (default = serviço real).
     private readonly Func<long, CancellationToken, Task<Modelo.Entrada.ResultadoExclusaoPesagem>> _excluirPesagemLocal;
-    private readonly Func<long, CancellationToken, Task<bool>> _reservarLancamentoParaEnvio;
+    private readonly Func<long, CancellationToken, Task<Modelo.Entrada.ResultadoReservaEnvioSap>> _reservarLancamentoParaEnvio;
+    // GATE 096D: loader PÓS-RESERVA (status ENVIADO_SAP) — revalida o snapshot sem se auto-invalidar.
+    private readonly Func<long, CancellationToken, Task<IReadOnlyList<EntradaProdutoItemEnvioSap>>> _carregarItensReservadosParaRevalidacao;
+    // GATE 096D: libera a reserva (restaura StatusAnterior) num abort pré-POST — nunca via falha SAP.
+    private readonly Func<long, string, CancellationToken, Task<bool>> _liberarReservaAposAbort;
     private readonly Func<CancellationToken, Task<DiagnosticoProntidaoIntegracaoSap>> _diagnosticarIntegracaoSap;
     private readonly Func<
         long,
@@ -86,7 +90,9 @@ public sealed class EntradaProdutoController
         Func<string, string, CancellationToken, Task<ProdutoCentroSapMestre?>>? consultarProdutoCentroSap = null,
         Func<long, CancellationToken, Task<string?>>? obterStatusLancamento = null,
         Func<string, CancellationToken, Task<long?>>? recuperarLancamentoLocalPorPedido = null,
-        Func<long, CancellationToken, Task<bool>>? reservarLancamentoParaEnvio = null,
+        Func<long, CancellationToken, Task<Modelo.Entrada.ResultadoReservaEnvioSap>>? reservarLancamentoParaEnvio = null,
+        Func<long, CancellationToken, Task<IReadOnlyList<EntradaProdutoItemEnvioSap>>>? carregarItensReservadosParaRevalidacao = null,
+        Func<long, string, CancellationToken, Task<bool>>? liberarReservaAposAbort = null,
         Func<CancellationToken, Task<DiagnosticoProntidaoIntegracaoSap>>? diagnosticarIntegracaoSap = null,
         Func<
             long,
@@ -122,6 +128,12 @@ public sealed class EntradaProdutoController
         _reservarLancamentoParaEnvio = reservarLancamentoParaEnvio
             ?? ((codigoLancamento, cancellationToken) =>
                 EntradaProduto.TentarReservarLancamentoParaEnvioSapAsync(codigoLancamento, cancellationToken));
+        _carregarItensReservadosParaRevalidacao = carregarItensReservadosParaRevalidacao
+            ?? ((codigoLancamento, cancellationToken) =>
+                EntradaProduto.ListarItensReservadosParaRevalidacaoSapAsync(codigoLancamento, cancellationToken));
+        _liberarReservaAposAbort = liberarReservaAposAbort
+            ?? ((codigoLancamento, statusAnterior, cancellationToken) =>
+                EntradaProduto.LiberarReservaEnvioSapAposAbortPrePostAsync(codigoLancamento, statusAnterior, cancellationToken));
         _diagnosticarIntegracaoSap =
             diagnosticarIntegracaoSap ?? Sap.DiagnosticarProntidaoEscritaAsync;
         _atualizarStatusAposEnvioSap =
@@ -442,10 +454,10 @@ public sealed class EntradaProdutoController
         // Reserva/claim ATOMICO antes de montar o payload e antes do POST (concorrencia/idempotencia):
         // FINALIZADO_LOCAL/ERRO_SAP -> ENVIADO_SAP em um unico UPDATE condicional. Se 0 linhas, outro
         // envio ja reservou (ou o status mudou): aborta SEM POST.
-        bool reservado;
+        Modelo.Entrada.ResultadoReservaEnvioSap reserva;
         try
         {
-            reservado = await _reservarLancamentoParaEnvio(codigoLancamento, cancellationToken);
+            reserva = await _reservarLancamentoParaEnvio(codigoLancamento, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -459,7 +471,7 @@ public sealed class EntradaProdutoController
             };
         }
 
-        if (!reservado)
+        if (!reserva.Reservado)
         {
             Sap.RegistrarDiagnostico(
                 $"Envio SAP bloqueado (lancamento {codigoLancamento}): reserva nao obtida (em processamento ou ja confirmado).");
@@ -471,30 +483,32 @@ public sealed class EntradaProdutoController
             };
         }
 
-        // 054 / §15 CORRETIVA (concorrência com EXCLUIR PESAGEM): APÓS a reserva (claim) e ANTES do POST,
-        // RECARREGA o estado autoritativo (pesagens VÁLIDAS/ativas) e compara com o snapshot usado no payload.
-        // Se qualquer item/peso elegível mudou, OU nada elegível restou, ABORTA sem POST — payload stale nunca
-        // despacha. Garante a semântica: cancelamento-primeiro => 101 relê e não envia a pesagem cancelada.
+        // GATE 096D: StatusAnterior EFETIVAMENTE consumido pela reserva — para liberar a reserva num abort
+        // pré-POST (restaura FINALIZADO_LOCAL/ERRO_SAP), NUNCA classificando abort local como falha SAP.
+        string statusAnteriorReserva = reserva.StatusAnterior ?? "FINALIZADO_LOCAL";
+
+        // 054/§15 + 096D CORRETIVA: APÓS a reserva e ANTES do POST, RECARREGA pelo loader PÓS-RESERVA (status
+        // ENVIADO_SAP + pesagens VÁLIDAS/ativas) e compara com o snapshot do payload. A transição
+        // FINALIZADO_LOCAL/ERRO_SAP → ENVIADO_SAP feita pela PRÓPRIA reserva NÃO conta como mudança (o loader
+        // pós-reserva já espera ENVIADO_SAP). Só um EXCLUIR PESAGEM concorrente muda o snapshot → aborta sem POST.
         IReadOnlyList<EntradaProdutoItemEnvioSap> itensRevalidados;
         try
         {
-            itensRevalidados = await _carregarItensParaEnvio(codigoLancamento, cancellationToken);
+            itensRevalidados = await _carregarItensReservadosParaRevalidacao(codigoLancamento, cancellationToken);
         }
         catch (Exception ex)
         {
-            await Sap.RegistrarFalhaStatusLocalAposSapAsync(
-                codigoLancamento, "Falha ao revalidar itens após a reserva.", CancellationToken.None);
+            await _liberarReservaAposAbort(codigoLancamento, statusAnteriorReserva, CancellationToken.None);
             Sap.RegistrarDiagnostico(
-                $"Envio SAP abortado (lancamento {codigoLancamento}): recarga pós-reserva falhou.{Environment.NewLine}{ex}");
+                $"Envio SAP abortado (lancamento {codigoLancamento}): recarga pós-reserva falhou; reserva liberada.{Environment.NewLine}{ex}");
             return new ResultadoEnvioSapEntrada { Cenario = CenarioEnvioSapEntrada.Falha, Total = itens.Count };
         }
 
         if (!ItensElegiveisIguais(itens, itensRevalidados))
         {
-            await Sap.RegistrarFalhaStatusLocalAposSapAsync(
-                codigoLancamento, "Estado do lançamento mudou após a reserva; envio abortado sem POST.", CancellationToken.None);
+            await _liberarReservaAposAbort(codigoLancamento, statusAnteriorReserva, CancellationToken.None);
             Sap.RegistrarDiagnostico(
-                $"Envio SAP abortado (lancamento {codigoLancamento}): itens elegíveis mudaram entre reserva e POST (payload stale). ZERO POST.");
+                $"Envio SAP abortado (lancamento {codigoLancamento}): itens elegíveis mudaram entre reserva e POST (payload stale). ZERO POST; reserva liberada.");
             return new ResultadoEnvioSapEntrada
             {
                 Cenario = CenarioEnvioSapEntrada.Falha,

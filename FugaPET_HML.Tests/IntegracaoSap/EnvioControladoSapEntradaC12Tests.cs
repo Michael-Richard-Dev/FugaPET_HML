@@ -1167,6 +1167,164 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
         Assert.Contains("Finalize e grave", diag.MotivoBloqueio!, StringComparison.Ordinal);
     }
 
+    // ===================================================================================================
+    // GATE 096D — revalidação PÓS-RESERVA com loader dedicado (status ENVIADO_SAP) + restore no abort.
+    // ===================================================================================================
+
+    private EntradaProdutoController CriarController096D(
+        FakeMaterialDocumentSapServico materialDoc,
+        IReadOnlyList<EntradaProdutoItemEnvioSap> itensPre,
+        IReadOnlyList<EntradaProdutoItemEnvioSap> itensPos,
+        string statusAnterior = "FINALIZADO_LOCAL",
+        bool reservado = true,
+        List<(long Codigo, string Status)>? restauracoes = null)
+        => new(
+            new IntegracaoEntradaSapServico(new FakePedidoCompraSapServico { EscritaHabilitada = true }, materialDoc),
+            new EntradaProdutoServico(null!, null!, null!, null, new AutorizacaoCentroDepositoEntrada([], []), null),
+            new BalancaLeituraServico(),
+            new ImpressoraEtiquetaServico(),
+            new AutorizacaoCentroDepositoEntrada([], []),
+            FabricaControladoresCadastro.CriarTaraController(),
+            ehAmbienteHomologacao: () => true,
+            carregarItensParaEnvio: (_, _) => Task.FromResult(itensPre),
+            carregarItensReservadosParaRevalidacao: (_, _) => Task.FromResult(itensPos),
+            liberarReservaAposAbort: (id, st, _) => { restauracoes?.Add((id, st)); return Task.FromResult(true); },
+            consultarProdutoCentroSap: ProdutoCentroBatchManaged,
+            obterStatusLancamento: (_, _) => Task.FromResult<string?>("FINALIZADO_LOCAL"),
+            reservarLancamentoParaEnvio: (_, _) => Task.FromResult(
+                new ResultadoReservaEnvioSap(reservado, reservado ? statusAnterior : null)),
+            diagnosticarIntegracaoSap: _ => Task.FromResult(new DiagnosticoProntidaoIntegracaoSap(
+                AmbienteOperacional: true, IntegracaoAtiva: true, SapConfigurado: true,
+                EscritaSapHabilitada: true, MaterialDocumentConfigurado: true, MotivoBloqueio: null)),
+            atualizarStatusAposEnvioSap: (_, _, _, _, _) => Task.FromResult(ResultadoOperacao.Ok()));
+
+    [Fact] // T01 — FINALIZADO_LOCAL, snapshot estável ⇒ writer 1, sem "estado mudou".
+    public async Task T01_FinalizadoLocal_SnapshotEstavel_Despacha()
+    {
+        DefinirSessao(comEnviarSap: true);
+        FakeMaterialDocumentSapServico materialDoc = new();
+        EntradaProdutoController c = CriarController096D(materialDoc, [Item("10", pesoLiquido: 2m)], [Item("10", pesoLiquido: 2m)]);
+
+        ResultadoEnvioSapEntrada r = await c.EnviarPesoEntradaParaSapHomologacaoAsync(99);
+
+        Assert.Equal(CenarioEnvioSapEntrada.Enviado, r.Cenario);
+        Assert.Equal(1, materialDoc.Chamadas);
+        Assert.DoesNotContain("estado do lançamento mudou", r.Mensagem ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact] // T02 — ERRO_SAP como StatusAnterior ⇒ writer 1.
+    public async Task T02_ErroSap_SnapshotEstavel_Despacha()
+    {
+        DefinirSessao(comEnviarSap: true);
+        FakeMaterialDocumentSapServico materialDoc = new();
+        EntradaProdutoController c = CriarController096D(
+            materialDoc, [Item("10", pesoLiquido: 2m)], [Item("10", pesoLiquido: 2m)], statusAnterior: "ERRO_SAP");
+
+        await c.EnviarPesoEntradaParaSapHomologacaoAsync(99);
+
+        Assert.Equal(1, materialDoc.Chamadas);
+    }
+
+    [Fact] // T04 — peso muda (2 → 1.5) ⇒ writer 0 + restore StatusAnterior.
+    public async Task T04_SnapshotDiverge_Peso_AbortaERestaura()
+    {
+        DefinirSessao(comEnviarSap: true);
+        FakeMaterialDocumentSapServico materialDoc = new();
+        List<(long, string)> restauracoes = [];
+        EntradaProdutoController c = CriarController096D(
+            materialDoc, [Item("10", pesoLiquido: 2m)], [Item("10", pesoLiquido: 1.5m)], restauracoes: restauracoes);
+
+        ResultadoEnvioSapEntrada r = await c.EnviarPesoEntradaParaSapHomologacaoAsync(99);
+
+        Assert.Equal(0, materialDoc.Chamadas);
+        Assert.Equal(CenarioEnvioSapEntrada.Falha, r.Cenario);
+        Assert.Equal((99L, "FINALIZADO_LOCAL"), Assert.Single(restauracoes));
+    }
+
+    [Fact] // T05 — nada elegível restou (pós vazio) ⇒ writer 0 + restore.
+    public async Task T05_SnapshotVazio_AbortaERestaura()
+    {
+        DefinirSessao(comEnviarSap: true);
+        FakeMaterialDocumentSapServico materialDoc = new();
+        List<(long, string)> restauracoes = [];
+        EntradaProdutoController c = CriarController096D(
+            materialDoc, [Item("10", pesoLiquido: 2m)], [], restauracoes: restauracoes);
+
+        await c.EnviarPesoEntradaParaSapHomologacaoAsync(99);
+
+        Assert.Equal(0, materialDoc.Chamadas);
+        Assert.Single(restauracoes);
+    }
+
+    [Fact] // T06 — segunda reserva perde (Reservado=false) ⇒ writer 0.
+    public async Task T06_ReservaNaoObtida_NaoDespacha()
+    {
+        DefinirSessao(comEnviarSap: true);
+        FakeMaterialDocumentSapServico materialDoc = new();
+        EntradaProdutoController c = CriarController096D(
+            materialDoc, [Item("10", pesoLiquido: 2m)], [Item("10", pesoLiquido: 2m)], reservado: false);
+
+        ResultadoEnvioSapEntrada r = await c.EnviarPesoEntradaParaSapHomologacaoAsync(99);
+
+        Assert.Equal(CenarioEnvioSapEntrada.EnvioEmProcessamento, r.Cenario);
+        Assert.Equal(0, materialDoc.Chamadas);
+    }
+
+    [Fact] // T07/T09 — CASO REAL: pedido 1000 KG, snapshot 2 KG estável ⇒ 2 != 1000 NÃO bloqueia; writer 1.
+    public async Task T07_RecebimentoParcial2De1000_Despacha()
+    {
+        DefinirSessao(comEnviarSap: true);
+        FakeMaterialDocumentSapServico materialDoc = new();
+        EntradaProdutoItemEnvioSap dois = Item("10", pesoLiquido: 2m) with { NumeroPedido = "4500000005", Material = "1000111" };
+        EntradaProdutoController c = CriarController096D(materialDoc, [dois], [dois]);
+
+        ResultadoEnvioSapEntrada r = await c.EnviarPesoEntradaParaSapHomologacaoAsync(99);
+
+        Assert.Equal(CenarioEnvioSapEntrada.Enviado, r.Cenario);
+        Assert.Equal(1, materialDoc.Chamadas);
+    }
+
+    [Fact] // T08/T20 — loader PÓS-RESERVA exige ENVIADO_SAP e NÃO depende de FINALIZADO_LOCAL/ERRO_SAP no lançamento.
+    public void T08_PostLoader_ExigeEnviadoSap()
+    {
+        string repo = File.ReadAllText(Path.Combine(RaizProjeto(), "AcessoDados", "Repositorio", "EntradaProdutoRepositorio.cs"));
+        string metodo = ExtrairMetodoEntrada(repo, "ListarItensReservadosParaRevalidacaoSapAsync");
+        Assert.Contains("lancamento.status_lancamento = 'ENVIADO_SAP'", metodo, StringComparison.Ordinal);
+        Assert.DoesNotContain("lancamento.status_lancamento IN ('FINALIZADO_LOCAL', 'ERRO_SAP')", metodo, StringComparison.Ordinal);
+    }
+
+    [Fact] // T11 — restore é CONDICIONAL a ENVIADO_SAP e destino restrito (fail-closed contra estado concorrente).
+    public void T11_Restore_CondicionalEnviadoSap_FailClosed()
+    {
+        string repo = File.ReadAllText(Path.Combine(RaizProjeto(), "AcessoDados", "Repositorio", "EntradaProdutoRepositorio.cs"));
+        string metodo = ExtrairMetodoEntrada(repo, "LiberarReservaEnvioSapAposAbortPrePostAsync");
+        Assert.Contains("AND status_lancamento = 'ENVIADO_SAP'", metodo, StringComparison.Ordinal);
+        Assert.Contains("statusAnterior is not (\"FINALIZADO_LOCAL\" or \"ERRO_SAP\")", metodo, StringComparison.Ordinal);
+    }
+
+    [Fact] // T12 — reserva ATÔMICA devolve o StatusAnterior efetivamente consumido (CTE FOR UPDATE + RETURNING).
+    public void T12_ReservaAtomica_DevolveStatusAnterior()
+    {
+        string repo = File.ReadAllText(Path.Combine(RaizProjeto(), "AcessoDados", "Repositorio", "EntradaProdutoRepositorio.cs"));
+        string metodo = ExtrairMetodoEntrada(repo, "TentarReservarLancamentoParaEnvioSapAsync");
+        Assert.Contains("FOR UPDATE", metodo, StringComparison.Ordinal);
+        Assert.Contains("RETURNING elegivel.status_lancamento AS status_anterior", metodo, StringComparison.Ordinal);
+    }
+
+    private static string ExtrairMetodoEntrada(string fonte, string nomeMetodo)
+    {
+        int i = fonte.IndexOf(nomeMetodo, StringComparison.Ordinal);
+        Assert.True(i >= 0, $"metodo nao encontrado: {nomeMetodo}");
+        int abre = fonte.IndexOf('{', i);
+        int prof = 0;
+        for (int j = abre; j < fonte.Length; j++)
+        {
+            if (fonte[j] == '{') prof++;
+            else if (fonte[j] == '}' && --prof == 0) return fonte[i..(j + 1)];
+        }
+        return fonte[i..];
+    }
+
     private static EntradaProdutoController CriarController(
         FakePedidoCompraSapServico pedido,
         FakeMaterialDocumentSapServico materialDoc,
@@ -1195,11 +1353,16 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
             FabricaControladoresCadastro.CriarTaraController(),
             ehAmbienteHomologacao: () => ehHomologacao,
             carregarItensParaEnvio: carregarItensProvider ?? ((_, _) => Task.FromResult(itens)),
+            // GATE 096D: o loader PÓS-RESERVA compartilha o MESMO provider (contador único) para preservar a
+            // semântica dos testes §15 (ProviderMudaApos2 conta pré + pós); default = mesma lista.
+            carregarItensReservadosParaRevalidacao: carregarItensProvider ?? ((_, _) => Task.FromResult(itens)),
+            liberarReservaAposAbort: (_, _, _) => Task.FromResult(true),
             // Por padrão, material ADMINISTRADO por lote (mantém o envio de Batch/datas dos testes existentes).
             consultarProdutoCentroSap: consultarProdutoCentro ?? ProdutoCentroBatchManaged,
             obterStatusLancamento: (_, _) => Task.FromResult<string?>(statusLancamento),
             recuperarLancamentoLocalPorPedido: recuperarLancamento,
-            reservarLancamentoParaEnvio: (_, _) => Task.FromResult(reservaObtida),
+            reservarLancamentoParaEnvio: (_, _) => Task.FromResult(
+                new ResultadoReservaEnvioSap(reservaObtida, reservaObtida ? "FINALIZADO_LOCAL" : null)),
             diagnosticarIntegracaoSap: _ => Task.FromResult(
                 new DiagnosticoProntidaoIntegracaoSap(
                     AmbienteOperacional: true,
