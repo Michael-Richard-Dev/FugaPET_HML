@@ -849,6 +849,78 @@ public sealed class ProcessoControleApontamentosServicoTests
         Assert.Empty(repo.Iniciados);
     }
 
+    [Fact]
+    public async Task RecuperarConsumoConfirmado_DelegaIdentidadeExplicitaEConclusaoConfirmadaSap()
+    {
+        RepositorioFake repo = new() { RecuperacaoConfirmada = true };
+        ProcessoControleApontamentosServico servico = Criar(new SapFake(null), repo);
+        ContextoApontamentoProcesso contexto = new()
+        {
+            CodigoApontamento = 2,
+            NumeroOrdem = "1000170",
+            Sequencia = "000000",
+            Operacao = "0010",
+            Suboperacao = "",
+            TipoProcesso = TipoProcessoOperacao.ConsumoMateriaPrima
+        };
+
+        bool recuperado = await servico.RecuperarConsumoConfirmadoAsync(
+            contexto,
+            71,
+            "000000000000123456",
+            "0000123456",
+            "0001",
+            "LOTE-01",
+            Usuario,
+            Estacao,
+            "000001000170001001");
+
+        Assert.True(recuperado);
+        Assert.Equal(1, repo.TentativasRecuperacao);
+        Assert.Equal(2, repo.ContextoRecuperacao?.CodigoApontamento);
+        Assert.Equal(71, repo.CodigoLancamentoRecuperacao);
+        Assert.Equal("000000000000123456", repo.MaterialRecuperacao);
+        Assert.Equal("0000123456", repo.ReservaRecuperacao);
+        Assert.Equal("0001", repo.ItemReservaRecuperacao);
+        Assert.Equal("LOTE-01", repo.LoteRecuperacao);
+        Assert.Equal(ResultadoExecucaoProcessoApontamento.ConfirmadoSap, repo.ResultadoRecuperacao?.Resultado);
+        Assert.Equal(71, repo.ResultadoRecuperacao?.CodigoRegistroProcesso);
+        Assert.True(repo.ResultadoRecuperacao?.IndicadorConfirmadoSap);
+    }
+
+    [Fact]
+    public async Task RecuperarConsumoConfirmado_IdentidadeOuTipoDivergente_NaoAcessaRepositorio()
+    {
+        RepositorioFake repo = new() { RecuperacaoConfirmada = true };
+        ProcessoControleApontamentosServico servico = Criar(new SapFake(null), repo);
+        ContextoApontamentoProcesso contexto = new()
+        {
+            CodigoApontamento = 2,
+            NumeroOrdem = "1000170",
+            Sequencia = "000000",
+            Operacao = "0010",
+            TipoProcesso = TipoProcessoOperacao.ConsumoQuimicos
+        };
+
+        bool tipoDivergente = await servico.RecuperarConsumoConfirmadoAsync(
+            contexto, 71, "MAT", "RES", "ITEM", "LOTE", Usuario, Estacao, "000001000170001001");
+
+        contexto = new ContextoApontamentoProcesso
+        {
+            CodigoApontamento = 2,
+            NumeroOrdem = "1000170",
+            Sequencia = "000000",
+            Operacao = "0010",
+            TipoProcesso = TipoProcessoOperacao.ConsumoMateriaPrima
+        };
+        bool barcodeDivergente = await servico.RecuperarConsumoConfirmadoAsync(
+            contexto, 71, "MAT", "RES", "ITEM", "LOTE", Usuario, Estacao, CodigoInicio);
+
+        Assert.False(tipoDivergente);
+        Assert.False(barcodeDivergente);
+        Assert.Equal(0, repo.TentativasRecuperacao);
+    }
+
     // ---------- Apoio ----------
 
     // Autorização permissiva: estes testes exercitam o FLUXO, não o gate de permissão
@@ -1266,6 +1338,7 @@ public sealed class ProcessoControleApontamentosServicoTests
         public bool ConclusaoFalha { get; init; }
         public bool MarcarAguardandoFalha { get; init; }
         public bool LancarNoMarcar { get; init; }
+        public bool RecuperacaoConfirmada { get; init; }
 
         /// <summary>Ativo por sequência+operação (caminho do INÍCIO).</summary>
         public OperacaoProducaoApontamento? AtivoPorOperacao { get; init; }
@@ -1293,6 +1366,14 @@ public sealed class ProcessoControleApontamentosServicoTests
         public bool MarcouAguardando { get; private set; }
         public ResultadoExecucaoProcesso? ResultadoRegistrado { get; private set; }
         public string CentroTrabalhoConsultado { get; private set; } = string.Empty;
+        public int TentativasRecuperacao { get; private set; }
+        public ContextoApontamentoProcesso? ContextoRecuperacao { get; private set; }
+        public long CodigoLancamentoRecuperacao { get; private set; }
+        public string MaterialRecuperacao { get; private set; } = string.Empty;
+        public string ReservaRecuperacao { get; private set; } = string.Empty;
+        public string ItemReservaRecuperacao { get; private set; } = string.Empty;
+        public string LoteRecuperacao { get; private set; } = string.Empty;
+        public ResultadoExecucaoProcesso? ResultadoRecuperacao { get; private set; }
 
         public Task<bool> EstruturaDisponivelAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(Estrutura);
@@ -1372,6 +1453,23 @@ public sealed class ProcessoControleApontamentosServicoTests
             MarcouAguardando = true;
             ResultadoRegistrado = resultado;
             return Task.FromResult(true);
+        }
+
+        public Task<bool> TentarRecuperarConsumoConfirmadoAsync(
+            ContextoApontamentoProcesso contexto, long codigoLancamento, string materialEsperado,
+            string reservaEsperada, string itemReservaEsperado, string loteEsperado,
+            ResultadoExecucaoProcesso resultado, string usuario, string estacao,
+            CodigoBarrasOperacao codigoInicio, CancellationToken cancellationToken = default)
+        {
+            TentativasRecuperacao++;
+            ContextoRecuperacao = contexto;
+            CodigoLancamentoRecuperacao = codigoLancamento;
+            MaterialRecuperacao = materialEsperado;
+            ReservaRecuperacao = reservaEsperada;
+            ItemReservaRecuperacao = itemReservaEsperado;
+            LoteRecuperacao = loteEsperado;
+            ResultadoRecuperacao = resultado;
+            return Task.FromResult(RecuperacaoConfirmada);
         }
 
         public Task RegistrarVinculoProcessoAsync(

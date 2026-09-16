@@ -498,6 +498,157 @@ public sealed class ControleApontamentosRepositorio : RepositorioBase, IControle
             return true;
         }, cancellationToken);
 
+    public async Task<bool> TentarRecuperarConsumoConfirmadoAsync(
+        ContextoApontamentoProcesso contexto,
+        long codigoLancamento,
+        string materialEsperado,
+        string reservaEsperada,
+        string itemReservaEsperado,
+        string loteEsperado,
+        ResultadoExecucaoProcesso resultado,
+        string usuario,
+        string estacao,
+        CodigoBarrasOperacao codigoInicio,
+        CancellationToken cancellationToken = default)
+        => await ExecutarEmTransacaoAuditavelAsync(async (conexao, transacao) =>
+        {
+            const string sqlApontamento = """
+                SELECT codigo_apontamento
+                  FROM operacao_producao_apontamento
+                 WHERE codigo_apontamento = @codigo_apontamento
+                   AND numero_ordem = @numero_ordem
+                   AND sequencia = @sequencia
+                   AND operacao = @operacao
+                   AND coalesce(suboperacao, '') = @suboperacao
+                   AND tipo_processo = 'CONSUMO_MATERIA_PRIMA'
+                   AND status = 'EM_ANDAMENTO'
+                   AND resultado_operacional IS NULL
+                   AND codigo_registro_processo IS NULL
+                   AND concluido_operacional_em IS NULL
+                   AND NOT EXISTS (
+                       SELECT 1
+                         FROM operacao_producao_apontamento_processo processo
+                        WHERE processo.codigo_apontamento = @codigo_apontamento
+                   )
+                 FOR UPDATE;
+                """;
+
+            await using (NpgsqlCommand comando = new(sqlApontamento, conexao, transacao))
+            {
+                comando.Parameters.Add(ParametroLongo("@codigo_apontamento", contexto.CodigoApontamento));
+                comando.Parameters.Add(ParametroTexto("@numero_ordem", contexto.NumeroOrdem));
+                comando.Parameters.Add(ParametroTexto("@sequencia", contexto.Sequencia));
+                comando.Parameters.Add(ParametroTexto("@operacao", contexto.Operacao));
+                comando.Parameters.Add(ParametroTexto("@suboperacao", contexto.Suboperacao));
+                if (await comando.ExecuteScalarAsync(cancellationToken) is null)
+                {
+                    return false;
+                }
+            }
+
+            const string sqlLancamento = """
+                SELECT codigo_consumo_material_lancamento
+                  FROM consumo_material_lancamento
+                 WHERE codigo_consumo_material_lancamento = @codigo_lancamento
+                   AND numero_ordem = @numero_ordem
+                   AND status_lancamento = 'CONFIRMADO_SAP'
+                   AND nullif(btrim(documento_material_sap), '') IS NOT NULL
+                   AND nullif(btrim(exercicio_documento_material_sap), '') IS NOT NULL
+                 FOR UPDATE;
+                """;
+
+            await using (NpgsqlCommand comando = new(sqlLancamento, conexao, transacao))
+            {
+                comando.Parameters.Add(ParametroLongo("@codigo_lancamento", codigoLancamento));
+                comando.Parameters.Add(ParametroTexto("@numero_ordem", contexto.NumeroOrdem));
+                if (await comando.ExecuteScalarAsync(cancellationToken) is null)
+                {
+                    return false;
+                }
+            }
+
+            const string sqlItens = """
+                SELECT COUNT(*),
+                       COUNT(*) FILTER (
+                           WHERE btrim(codigo_material) = @material
+                             AND btrim(numero_reserva) = @reserva
+                             AND btrim(item_reserva) = @item_reserva
+                             AND btrim(lote) = @lote
+                       )
+                  FROM consumo_material_item
+                 WHERE codigo_consumo_material_lancamento = @codigo_lancamento;
+                """;
+
+            await using (NpgsqlCommand comando = new(sqlItens, conexao, transacao))
+            {
+                comando.Parameters.Add(ParametroLongo("@codigo_lancamento", codigoLancamento));
+                comando.Parameters.Add(ParametroTexto("@material", materialEsperado));
+                comando.Parameters.Add(ParametroTexto("@reserva", reservaEsperada));
+                comando.Parameters.Add(ParametroTexto("@item_reserva", itemReservaEsperado));
+                comando.Parameters.Add(ParametroTexto("@lote", loteEsperado));
+                await using NpgsqlDataReader leitor = await comando.ExecuteReaderAsync(cancellationToken);
+                if (!await leitor.ReadAsync(cancellationToken)
+                    || leitor.GetInt64(0) != 1
+                    || leitor.GetInt64(1) != 1)
+                {
+                    return false;
+                }
+            }
+
+            const string sqlVinculo = """
+                INSERT INTO operacao_producao_apontamento_processo
+                    (codigo_apontamento, tipo_processo, codigo_registro_processo)
+                VALUES
+                    (@codigo_apontamento, 'CONSUMO_MATERIA_PRIMA', @codigo_lancamento);
+                """;
+
+            await using (NpgsqlCommand comando = new(sqlVinculo, conexao, transacao))
+            {
+                comando.Parameters.Add(ParametroLongo("@codigo_apontamento", contexto.CodigoApontamento));
+                comando.Parameters.Add(ParametroLongo("@codigo_lancamento", codigoLancamento));
+                if (await comando.ExecuteNonQueryAsync(cancellationToken) != 1)
+                {
+                    throw new InvalidOperationException("Vínculo canônico não foi criado.");
+                }
+            }
+
+            const string sqlAtualizacao = """
+                UPDATE operacao_producao_apontamento
+                   SET status = 'AGUARDANDO_FINALIZACAO',
+                       resultado_operacional = @resultado_operacional,
+                       codigo_registro_processo = @codigo_lancamento,
+                       concluido_operacional_em = now(),
+                       mensagem_resultado_operacional = @mensagem,
+                       atualizado_em = now()
+                 WHERE codigo_apontamento = @codigo_apontamento
+                   AND status = 'EM_ANDAMENTO'
+                   AND resultado_operacional IS NULL
+                   AND codigo_registro_processo IS NULL
+                   AND concluido_operacional_em IS NULL;
+                """;
+
+            await using (NpgsqlCommand comando = new(sqlAtualizacao, conexao, transacao))
+            {
+                comando.Parameters.Add(ParametroLongo("@codigo_apontamento", contexto.CodigoApontamento));
+                comando.Parameters.Add(ParametroLongo("@codigo_lancamento", codigoLancamento));
+                comando.Parameters.Add(ParametroTexto("@resultado_operacional", resultado.Resultado.ToString()));
+                comando.Parameters.Add(ParametroTexto("@mensagem", resultado.Mensagem));
+                if (await comando.ExecuteNonQueryAsync(cancellationToken) != 1)
+                {
+                    throw new InvalidOperationException("Apontamento deixou de estar elegível para recuperação.");
+                }
+            }
+
+            await InserirEventoAsync(
+                conexao, transacao, contexto.CodigoApontamento, codigoInicio, usuario, estacao,
+                StatusApontamentoOperacao.EmAndamento, StatusApontamentoOperacao.AguardandoFinalizacao,
+                $"CONCLUSAO_OPERACIONAL_{resultado.Resultado}",
+                $"Recovery local do lançamento confirmado {codigoLancamento}. {resultado.Mensagem}",
+                string.Empty, cancellationToken);
+
+            return true;
+        }, cancellationToken);
+
     public async Task<DateTimeOffset?> TentarConcluirApontamentoAsync(
         long codigoApontamento,
         string usuarioTermino,

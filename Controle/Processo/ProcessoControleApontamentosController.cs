@@ -66,4 +66,19 @@ public sealed class ProcessoControleApontamentosController
         CancellationToken cancellationToken = default)
         => _servico.RegistrarConclusaoOperacionalAsync(
             codigoApontamento, resultado, usuario, estacao, codigo, tipoProcesso, cancellationToken);
+
+    public Task<bool> RecuperarConsumoConfirmadoAsync(
+        ContextoApontamentoProcesso contexto,
+        long codigoLancamento,
+        string materialEsperado,
+        string reservaEsperada,
+        string itemReservaEsperado,
+        string loteEsperado,
+        string usuario,
+        string estacao,
+        string codigoInicio,
+        CancellationToken cancellationToken = default)
+        => _servico.RecuperarConsumoConfirmadoAsync(
+            contexto, codigoLancamento, materialEsperado, reservaEsperada, itemReservaEsperado,
+            loteEsperado, usuario, estacao, codigoInicio, cancellationToken);
 }

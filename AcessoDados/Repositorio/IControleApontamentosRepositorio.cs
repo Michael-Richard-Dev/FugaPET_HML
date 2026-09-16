@@ -117,6 +117,20 @@ public interface IControleApontamentosRepositorio
         CodigoBarrasOperacao codigo,
         CancellationToken cancellationToken = default);
 
+    Task<bool> TentarRecuperarConsumoConfirmadoAsync(
+        ContextoApontamentoProcesso contexto,
+        long codigoLancamento,
+        string materialEsperado,
+        string reservaEsperada,
+        string itemReservaEsperado,
+        string loteEsperado,
+        ResultadoExecucaoProcesso resultado,
+        string usuario,
+        string estacao,
+        CodigoBarrasOperacao codigoInicio,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(false);
+
     /// <summary>
     /// Conclui o apontamento ATIVO e devolve o <c>terminado_em</c> do BANCO. Null quando nenhuma linha
     /// foi atualizada (já concluído por outra estação) ou em conflito 23505 de idempotência do término.

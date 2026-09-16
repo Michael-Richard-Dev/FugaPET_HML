@@ -805,6 +805,70 @@ public sealed class ProcessoControleApontamentosServico
         }
     }
 
+    public async Task<bool> RecuperarConsumoConfirmadoAsync(
+        ContextoApontamentoProcesso contexto,
+        long codigoLancamento,
+        string materialEsperado,
+        string reservaEsperada,
+        string itemReservaEsperado,
+        string loteEsperado,
+        string usuario,
+        string estacao,
+        string codigoBarrasInicio,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(contexto);
+
+        if (codigoLancamento <= 0
+            || !string.Equals(contexto.TipoProcesso, TipoProcessoOperacao.ConsumoMateriaPrima, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(materialEsperado)
+            || string.IsNullOrWhiteSpace(reservaEsperada)
+            || string.IsNullOrWhiteSpace(itemReservaEsperado)
+            || string.IsNullOrWhiteSpace(loteEsperado)
+            || string.IsNullOrWhiteSpace(usuario)
+            || string.IsNullOrWhiteSpace(estacao))
+        {
+            return false;
+        }
+
+        CodigoBarrasOperacao codigo = Interpretar(codigoBarrasInicio);
+        if (!codigo.Valido
+            || codigo.TipoEvento != TipoEventoOperacao.Inicio
+            || !string.Equals(codigo.OrdemProducao, contexto.NumeroOrdem, StringComparison.Ordinal)
+            || !string.Equals(codigo.Operacao, contexto.Operacao, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        ResultadoExecucaoProcesso resultado = new(
+            ResultadoExecucaoProcessoApontamento.ConfirmadoSap,
+            codigoLancamento,
+            "Consumo já confirmado no SAP recuperado sem novo envio.",
+            true);
+
+        try
+        {
+            return await _criarRepositorio().TentarRecuperarConsumoConfirmadoAsync(
+                contexto,
+                codigoLancamento,
+                materialEsperado.Trim(),
+                reservaEsperada.Trim(),
+                itemReservaEsperado.Trim(),
+                loteEsperado.Trim(),
+                resultado,
+                usuario.Trim(),
+                estacao.Trim(),
+                codigo,
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is PostgresException or NpgsqlException or InvalidOperationException)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                $"[Apontamento] Falha ao recuperar consumo confirmado: {ex.GetType().Name}");
+            return false;
+        }
+    }
+
     private static EstadoConclusaoAgregada AvaliarConclusaoResultadoApontamento(
         OperacaoProducaoApontamento apontamento,
         IReadOnlyList<ApontamentoProcesso> vinculos)
