@@ -533,10 +533,20 @@ public sealed class ControleApontamentosRepositorio : RepositorioBase, IControle
                 comando.Parameters.Add(ParametroTexto("@codigo_barras_termino", codigoTermino.CodigoOriginal));
                 comando.Parameters.Add(ParametroTexto("@idempotency_key_termino", idempotencyKeyTermino));
 
-                object? terminadoEm = await comando.ExecuteScalarAsync(cancellationToken);
-                if (terminadoEm is null or DBNull)
+                // GATE 099B: terminado_em é timestamptz. Pelo caminho object de ExecuteScalar o provider Npgsql
+                // devolve um DateTime (UTC) encaixotado; o unboxing direto (DateTimeOffset)object lançava
+                // InvalidCastException, abortando a transação e deixando o término sem persistir. Lê de forma
+                // type-safe com GetFieldValue<DateTimeOffset> (mesmo padrão do mapeador desta classe), sem
+                // conversão dependente de locale. 0 linhas / DBNull ⇒ null (fail-closed: já concluído por outra estação).
+                DateTimeOffset terminadoEm;
+                await using (NpgsqlDataReader leitor = await comando.ExecuteReaderAsync(cancellationToken))
                 {
-                    return null; // já concluído por outra estação
+                    if (!await leitor.ReadAsync(cancellationToken) || await leitor.IsDBNullAsync(0, cancellationToken))
+                    {
+                        return null; // já concluído por outra estação
+                    }
+
+                    terminadoEm = leitor.GetFieldValue<DateTimeOffset>(0);
                 }
 
                 await InserirEventoAsync(
@@ -544,7 +554,7 @@ public sealed class ControleApontamentosRepositorio : RepositorioBase, IControle
                     StatusApontamentoOperacao.AguardandoFinalizacao, StatusApontamentoOperacao.Concluida,
                     "SUCESSO_TERMINO", "Término registrado.", string.Empty, cancellationToken);
 
-                return (DateTimeOffset)terminadoEm;
+                return terminadoEm;
             }, cancellationToken);
         }
         catch (PostgresException ex) when (ex.SqlState == SqlStateUniqueViolation)
