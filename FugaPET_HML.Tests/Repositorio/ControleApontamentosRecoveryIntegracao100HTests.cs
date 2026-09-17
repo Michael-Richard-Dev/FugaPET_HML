@@ -36,6 +36,16 @@ public sealed class ControleApontamentosRecoveryIntegracao100HTests : IAsyncLife
             return;
         }
 
+        // 100H-R3: guard EXATO fail-closed ANTES de qualquer conexão — só o alvo autorizado (host/porta/database/
+        // role/TLS) prossegue; qualquer divergência aborta sem tocar o banco.
+        Recovery100HAlvo.Resultado alvo = Recovery100HAlvo.Validar(
+            fabricaBase.ObterConnectionString(), BancoTesteIntegracao.DestrutivoAutorizado());
+        if (!alvo.Aceito)
+        {
+            _motivo = alvo.Motivo;
+            return;
+        }
+
         // Espelha a produção (FabricaConexaoPostgreSql define SearchPath = schema): garante que as conexões do
         // repositório resolvam as tabelas NÃO-qualificadas no schema homologacao. Sem alterar código produtivo.
         NpgsqlConnectionStringBuilder builder = new(fabricaBase.ObterConnectionString());
@@ -80,15 +90,27 @@ public sealed class ControleApontamentosRecoveryIntegracao100HTests : IAsyncLife
     // ============================ 01–15: FAIL-CLOSED (false, zero mutação) ============================
 
     [Recovery100HIntegrationFact]
-    public async Task Cenario01_PkInexistente_RetornaFalseSemMutacao()
+    public async Task Cenario01_CodigoLancamentoInexistente_RetornaFalseSemMutacao()
     {
-        Cenario cenario = await MontarHappyPathAsync();
-        long inexistente = 999_000_000 + Interlocked.Increment(ref _sequencia);
+        // 100H-R3 FIX01: apontamento e contexto VÁLIDOS; a PK de LANÇAMENTO passada é sinteticamente inexistente
+        // (namespace controlado pelo teste, ≥ 8e9 — sem MAX(id)+1 vulnerável a corrida). Nenhum lançamento é criado
+        // para essa PK. Prova o guard de PK/codigo_lancamento explícito inexistente (não "apontamento inexistente").
+        Cenario c = await MontarHappyPathAsync();
+        long lancamentoInexistente = 8_000_000_000L + Interlocked.Increment(ref _sequencia);
 
-        bool ok = await ExecutarRecuperacaoAsync(cenario with { CodigoApontamento = inexistente });
+        int vinculoAntes = await ContarVinculosAsync(c.CodigoApontamento);
+        int eventoAntes = await ContarEventosAsync(c.CodigoApontamento);
+
+        bool ok = await ExecutarRecuperacaoAsync(c with { CodigoLancamento = lancamentoInexistente });
 
         Assert.False(ok);
-        await AssertApontamentoIntactoAsync(cenario);
+        (string status, string? resultado, long? registro, bool concluidoNotNull) = await LerApontamentoAsync(c.CodigoApontamento);
+        Assert.Equal("EM_ANDAMENTO", status);           // status inalterado
+        Assert.Null(resultado);                          // resultado_operacional inalterado
+        Assert.Null(registro);                           // codigo_registro_processo inalterado
+        Assert.False(concluidoNotNull);                  // concluido_operacional_em inalterado
+        Assert.Equal(vinculoAntes, await ContarVinculosAsync(c.CodigoApontamento)); // vinculo_count_delta = 0
+        Assert.Equal(eventoAntes, await ContarEventosAsync(c.CodigoApontamento));   // evento_count_delta = 0
     }
 
     [Recovery100HIntegrationFact]
@@ -284,6 +306,10 @@ public sealed class ControleApontamentosRecoveryIntegracao100HTests : IAsyncLife
     {
         Cenario c = await MontarHappyPathAsync();
 
+        // 100H-R3 FIX02: snapshot COMPORTAMENTAL do consumo (chave + campos mutáveis + atualizado_em), não só COUNT,
+        // para provar INSERT=0/UPDATE=0/DELETE=0 no consumo associado à fixture após o rollback.
+        string consumoAntes = await SnapshotConsumoAsync(c.NumeroOrdem);
+
         await InstalarGatilhoFalhaEventoAsync();
         try
         {
@@ -304,6 +330,68 @@ public sealed class ControleApontamentosRecoveryIntegracao100HTests : IAsyncLife
         Assert.Null(registro);
         Assert.False(concluidoNotNull);
         Assert.Equal(0, await ContarEventosAsync(c.CodigoApontamento));
+
+        // Consumo (lançamento/item/pesagem) idêntico byte a byte ⇒ nenhum INSERT/UPDATE/DELETE no consumo da fixture.
+        string consumoDepois = await SnapshotConsumoAsync(c.NumeroOrdem);
+        Assert.Equal(consumoAntes, consumoDepois);
+    }
+
+    /// <summary>
+    /// Assinatura determinística do estado de consumo da fixture (por OP): lançamento + item + pesagem com chave e
+    /// TODOS os campos mutáveis relevantes (incl. *_atualizado_em). Igualdade antes/depois prova zero INSERT/UPDATE/DELETE.
+    /// </summary>
+    private async Task<string> SnapshotConsumoAsync(string numeroOrdem)
+    {
+        System.Text.StringBuilder sb = new();
+        await using NpgsqlConnection conexao = await AbrirAsync();
+
+        await AnexarLinhasAsync(conexao, sb, "L", $"""
+            SELECT codigo_consumo_material_lancamento, status_lancamento,
+                   coalesce(documento_material_sap,''), coalesce(exercicio_documento_material_sap,''),
+                   consumo_material_lancamento_atualizado_em
+              FROM {Schema}.consumo_material_lancamento
+             WHERE numero_ordem = @ordem
+             ORDER BY codigo_consumo_material_lancamento
+            """, numeroOrdem);
+
+        await AnexarLinhasAsync(conexao, sb, "I", $"""
+            SELECT codigo_consumo_material_item, codigo_material, coalesce(numero_reserva,''),
+                   coalesce(item_reserva,''), coalesce(lote,''), status_item, quantidade_consumida_local,
+                   consumo_material_item_atualizado_em
+              FROM {Schema}.consumo_material_item
+             WHERE numero_ordem = @ordem
+             ORDER BY codigo_consumo_material_item
+            """, numeroOrdem);
+
+        await AnexarLinhasAsync(conexao, sb, "P", $"""
+            SELECT p.codigo_consumo_material_pesagem, p.status_pesagem, p.peso_liquido_kg, p.peso_bruto_kg,
+                   p.peso_tara_kg, p.consumo_material_pesagem_criado_em
+              FROM {Schema}.consumo_material_pesagem p
+              JOIN {Schema}.consumo_material_item i
+                ON i.codigo_consumo_material_item = p.codigo_consumo_material_item
+             WHERE i.numero_ordem = @ordem
+             ORDER BY p.codigo_consumo_material_pesagem
+            """, numeroOrdem);
+
+        return sb.ToString();
+    }
+
+    private static async Task AnexarLinhasAsync(
+        NpgsqlConnection conexao, System.Text.StringBuilder sb, string prefixo, string sql, string numeroOrdem)
+    {
+        await using NpgsqlCommand cmd = new(sql, conexao);
+        cmd.Parameters.AddWithValue("@ordem", numeroOrdem);
+        await using NpgsqlDataReader leitor = await cmd.ExecuteReaderAsync();
+        while (await leitor.ReadAsync())
+        {
+            sb.Append(prefixo).Append('{');
+            for (int i = 0; i < leitor.FieldCount; i++)
+            {
+                if (i > 0) sb.Append('|');
+                sb.Append(leitor.IsDBNull(i) ? "<null>" : Convert.ToString(leitor.GetValue(i), System.Globalization.CultureInfo.InvariantCulture));
+            }
+            sb.Append("}\n");
+        }
     }
 
     // ============================ Cenários auxiliares ============================
@@ -658,28 +746,141 @@ public sealed class ControleApontamentosRecoveryIntegracao100HTests : IAsyncLife
     }
 }
 
-/// <summary>Fact que só executa com o opt-in explícito do banco de teste isolado (senão SKIP objetivo, sem tocar banco).</summary>
+/// <summary>
+/// Guard EXATO e fail-closed do alvo de teste 100H (100H-R3). Valida SEMANTICAMENTE (via
+/// NpgsqlConnectionStringBuilder — nunca busca textual frágil) que a connection string aponta EXATAMENTE para o
+/// banco de teste isolado autorizado, além do opt-in destrutivo e do prefixo de segurança já existentes. Não abre
+/// conexão. NÃO altera/enfraquece BancoTesteIntegracao (guard aditivo, específico do 100H).
+/// </summary>
+internal static class Recovery100HAlvo
+{
+    public const string Host = "192.168.3.226";
+    public const int Port = 5432;
+    public const string Database = "fuga_balanca_teste_recovery_100h";
+    public const string Username = "fugapet_test_recovery_100h";
+
+    public sealed record Resultado(bool Aceito, string Motivo);
+
+    public static Resultado Validar(string? connectionString, bool destrutivoAutorizado)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return new(false, $"{BancoTesteIntegracao.VariavelConnectionString} não configurada.");
+        }
+
+        if (!destrutivoAutorizado)
+        {
+            return new(false, $"Defina {BancoTesteIntegracao.VariavelPermitirDestrutivo}=true para autorizar testes destrutivos.");
+        }
+
+        NpgsqlConnectionStringBuilder builder;
+        try
+        {
+            builder = new NpgsqlConnectionStringBuilder(connectionString);
+        }
+        catch (Exception ex)
+        {
+            return new(false, $"Connection string inválida: {ex.GetType().Name}.");
+        }
+
+        string database = builder.Database ?? string.Empty;
+        if (!database.StartsWith(BancoTesteIntegracao.PrefixoBancoSeguro, StringComparison.OrdinalIgnoreCase))
+        {
+            return new(false, $"database '{database}' não começa com '{BancoTesteIntegracao.PrefixoBancoSeguro}'.");
+        }
+
+        if (!string.Equals(builder.Host, Host, StringComparison.Ordinal))
+        {
+            return new(false, "host divergente do alvo 100H (localhost/127.0.0.1/outro rejeitado).");
+        }
+
+        if (builder.Port != Port)
+        {
+            return new(false, "porta divergente do alvo 100H.");
+        }
+
+        if (!string.Equals(database, Database, StringComparison.Ordinal))
+        {
+            return new(false, "database divergente do alvo 100H (mesmo com prefixo fuga_balanca_teste_).");
+        }
+
+        if (!string.Equals(builder.Username, Username, StringComparison.Ordinal))
+        {
+            return new(false, "role divergente do alvo 100H.");
+        }
+
+        if (builder.SslMode != SslMode.Require)
+        {
+            return new(false, "TLS deve ser Require (SSL desabilitado/prefer/allow rejeitado).");
+        }
+
+        return new(true, string.Empty);
+    }
+}
+
+/// <summary>Fact que só executa quando o alvo é EXATAMENTE o banco de teste 100H autorizado (senão SKIP objetivo, sem tocar banco).</summary>
 internal sealed class Recovery100HIntegrationFactAttribute : FactAttribute
 {
     public Recovery100HIntegrationFactAttribute()
     {
         string? conn = Environment.GetEnvironmentVariable(BancoTesteIntegracao.VariavelConnectionString);
-        if (string.IsNullOrWhiteSpace(conn))
+        Recovery100HAlvo.Resultado resultado = Recovery100HAlvo.Validar(conn, BancoTesteIntegracao.DestrutivoAutorizado());
+        if (!resultado.Aceito)
         {
-            Skip = $"Integração recovery 100H ignorada: {BancoTesteIntegracao.VariavelConnectionString} não configurada.";
-            return;
-        }
-
-        if (!BancoTesteIntegracao.DestrutivoAutorizado())
-        {
-            Skip = $"Integração recovery 100H ignorada: defina {BancoTesteIntegracao.VariavelPermitirDestrutivo}=true.";
-            return;
-        }
-
-        string database = new NpgsqlConnectionStringBuilder(conn).Database ?? string.Empty;
-        if (!database.StartsWith(BancoTesteIntegracao.PrefixoBancoSeguro, StringComparison.OrdinalIgnoreCase))
-        {
-            Skip = $"Integração recovery 100H ignorada: database '{database}' não começa com '{BancoTesteIntegracao.PrefixoBancoSeguro}'.";
+            Skip = $"Integração recovery 100H ignorada: {resultado.Motivo}";
         }
     }
+}
+
+/// <summary>
+/// 100H-R3 — testes DB-FREE do guard exato do alvo (nenhuma conexão PostgreSQL). Provam fail-closed:
+/// alvo exato aceita; host/porta/database/role divergentes rejeitam; TLS ≠ Require rejeita; opt-in ausente rejeita.
+/// </summary>
+public sealed class Recovery100HAlvoGuardTests
+{
+    private const string Alvo =
+        "Host=192.168.3.226;Port=5432;Database=fuga_balanca_teste_recovery_100h;Username=fugapet_test_recovery_100h;Password=x;SSL Mode=Require";
+
+    [Fact]
+    public void AlvoExatoComOptIn_Aceita()
+        => Assert.True(Recovery100HAlvo.Validar(Alvo, destrutivoAutorizado: true).Aceito);
+
+    [Fact]
+    public void OptInDestrutivoAusente_Rejeita()
+    {
+        Recovery100HAlvo.Resultado r = Recovery100HAlvo.Validar(Alvo, destrutivoAutorizado: false);
+        Assert.False(r.Aceito);
+    }
+
+    [Fact]
+    public void ConnectionStringVazia_Rejeita()
+        => Assert.False(Recovery100HAlvo.Validar(null, destrutivoAutorizado: true).Aceito);
+
+    [Theory]
+    [InlineData("Host=localhost;Port=5432;Database=fuga_balanca_teste_recovery_100h;Username=fugapet_test_recovery_100h;SSL Mode=Require")]
+    [InlineData("Host=127.0.0.1;Port=5432;Database=fuga_balanca_teste_recovery_100h;Username=fugapet_test_recovery_100h;SSL Mode=Require")]
+    [InlineData("Host=192.168.3.999;Port=5432;Database=fuga_balanca_teste_recovery_100h;Username=fugapet_test_recovery_100h;SSL Mode=Require")]
+    public void HostDivergente_Rejeita(string conn)
+        => Assert.False(Recovery100HAlvo.Validar(conn, destrutivoAutorizado: true).Aceito);
+
+    [Fact]
+    public void PortaDivergente_Rejeita()
+        => Assert.False(Recovery100HAlvo.Validar(Alvo.Replace("Port=5432", "Port=5433", StringComparison.Ordinal), true).Aceito);
+
+    [Fact]
+    public void DatabaseDivergenteMasComPrefixoSeguro_Rejeita()
+        => Assert.False(Recovery100HAlvo.Validar(
+            Alvo.Replace("Database=fuga_balanca_teste_recovery_100h", "Database=fuga_balanca_teste_outro", StringComparison.Ordinal), true).Aceito);
+
+    [Fact]
+    public void RoleDivergente_Rejeita()
+        => Assert.False(Recovery100HAlvo.Validar(
+            Alvo.Replace("Username=fugapet_test_recovery_100h", "Username=postgres", StringComparison.Ordinal), true).Aceito);
+
+    [Theory]
+    [InlineData("SSL Mode=Disable")]
+    [InlineData("SSL Mode=Prefer")]
+    [InlineData("SSL Mode=Allow")]
+    public void TlsDiferenteDeRequire_Rejeita(string ssl)
+        => Assert.False(Recovery100HAlvo.Validar(Alvo.Replace("SSL Mode=Require", ssl, StringComparison.Ordinal), true).Aceito);
 }
