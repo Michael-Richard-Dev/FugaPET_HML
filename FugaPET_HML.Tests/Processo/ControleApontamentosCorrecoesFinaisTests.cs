@@ -583,6 +583,26 @@ public sealed class ControleApontamentosCorrecoesFinaisTests
     }
 
     [Fact]
+    public void RegistrarZeroIntencional_UsaColunaDecididoEmDoSchemaQ()
+    {
+        // GATE 100M: a coluna do schema Q é decidido_em (timestamptz NOT NULL DEFAULT now()); o INSERT usava
+        // criado_em (inexistente) e quebrava "Não Consumido" com "Não foi possível registrar a decisão operacional".
+        // Regressão: FALHA com criado_em, PASSA com decidido_em — sem mudar a semântica funcional.
+        string repo = LerArquivoProjeto("AcessoDados", "Repositorio", "ControleApontamentosRepositorio.cs");
+        string metodo = ExtrairMetodo(
+            repo, "public async Task<ResultadoDecisaoOperacionalConsumo> RegistrarZeroIntencionalAsync");
+
+        Assert.Contains("decidido_em", metodo, StringComparison.Ordinal);
+        Assert.DoesNotContain("criado_em", metodo, StringComparison.Ordinal);
+
+        // Semântica preservada: ZERO_INTENCIONAL, quantidade 0, carimbo now(), idempotência por ON CONFLICT.
+        Assert.Contains("'ZERO_INTENCIONAL', 0, @unidade, @usuario, @estacao, now()", metodo, StringComparison.Ordinal);
+        Assert.Contains(
+            "ON CONFLICT (codigo_apontamento, numero_reserva, item_reserva) DO NOTHING",
+            metodo, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Pacote039_ExigeResultadoValidoTambemEmConcluida()
     {
         string proposta = LerArquivoProjeto(

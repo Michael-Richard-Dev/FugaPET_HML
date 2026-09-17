@@ -832,7 +832,7 @@ public sealed class ControleApontamentosRepositorio : RepositorioBase, IControle
                     INSERT INTO consumo_material_componente_decisao
                     (
                         codigo_apontamento, numero_reserva, item_reserva, codigo_material,
-                        decisao_operacional, quantidade, unidade, usuario, estacao, criado_em
+                        decisao_operacional, quantidade, unidade, usuario, estacao, decidido_em
                     )
                     VALUES
                     (
