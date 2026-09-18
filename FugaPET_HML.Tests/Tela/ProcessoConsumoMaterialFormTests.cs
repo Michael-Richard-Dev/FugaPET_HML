@@ -883,7 +883,9 @@ public sealed class ProcessoConsumoMaterialFormTests
         Assert.Contains("_controller.EnviarConsumoSap261Async(", form, StringComparison.Ordinal);
         Assert.Contains("_enviandoSap", form, StringComparison.Ordinal);
         Assert.Contains("Enviar SAP 261", form, StringComparison.Ordinal);
-        Assert.Contains("Deseja enviar este consumo ao SAP agora?", form, StringComparison.Ordinal);
+        // GATE 101E-P2: cerimônia de autorização explícita do envio 261 (confirmação humana + capability bound).
+        Assert.Contains("Autorizar um envio SAP 261 para este consumo?", form, StringComparison.Ordinal);
+        Assert.Contains("ConfirmarEHabilitarEnvio261Async", form, StringComparison.Ordinal);
         Assert.DoesNotContain("HttpMethod.Patch", form, StringComparison.Ordinal);
 
         // NAO envia automaticamente apos salvar: ConfirmarConsumoAsync nao chama o envio SAP.

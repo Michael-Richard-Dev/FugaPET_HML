@@ -70,6 +70,10 @@ public partial class ProcessoConsumoMaterialForm : Form
 
     // Preview SAP 261 (Tarefa 6): só montagem/visualização do payload — NÃO envia SAP.
     private long? _ultimoCodigoLancamentoSalvo;
+
+    // GATE 101E-P2 §8/§9: cerimônia de habilitação da escrita SAP 261 (capability bound ao lançamento). Sem env
+    // write=true, SÓ esta cerimônia (confirmação humana + auditoria durável) arma o envio de PK específico.
+    private readonly global::FugaPET_HML.Servicos.IntegracaoSap.HabilitacaoEscritaSap261Servico _habilitacao261 = new();
     private Button? _previewSap261Button;
 
     // Envio controlado SAP 261 (Tarefa 7): governado por WRITE_ENABLED; trava clique duplo.
@@ -3153,6 +3157,40 @@ public partial class ProcessoConsumoMaterialForm : Form
     /// Trava clique duplo (<see cref="_enviandoSap"/>); bloqueio/sucesso/erro vem do service (WRITE_ENABLED,
     /// CSRF, parse rigoroso). Mensagens sanitizadas.
     /// </summary>
+    /// <summary>
+    /// GATE 101E-P2 §8/§9: cerimônia HUMANA explícita de autorização do envio SAP 261, bound ao
+    /// <paramref name="codigoLancamento"/>. NÃO ⇒ retorna false (nada armado, nada enviado, PENDENTE preservado).
+    /// SIM ⇒ arma a capability 261 via <see cref="HabilitacaoEscritaSap261Servico"/> (auditoria durável fail-closed);
+    /// falha de habilitação ⇒ false. A mesma cerimônia é usada no fluxo normal e no recovery (mesmo botão/PK).
+    /// </summary>
+    private async Task<bool> ConfirmarEHabilitarEnvio261Async(long codigoLancamento)
+    {
+        string op = _ordemConsumoAtual?.NumeroOrdem
+            ?? _contextoApontamento?.NumeroOrdem
+            ?? "-";
+
+        if (MessageBox.Show(
+                $"Autorizar um envio SAP 261 para este consumo?{Environment.NewLine}OP: {op}{Environment.NewLine}Lançamento: {codigoLancamento}",
+                "Autorizar envio SAP 261",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question) != DialogResult.Yes)
+        {
+            statusLabel.Text = "Envio SAP 261 não autorizado pelo operador. O consumo permanece pendente.";
+            return false;
+        }
+
+        global::FugaPET_HML.Servicos.Cadastro.ResultadoOperacao habilitacao =
+            await _habilitacao261.HabilitarParaEnvioAsync(codigoLancamento);
+        if (!habilitacao.Sucesso)
+        {
+            statusLabel.Text = habilitacao.Mensagem;
+            MessageBox.Show(habilitacao.Mensagem, "Autorizar envio SAP 261", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
+        }
+
+        return true;
+    }
+
     private async Task EnviarSap261Async()
     {
         if (_enviandoSap)
@@ -3185,11 +3223,10 @@ public partial class ProcessoConsumoMaterialForm : Form
             return;
         }
 
-        if (MessageBox.Show(
-                "Deseja enviar este consumo ao SAP agora?",
-                "Enviar SAP 261",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Question) != DialogResult.Yes)
+        // GATE 101E-P2 §8/§9: cerimônia HUMANA + habilitação da capability 261 bound ao lançamento ANTES do envio.
+        // NÃO ⇒ nada armado, nada enviado (PENDENTE preservado). Mesma cerimônia serve ao fluxo normal e ao recovery
+        // (o botão reaproveita _ultimoCodigoLancamentoSalvo materializado pelo recovery).
+        if (!await ConfirmarEHabilitarEnvio261Async(codigoLancamento))
         {
             return;
         }

@@ -18,6 +18,7 @@ internal sealed class ConsumoMaterialSap261MockServico : IConsumoMaterialSap261S
 
     public Task<ResultadoEnvioConsumoSap261> EnviarConsumo261Async(
         ConsumoMaterialSap261Request requisicao,
+        long codigoLancamento,
         string chaveNegocio,
         CancellationToken cancellationToken = default)
         => Task.FromResult(ValidarProntoParaEnvio());

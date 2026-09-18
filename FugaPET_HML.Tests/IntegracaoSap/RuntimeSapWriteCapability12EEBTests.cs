@@ -343,7 +343,11 @@ public sealed class RuntimeSapWriteCapability12EEBTests : IDisposable
         string src = LerFonte("Servicos", "IntegracaoSap", "ConsumoMaterialSap261Servico.cs");
         Assert.Contains("_configuracaoSap.EscritaHabilitada", src, StringComparison.Ordinal);
         Assert.DoesNotContain("EscritaRuntimeAutorizada101", src, StringComparison.Ordinal);
-        Assert.DoesNotContain("RuntimeSapWriteCapability", src, StringComparison.Ordinal);
+        // GATE 101E-P2: o writer 261 usa a capability 261 (isolada da 101). Continua SEM acoplamento à 101.
+        Assert.DoesNotContain("TryAdquirir101", src, StringComparison.Ordinal);
+        Assert.DoesNotContain("RuntimeSapWriteCapability.Instancia", src, StringComparison.Ordinal);
+        Assert.DoesNotContain("Armada101", src, StringComparison.Ordinal);
+        Assert.Contains("RuntimeSapWriteCapability261", src, StringComparison.Ordinal);
     }
 
     [Fact] // T15: HU permanece gated por EscritaHabilitada (isolado da capability 101).
@@ -598,8 +602,10 @@ public sealed class RuntimeSapWriteCapability12EEBTests : IDisposable
         })
         {
             string src = LerFonte("Servicos", "IntegracaoSap", arquivo);
+            // GATE 101E-P2: nenhum destes writers usa a capability 101 (o 261 usa a SUA própria capability 261).
             Assert.DoesNotContain("TryAdquirir101", src, StringComparison.Ordinal);
-            Assert.DoesNotContain("RuntimeSapWriteCapability", src, StringComparison.Ordinal);
+            Assert.DoesNotContain("RuntimeSapWriteCapability.Instancia", src, StringComparison.Ordinal);
+            Assert.DoesNotContain("Armada101", src, StringComparison.Ordinal);
         }
     }
 }
