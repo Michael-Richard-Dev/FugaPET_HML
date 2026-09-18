@@ -3069,6 +3069,12 @@ public partial class ProcessoConsumoMaterialForm : Form
         if (_modoConsumo == ModoConsumoMaterial.Quimico)
         {
             ResultadoEnvioConsumoSap261? envio = await ExecutarEnvioSap261AposConfirmarAsync(codigoLancamento, usuario);
+            if (envio is null)
+            {
+                // GATE 101E-P3 §5: cerimônia 261 recusada/habilitação falhou ⇒ zero envio; PENDENTE preservado; atividade NÃO concluída.
+                return ResultadoOrquestracaoConsumoApontamento.NaoConcluido(codigoLancamento,
+                    "Envio SAP 261 não autorizado. O consumo de químicos foi salvo localmente e permanece pendente de envio.");
+            }
             return ResultadoOrquestracaoConsumoApontamento.DoEnvio261(
                 codigoLancamento,
                 envio,
@@ -3079,6 +3085,12 @@ public partial class ProcessoConsumoMaterialForm : Form
         if (_rotaEnvioSalva == RotaEnvioConsumo.Direto261)
         {
             ResultadoEnvioConsumoSap261? envio = await ExecutarEnvioSap261AposConfirmarAsync(codigoLancamento, usuario);
+            if (envio is null)
+            {
+                // GATE 101E-P3 §5: cerimônia 261 recusada/habilitação falhou ⇒ zero envio; PENDENTE preservado; atividade NÃO concluída.
+                return ResultadoOrquestracaoConsumoApontamento.NaoConcluido(codigoLancamento,
+                    "Envio SAP 261 não autorizado. O consumo foi salvo localmente e permanece pendente de envio.");
+            }
             return ResultadoOrquestracaoConsumoApontamento.DoEnvio261(
                 codigoLancamento,
                 envio,
@@ -3104,9 +3116,20 @@ public partial class ProcessoConsumoMaterialForm : Form
             + "Verifique depósito, lote e componentes antes de enviar ao SAP.");
     }
 
-    /// <summary>Refatoração: envio 261 direto SEM depender de botão visual (reaproveita o método existente).</summary>
-    private async Task<ResultadoEnvioConsumoSap261?> ExecutarEnvioSap261AposConfirmarAsync(long codigoLancamento, string usuario)
+    /// <summary>
+    /// GATE 101E-P3: SEAM ÚNICO de autorização+envio 261, compartilhado pelo fluxo normal (pós-Confirmar Consumo),
+    /// pelo envio manual e pelo recovery. (1) confirmação humana + habilitação da capability BOUND ao
+    /// codigo_lancamento (auditoria durável fail-closed); recusa/habilitação falha ⇒ retorna null: ZERO capability
+    /// efetiva, ZERO claim, ZERO HTTP, PENDENTE_SAP preservado. (2) SÓ após armar, invoca o envio controlado
+    /// (claim → writer → TryAdquirir261 → POST). No máximo UMA confirmação humana, UM armamento, UM envio.
+    /// </summary>
+    private async Task<ResultadoEnvioConsumoSap261?> AutorizarEEnviarSap261Async(long codigoLancamento, string usuario)
     {
+        if (!await ConfirmarEHabilitarEnvio261Async(codigoLancamento))
+        {
+            return null;
+        }
+
         ResultadoEnvioConsumoSap261 resultado = await _controller.EnviarConsumoSap261Async(codigoLancamento, usuario);
         if (!resultado.Sucesso && resultado.StatusHttp.HasValue)
         {
@@ -3115,6 +3138,10 @@ public partial class ProcessoConsumoMaterialForm : Form
 
         return resultado;
     }
+
+    /// <summary>Fluxo normal pós-confirmar: delega ao SEAM único (mesma cerimônia do envio manual/recovery).</summary>
+    private Task<ResultadoEnvioConsumoSap261?> ExecutarEnvioSap261AposConfirmarAsync(long codigoLancamento, string usuario)
+        => AutorizarEEnviarSap261Async(codigoLancamento, usuario);
 
     private string ObterTooltipEnvio261(bool salvo)
     {
@@ -3223,25 +3250,17 @@ public partial class ProcessoConsumoMaterialForm : Form
             return;
         }
 
-        // GATE 101E-P2 §8/§9: cerimônia HUMANA + habilitação da capability 261 bound ao lançamento ANTES do envio.
-        // NÃO ⇒ nada armado, nada enviado (PENDENTE preservado). Mesma cerimônia serve ao fluxo normal e ao recovery
-        // (o botão reaproveita _ultimoCodigoLancamentoSalvo materializado pelo recovery).
-        if (!await ConfirmarEHabilitarEnvio261Async(codigoLancamento))
-        {
-            return;
-        }
-
         _enviandoSap = true;
         AtualizarBotaoConfirmar();
         try
         {
             string usuario = global::FugaPET_HML.Tela.Comum.UsuarioLogadoUiHelper.ObterLogin();
-            ResultadoEnvioConsumoSap261 resultado = await _controller.EnviarConsumoSap261Async(codigoLancamento, usuario);
-
-            // Correcao 4: falha de nível SAP (HTTP) marca FALHA_SAP local — bloqueia reenvio automático.
-            if (!resultado.Sucesso && resultado.StatusHttp.HasValue)
+            // GATE 101E-P3: SEAM ÚNICO (cerimônia humana + habilitação da capability bound + envio). Recusa/
+            // habilitação falha ⇒ null: nada armado, nada enviado, PENDENTE_SAP preservado (§5).
+            ResultadoEnvioConsumoSap261? resultado = await AutorizarEEnviarSap261Async(codigoLancamento, usuario);
+            if (resultado is null)
             {
-                _lancamentoComFalhaSap = true;
+                return; // ConfirmarEHabilitarEnvio261Async já publicou a mensagem ao operador.
             }
 
             statusLabel.Text = resultado.Mensagem;
