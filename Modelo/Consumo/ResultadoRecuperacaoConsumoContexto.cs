@@ -79,4 +79,22 @@ public static class RecuperacaoConsumoPolitica
     /// PENDENTE recuperado E com PK. Falha/ambíguo/enviando/desconhecido ⇒ false (zero capability/claim/HTTP).</summary>
     public static bool PermiteEnvioRecuperado(ModalidadeRecuperacaoConsumo modalidade, long? codigoLancamentoRecuperado)
         => modalidade == ModalidadeRecuperacaoConsumo.UmPendente && codigoLancamentoRecuperado.HasValue;
+
+    /// <summary>
+    /// GATE 101N — mapeamento CANÔNICO e DEFAULT-DENY da modalidade resolvida para a modalidade EFETIVA que a
+    /// tela deve aplicar. Cada valor conhecido mapeia para si mesmo; QUALQUER valor fora do domínio (enum não
+    /// reconhecido / resultado inconsistente) mapeia para <see cref="ModalidadeRecuperacaoConsumo.FalhaResolucaoPersistida"/>.
+    /// NUNCA mapeia um valor desconhecido para <see cref="ModalidadeRecuperacaoConsumo.Nenhum"/>. A Form decide
+    /// o wiring por ESTA função, então testá-la é testar a decisão real da tela.
+    /// </summary>
+    public static ModalidadeRecuperacaoConsumo ModalidadeEfetiva(ModalidadeRecuperacaoConsumo modalidade)
+        => modalidade switch
+        {
+            ModalidadeRecuperacaoConsumo.Nenhum => ModalidadeRecuperacaoConsumo.Nenhum,
+            ModalidadeRecuperacaoConsumo.UmPendente => ModalidadeRecuperacaoConsumo.UmPendente,
+            ModalidadeRecuperacaoConsumo.AmbiguoPendente => ModalidadeRecuperacaoConsumo.AmbiguoPendente,
+            ModalidadeRecuperacaoConsumo.EnviandoReconciliacao => ModalidadeRecuperacaoConsumo.EnviandoReconciliacao,
+            ModalidadeRecuperacaoConsumo.FalhaResolucaoPersistida => ModalidadeRecuperacaoConsumo.FalhaResolucaoPersistida,
+            _ => ModalidadeRecuperacaoConsumo.FalhaResolucaoPersistida
+        };
 }

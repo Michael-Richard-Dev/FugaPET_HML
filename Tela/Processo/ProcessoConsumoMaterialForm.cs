@@ -3132,25 +3132,31 @@ public partial class ProcessoConsumoMaterialForm : Form
             // Uma nova resolução READ-ONLY bem-sucedida pode substituir este estado depois (§9).
             System.Diagnostics.Trace.TraceWarning(
                 $"[Consumo][Recovery] EVENTO=FALHA_RESOLUCAO_PERSISTIDA; EXCEPTION_TYPE={ex.GetType().Name}");
-            _codigoLancamentoRecuperado = null;
-            _snapshotRecuperacao = null;
-            _modalidadeRecuperacao = global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.FalhaResolucaoPersistida;
-            AplicarBloqueioReconciliacao(
-                "Não foi possível validar o estado persistido deste consumo. Novas operações estão "
-                + "bloqueadas até que a consulta seja executada com sucesso.");
+            AplicarFalhaResolucaoPersistida();
             return;
         }
 
-        _modalidadeRecuperacao = resultado.Modalidade;
-        switch (resultado.Modalidade)
+        // GATE 101N — DEFAULT-DENY: mapeia a modalidade resolvida para a EFETIVA por RecuperacaoConsumoPolitica
+        // (qualquer valor fora do domínio → FalhaResolucaoPersistida; SOMENTE Nenhum explícito libera fluxo novo).
+        // A tela decide o wiring por ESTA modalidade efetiva. NUNCA um valor desconhecido vira Nenhum.
+        global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo modalidadeEfetiva =
+            global::FugaPET_HML.Modelo.Consumo.RecuperacaoConsumoPolitica.ModalidadeEfetiva(resultado.Modalidade);
+        switch (modalidadeEfetiva)
         {
+            case global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.Nenhum:
+                // Resolução bem-sucedida e sem estado persistido relevante: único caminho que libera fresh flow.
+                LimparEstadoRecuperacao();
+                break;
+
             case global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.UmPendente:
+                _modalidadeRecuperacao = global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.UmPendente;
                 _codigoLancamentoRecuperado = resultado.CodigoLancamento;
                 _snapshotRecuperacao = SnapshotContextoRecuperacaoAtual();
                 AplicarMaterializacaoRecuperacaoPendente(resultado.CodigoLancamento!.Value);
                 break;
 
             case global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.AmbiguoPendente:
+                _modalidadeRecuperacao = global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.AmbiguoPendente;
                 _codigoLancamentoRecuperado = null;
                 _snapshotRecuperacao = null;
                 AplicarBloqueioReconciliacao(
@@ -3159,6 +3165,7 @@ public partial class ProcessoConsumoMaterialForm : Form
                 break;
 
             case global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.EnviandoReconciliacao:
+                _modalidadeRecuperacao = global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.EnviandoReconciliacao;
                 _codigoLancamentoRecuperado = null;
                 _snapshotRecuperacao = null;
                 AplicarBloqueioReconciliacao(
@@ -3166,8 +3173,12 @@ public partial class ProcessoConsumoMaterialForm : Form
                     + "bloqueado; nenhum novo envio é habilitado até a reconciliação.");
                 break;
 
+            case global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.FalhaResolucaoPersistida:
             default:
-                LimparEstadoRecuperacao();
+                // Falha explícita OU valor fora do domínio conhecido ⇒ fail-closed idêntico à falha técnica.
+                System.Diagnostics.Trace.TraceWarning(
+                    $"[Consumo][Recovery] EVENTO=MODALIDADE_NAO_RECONHECIDA; VALOR={(int)resultado.Modalidade}");
+                AplicarFalhaResolucaoPersistida();
                 break;
         }
     }
@@ -3202,6 +3213,22 @@ public partial class ProcessoConsumoMaterialForm : Form
         }
 
         statusLabel.Text = mensagem;
+    }
+
+    /// <summary>
+    /// GATE 101L/101N: materializa o estado FAIL-CLOSED de "estado persistido indisponível" — modalidade
+    /// FalhaResolucaoPersistida, PK/snapshot nulos, bloqueio total de novas operações e mensagem sanitizada.
+    /// Compartilhado pelo catch do resolvedor (exceção) e pelo case default do switch (modalidade desconhecida),
+    /// garantindo que NENHUM caminho de falha/indeterminação libere fluxo novo.
+    /// </summary>
+    private void AplicarFalhaResolucaoPersistida()
+    {
+        _codigoLancamentoRecuperado = null;
+        _snapshotRecuperacao = null;
+        _modalidadeRecuperacao = global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.FalhaResolucaoPersistida;
+        AplicarBloqueioReconciliacao(
+            "Não foi possível validar o estado persistido deste consumo. Novas operações estão "
+            + "bloqueadas até que a consulta seja executada com sucesso.");
     }
 
     private void AtualizarBotoesRecuperacao()

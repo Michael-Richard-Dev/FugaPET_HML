@@ -362,9 +362,12 @@ public sealed class ConsumoRecuperacaoLancamentoCode05Tests
         string form = Fonte("Tela", "Processo", "ProcessoConsumoMaterialForm.cs");
         string metodo = ExtrairMetodo(form, "private async Task ResolverRecuperacaoPersistidaDoContextoAsync");
         string corpoCatch = ExtrairBloco(metodo, "catch (Exception ex)");
-        Assert.Contains("ModalidadeRecuperacaoConsumo.FalhaResolucaoPersistida", corpoCatch, StringComparison.Ordinal);
-        // §2/§3: o catch NÃO pode reduzir a Nenhum via LimparEstadoRecuperacao.
+        // O catch delega ao helper fail-closed compartilhado; NÃO reduz a Nenhum via LimparEstadoRecuperacao.
+        Assert.Contains("AplicarFalhaResolucaoPersistida()", corpoCatch, StringComparison.Ordinal);
         Assert.DoesNotContain("LimparEstadoRecuperacao()", corpoCatch, StringComparison.Ordinal);
+        // O helper materializa FalhaResolucaoPersistida (≠ Nenhum).
+        string helper = ExtrairMetodo(form, "private void AplicarFalhaResolucaoPersistida");
+        Assert.Contains("ModalidadeRecuperacaoConsumo.FalhaResolucaoPersistida", helper, StringComparison.Ordinal);
     }
 
     [Theory] // F02–F07: falha bloqueia leitura/pesagem(ler+digitar)/confirmar/save/lançamento (default-deny).
@@ -394,10 +397,10 @@ public sealed class ConsumoRecuperacaoLancamentoCode05Tests
     public void F11_FormCatch_ZeraPkRecuperado()
     {
         string form = Fonte("Tela", "Processo", "ProcessoConsumoMaterialForm.cs");
-        string metodo = ExtrairMetodo(form, "private async Task ResolverRecuperacaoPersistidaDoContextoAsync");
-        string corpoCatch = ExtrairBloco(metodo, "catch (Exception ex)");
-        Assert.Contains("_codigoLancamentoRecuperado = null;", corpoCatch, StringComparison.Ordinal);
-        Assert.Contains("_snapshotRecuperacao = null;", corpoCatch, StringComparison.Ordinal);
+        // O catch delega ao helper compartilhado, que zera PK/snapshot (nenhum PK inventado na falha).
+        string helper = ExtrairMetodo(form, "private void AplicarFalhaResolucaoPersistida");
+        Assert.Contains("_codigoLancamentoRecuperado = null;", helper, StringComparison.Ordinal);
+        Assert.Contains("_snapshotRecuperacao = null;", helper, StringComparison.Ordinal);
     }
 
     [Fact] // F12: falha seguida de nova resolução bem-sucedida com 0 candidatos → SOMENTE então Nenhum.
@@ -458,6 +461,91 @@ public sealed class ConsumoRecuperacaoLancamentoCode05Tests
         var desconhecida = (ModalidadeRecuperacaoConsumo)999;
         Assert.True(RecuperacaoConsumoPolitica.BloqueiaNovoConsumo(desconhecida));
         Assert.False(RecuperacaoConsumoPolitica.PermiteEnvioRecuperado(desconhecida, 8));
+    }
+
+    // ======================================================================================
+    // GATE 101N — modalidade DESCONHECIDA fail-closed no wiring da Form (U01–U12)
+    // ======================================================================================
+
+    private const ModalidadeRecuperacaoConsumo ModalidadeDesconhecida = (ModalidadeRecuperacaoConsumo)999;
+
+    [Fact] // U01(wiring): a Form decide por RecuperacaoConsumoPolitica.ModalidadeEfetiva e o switch NÃO tem
+           // default→LimparEstadoRecuperacao; valor desconhecido cai em FalhaResolucaoPersistida (não Nenhum).
+    public void U01_FormWiring_DesconhecidoNaoViraNenhum()
+    {
+        string form = Fonte("Tela", "Processo", "ProcessoConsumoMaterialForm.cs");
+        string metodo = ExtrairMetodo(form, "private async Task ResolverRecuperacaoPersistidaDoContextoAsync");
+        // A tela decide pelo mapeamento canônico default-deny.
+        Assert.Contains("RecuperacaoConsumoPolitica.ModalidadeEfetiva(resultado.Modalidade)", metodo, StringComparison.Ordinal);
+        Assert.Contains("switch (modalidadeEfetiva)", metodo, StringComparison.Ordinal);
+        // Existe case Nenhum EXPLÍCITO (único a limpar/liberar) e case Falha+default fail-closed.
+        Assert.Contains("case global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.Nenhum:", metodo, StringComparison.Ordinal);
+        Assert.Contains("case global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.FalhaResolucaoPersistida:", metodo, StringComparison.Ordinal);
+        // O bloco default NÃO pode reduzir a Nenhum via LimparEstadoRecuperacao.
+        string blocoDefault = ExtrairBlocoDefault(metodo);
+        Assert.Contains("AplicarFalhaResolucaoPersistida()", blocoDefault, StringComparison.Ordinal);
+        Assert.DoesNotContain("LimparEstadoRecuperacao()", blocoDefault, StringComparison.Ordinal);
+    }
+
+    [Fact] // U02: modalidade desconhecida → efetiva = FalhaResolucaoPersistida (≠ Nenhum). Mesma função que a Form usa.
+    public void U02_Desconhecido_EfetivaFalha()
+    {
+        ModalidadeRecuperacaoConsumo efetiva = RecuperacaoConsumoPolitica.ModalidadeEfetiva(ModalidadeDesconhecida);
+        Assert.Equal(ModalidadeRecuperacaoConsumo.FalhaResolucaoPersistida, efetiva);
+        Assert.NotEqual(ModalidadeRecuperacaoConsumo.Nenhum, efetiva);
+    }
+
+    [Fact] // U03–U07: modalidade efetiva de um desconhecido bloqueia leitura/peso/confirmar/save/lançamento.
+    public void U03_a_U07_Desconhecido_BloqueiaNovoConsumo()
+    {
+        ModalidadeRecuperacaoConsumo efetiva = RecuperacaoConsumoPolitica.ModalidadeEfetiva(ModalidadeDesconhecida);
+        Assert.True(RecuperacaoConsumoPolitica.BloqueiaNovoConsumo(efetiva));
+    }
+
+    [Fact] // U08–U10: modalidade efetiva de um desconhecido não habilita envio ⇒ zero capability/claim/HTTP.
+    public void U08_a_U10_Desconhecido_NaoHabilitaEnvio()
+    {
+        ModalidadeRecuperacaoConsumo efetiva = RecuperacaoConsumoPolitica.ModalidadeEfetiva(ModalidadeDesconhecida);
+        Assert.False(RecuperacaoConsumoPolitica.PermiteEnvioRecuperado(efetiva, null));
+        Assert.False(RecuperacaoConsumoPolitica.PermiteEnvioRecuperado(efetiva, 8));
+    }
+
+    [Fact] // U01(estado): o case default materializa PK/snapshot null (via AplicarFalhaResolucaoPersistida).
+    public void U01_Default_ZeraPkSnapshot()
+    {
+        string form = Fonte("Tela", "Processo", "ProcessoConsumoMaterialForm.cs");
+        string helper = ExtrairMetodo(form, "private void AplicarFalhaResolucaoPersistida");
+        Assert.Contains("_codigoLancamentoRecuperado = null;", helper, StringComparison.Ordinal);
+        Assert.Contains("_snapshotRecuperacao = null;", helper, StringComparison.Ordinal);
+        Assert.Contains("ModalidadeRecuperacaoConsumo.FalhaResolucaoPersistida", helper, StringComparison.Ordinal);
+        Assert.Contains("AplicarBloqueioReconciliacao(", helper, StringComparison.Ordinal);
+    }
+
+    [Fact] // U11: SOMENTE Nenhum explícito libera fresh flow (mapeia para si mesmo e não bloqueia).
+    public void U11_NenhumExplicito_LiberaFreshFlow()
+    {
+        Assert.Equal(ModalidadeRecuperacaoConsumo.Nenhum, RecuperacaoConsumoPolitica.ModalidadeEfetiva(ModalidadeRecuperacaoConsumo.Nenhum));
+        Assert.False(RecuperacaoConsumoPolitica.BloqueiaNovoConsumo(ModalidadeRecuperacaoConsumo.Nenhum));
+    }
+
+    [Fact] // U12: FalhaResolucaoPersistida explícita continua bloqueando (mapeia para si mesma).
+    public void U12_FalhaExplicita_ContinuaBloqueando()
+    {
+        Assert.Equal(ModalidadeRecuperacaoConsumo.FalhaResolucaoPersistida,
+            RecuperacaoConsumoPolitica.ModalidadeEfetiva(ModalidadeRecuperacaoConsumo.FalhaResolucaoPersistida));
+        Assert.True(RecuperacaoConsumoPolitica.BloqueiaNovoConsumo(ModalidadeRecuperacaoConsumo.FalhaResolucaoPersistida));
+    }
+
+    [Theory] // Todo valor conhecido ≠ Nenhum é bloqueante; Nenhum é o único liberador (mapeamento identidade).
+    [InlineData(ModalidadeRecuperacaoConsumo.Nenhum, false)]
+    [InlineData(ModalidadeRecuperacaoConsumo.UmPendente, true)]
+    [InlineData(ModalidadeRecuperacaoConsumo.AmbiguoPendente, true)]
+    [InlineData(ModalidadeRecuperacaoConsumo.EnviandoReconciliacao, true)]
+    [InlineData(ModalidadeRecuperacaoConsumo.FalhaResolucaoPersistida, true)]
+    public void ModalidadeEfetiva_MapeamentoConhecido(ModalidadeRecuperacaoConsumo entrada, bool bloqueia)
+    {
+        Assert.Equal(entrada, RecuperacaoConsumoPolitica.ModalidadeEfetiva(entrada));
+        Assert.Equal(bloqueia, RecuperacaoConsumoPolitica.BloqueiaNovoConsumo(RecuperacaoConsumoPolitica.ModalidadeEfetiva(entrada)));
     }
 
     // ======================================================================================
@@ -525,6 +613,15 @@ public sealed class ConsumoRecuperacaoLancamentoCode05Tests
         }
 
         throw new FileNotFoundException($"Fonte não encontrada: {string.Join('/', partes)}");
+    }
+
+    /// <summary>Trecho do case default de um switch: de "default:" até o primeiro "break;" seguinte.</summary>
+    private static string ExtrairBlocoDefault(string metodo)
+    {
+        int inicio = metodo.IndexOf("default:", StringComparison.Ordinal);
+        Assert.True(inicio >= 0, "case default não encontrado");
+        int fim = metodo.IndexOf("break;", inicio, StringComparison.Ordinal);
+        return fim >= 0 ? metodo[inicio..(fim + "break;".Length)] : metodo[inicio..];
     }
 
     /// <summary>Extrai o bloco { ... } balanceado que começa no primeiro '{' após <paramref name="ancora"/>.</summary>
