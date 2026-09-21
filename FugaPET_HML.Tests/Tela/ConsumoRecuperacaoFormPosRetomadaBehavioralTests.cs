@@ -2,7 +2,9 @@ using System.Reflection;
 using FugaPET_HML.AcessoDados.Repositorio;
 using FugaPET_HML.Controle.Processo;
 using FugaPET_HML.Modelo.Consumo;
+using FugaPET_HML.Modelo.IntegracaoSap;
 using FugaPET_HML.Modelo.Processo;
+using FugaPET_HML.Servicos.IntegracaoSap;
 using FugaPET_HML.Servicos.Operacao;
 using FugaPET_HML.Tela.Processo;
 
@@ -322,7 +324,154 @@ public sealed class ConsumoRecuperacaoFormPosRetomadaBehavioralTests
         });
     }
 
+    // ==================================================================
+    // LIFECYCLE REAL — entrypoint runtime (ConsultarOrdemProducaoAsync), componente SEM lote (SAP Batch
+    // pré-consumo). GATE 102B: reproduz OP1000170/0010/PK8 e prova que o recovery agora MATERIALIZA.
+    // ==================================================================
+
+    /// <summary>OP1000170 com o componente da operação 0010 SEM lote (batch vazio na reserva) — como o SAP
+    /// entrega antes da pesagem. É este objeto que o código produtivo entrega ao resolver no caminho real.</summary>
+    private static OrdemProducaoSap OrdemOp1000170SemLote()
+        => new()
+        {
+            NumeroOrdem = "1000170",
+            TipoOrdem = "PP01",
+            MaterialProduzido = "PRODUTO-OP",
+            Centro = "3007",
+            QuantidadePrevista = 100m,
+            Unidade = "KG",
+            Deposito = "PP01",
+            Liberada = true,
+            Itens = [new ItemOrdemProducaoSap { ItemOrdem = "0001", Material = "PRODUTO-OP" }],
+            Operacoes = [new OperacaoOrdemProducaoSap { Operacao = "0010", Sequencia = "0", CentroTrabalho = "MONT01" }],
+            Componentes =
+            [
+                new ComponenteOrdemProducaoSap
+                {
+                    NumeroOrdem = "1000170",
+                    Reserva = "185",
+                    ItemReserva = "1",
+                    Material = "1000186",
+                    Centro = "3007",
+                    Deposito = "PP01",
+                    QuantidadeNecessaria = 2271.698m,
+                    QuantidadeRetirada = 0m,
+                    UnidadeBase = "KG",
+                    TipoMovimento = "261",
+                    Lote = string.Empty,           // ← incidente: batch VAZIO na reserva pré-consumo
+                    Operacao = "0010",
+                    SequenciaOperacao = "0"
+                }
+            ]
+        };
+
+    [Fact]
+    public void LifecycleReal_ConsultarOrdem_ComponenteSemLote_MaterializaRecoveryPk8()
+    {
+        RunSta(() =>
+        {
+            var orderServico = new FakeOrderServico
+            {
+                Resultado = ResultadoConsultaOrdemProducaoSap.Encontrada(OrdemOp1000170SemLote())
+            };
+            var repo = new FakeRepo
+            {
+                Candidatos = [new() { CodigoLancamento = 8, NumeroOrdem = "1000170", StatusLancamento = "PENDENTE_SAP" }],
+                Detalhes = { [8] = new() { Codigo = 8, NumeroOrdem = "1000170", StatusLancamento = "PENDENTE_SAP", Itens = [ItemPk8()] } }
+            };
+
+            object form = CriarFormComContexto();
+
+            // Injeta o serviço com OP fake + Product Master/Description FAKE (evita chamada de rede) e o
+            // resolvedor sobre repo fake — sem banco/SAP real.
+            var controller = new ProcessoConsumoMaterialController(CriarServicoFake(orderServico, repo));
+            SetField(controller, "_consultaServico", new ConsumoMaterialConsultaServico(() => repo, CriarServicoFake(orderServico, repo)));
+            SetField(form, "_controller", controller);
+
+            // Save de sessão divergente (prova que o envio de recovery não o usa).
+            SetField(form, "_ultimoCodigoLancamentoSalvo", 999L);
+
+            // ENTRYPOINT REAL do runtime (o mesmo que o handler Shown chama após Retomar operação).
+            Invoke(form, "ConsultarOrdemProducaoAsync", false);
+
+            // O resolver foi alcançado pelo lifecycle e materializou UmPendente/PK8 (com componente SEM lote).
+            Assert.Equal(ModalidadeRecuperacaoConsumo.UmPendente, GetField<ModalidadeRecuperacaoConsumo>(form, "_modalidadeRecuperacao"));
+            Assert.Equal(8L, GetField<long?>(form, "_codigoLancamentoRecuperado"));
+
+            Assert.True((bool)Invoke(form, "RecuperacaoBloqueiaNovoConsumo")!);
+            Assert.False(ControleEnabled(form, "iniciarLeituraButton"));
+            Assert.False(ControleEnabled(form, "lerEtiquetaButton"));
+            Assert.False(ControleEnabled(form, "leituraManualButton"));
+            Assert.False(ControleEnabled(form, "_confirmarConsumoButton"));
+            Assert.True(ControleVisible(form, "_enviarSap261Button"));
+
+            string status = StatusText(form);
+            Assert.Contains("PENDENTE_SAP", status, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Inicie a leitura", status, StringComparison.OrdinalIgnoreCase);
+
+            Assert.Equal(8L, (long?)Invoke(form, "PkEnvioRecuperadoAtual"));
+            Assert.Equal(0, repo.Saves);
+            Assert.Equal(0, repo.Reservas);
+            Assert.Equal(0, repo.Confirmacoes);
+        });
+    }
+
+    [Fact] // PROVA NEGATIVA: o matcher com lote OBRIGATÓRIO no componente (contrato pré-102B) rejeitaria o
+           // componente sem lote — demonstra que era exatamente esse o defeito (recovery não materializava).
+    public void ProvaNegativa_ComponenteSemLote_SeriaRejeitadoComLoteObrigatorio()
+    {
+        var itens = new List<ConsumoMaterialItem> { ItemPk8() };            // item persistido tem lote 0000000222
+        var comp = ComponentesOcorrencia();
+        comp[0].Lote = string.Empty;                                         // componente da reserva SEM lote (real)
+
+        // Contrato ATUAL (102B): casa (lote é atributo do consumo, não da reserva).
+        Assert.True(ConsumoMaterialConsultaServico.ItensCasamComComponentes(itens, comp));
+
+        // Simula o contrato PRÉ-102B (lote obrigatório no componente): teria rejeitado → Nenhum → sem recovery.
+        bool casaComLoteObrigatorio =
+            !string.IsNullOrWhiteSpace(comp[0].Lote)
+            && string.Equals(comp[0].Lote.Trim(), itens[0].Lote?.Trim(), StringComparison.Ordinal);
+        Assert.False(casaComLoteObrigatorio);
+    }
+
     // ---------------- fake repo READ-ONLY (sem banco/SAP) ----------------
+
+    private sealed class FakeOrderServico : IProductionOrderSapServico
+    {
+        public ResultadoConsultaOrdemProducaoSap Resultado { get; init; } = ResultadoConsultaOrdemProducaoSap.NaoEncontrada();
+        public bool EhSimulado => false;
+        public bool Configurado => true;
+        public Task<ResultadoConsultaOrdemProducaoSap> ConsultarOrdemAsync(string numeroOrdem, CancellationToken cancellationToken = default)
+            => Task.FromResult(Resultado);
+    }
+
+    // Product Master/Description FAKE: retornam null (sem enriquecimento, sem rede). O match do resolver usa
+    // os campos de identidade vindos do componente da ordem, não do enriquecimento.
+    private sealed class FakeDescricaoServico : IProductDescriptionSapServico
+    {
+        public bool EhSimulado => true;
+        public bool Configurado => true;
+        public Task<ProdutoSapMestre?> ObterDescricaoAsync(string codigoProduto, CancellationToken cancellationToken = default)
+            => Task.FromResult<ProdutoSapMestre?>(null);
+    }
+
+    private sealed class FakeMasterServico : IProductMasterSapServico
+    {
+        public bool EhSimulado => true;
+        public bool Configurado => true;
+        public Task<ProdutoSapMestre?> ObterProdutoAsync(string codigoProduto, CancellationToken cancellationToken = default)
+            => Task.FromResult<ProdutoSapMestre?>(null);
+    }
+
+    private static ConsumoMaterialServico CriarServicoFake(IProductionOrderSapServico orderServico, IConsumoMaterialRepositorio repo)
+        => new(
+            orderServico,
+            () => repo,
+            FugaPET_HML.Servicos.IntegracaoSap.FabricaConsumoMaterialSap261Servico.Criar,
+            () => new FugaPET_HML.Servicos.IntegracaoSap.ConfirmacaoProducaoSapServico(),
+            () => new FakeDescricaoServico(),
+            () => new FakeMasterServico());
+
 
     private sealed class FakeRepo : IConsumoMaterialRepositorio
     {

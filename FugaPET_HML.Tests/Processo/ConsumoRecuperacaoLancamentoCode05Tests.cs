@@ -60,11 +60,24 @@ public sealed class ConsumoRecuperacaoLancamentoCode05Tests
             new List<ConsumoMaterialItem> { Item("185", "1", "1000186", lote: "LOTE-B") },
             new List<ComponenteConsumoMaterial> { Comp("185", "1", "1000186", lote: "LOTE-A") }));
 
-    [Fact] // C10: identidade obrigatória ausente (lote vazio) → fail-closed.
+    [Fact] // C10: identidade obrigatória de RESERVA ausente (depósito vazio) → fail-closed.
     public void Match_IdentidadeObrigatoriaAusente_FailClosed()
         => Assert.False(ConsumoMaterialConsultaServico.ItensCasamComComponentes(
-            new List<ConsumoMaterialItem> { Item("185", "1", "1000186", lote: "") },
-            new List<ComponenteConsumoMaterial> { Comp("185", "1", "1000186", lote: "") }));
+            new List<ConsumoMaterialItem> { Item("185", "1", "1000186", dep: "") },
+            new List<ComponenteConsumoMaterial> { Comp("185", "1", "1000186", dep: "") }));
+
+    [Fact] // GATE 102B: componente de ocorrência SEM lote (reserva pré-pesagem) casa com item persistido que
+           // tem lote — o batch é atributo do consumo, não da reserva. Reproduz o incidente OP1000170/PK8.
+    public void Match_ComponenteSemLote_CasaComItemComLote_102B()
+        => Assert.True(ConsumoMaterialConsultaServico.ItensCasamComComponentes(
+            new List<ConsumoMaterialItem> { Item("185", "1", "1000186", dep: "PP01", lote: "0000000222") },
+            new List<ComponenteConsumoMaterial> { Comp("185", "1", "1000186", dep: "PP01", lote: "") }));
+
+    [Fact] // GATE 102B: divergência REAL de batch (ambos com lote, diferentes) continua rejeitada.
+    public void Match_LoteDivergenteAmbosPresentes_Rejeita_102B()
+        => Assert.False(ConsumoMaterialConsultaServico.ItensCasamComComponentes(
+            new List<ConsumoMaterialItem> { Item("185", "1", "1000186", dep: "PP01", lote: "LOTE-B") },
+            new List<ComponenteConsumoMaterial> { Comp("185", "1", "1000186", dep: "PP01", lote: "LOTE-A") }));
 
     [Fact] // C09: movimento != 261 → rejeita.
     public void Match_MovimentoNao261_Rejeita()

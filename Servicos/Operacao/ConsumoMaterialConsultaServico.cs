@@ -218,9 +218,12 @@ public sealed class ConsumoMaterialConsultaServico
 
     /// <summary>
     /// MATCH item-a-item PURO e fail-closed: cada item persistido corresponde inequivocamente (bijeção) a um
-    /// componente distinto da ocorrência pelos campos de identidade (material, reserva, item_reserva, lote,
-    /// depósito) com movimento 261. Identidade obrigatória ausente, movimento ≠ 261, item sem par, ambiguidade
-    /// (um item casa com &gt;1 componente ou dois itens disputam o mesmo componente) ⇒ false. Sem I/O.
+    /// componente distinto da OCORRÊNCIA pelos campos de identidade da RESERVA (material, reserva, item_reserva,
+    /// depósito) com movimento 261. GATE 102B: o LOTE (batch) é um atributo do CONSUMO — escolhido só na pesagem
+    /// — e NÃO existe no componente de reserva pré-consumo; portanto o lote é comparado SOMENTE quando o
+    /// componente da ocorrência efetivamente carrega um lote (divergência real de batch continua rejeitada).
+    /// Identidade de reserva ausente, movimento ≠ 261, item sem par, ambiguidade (um item casa com &gt;1
+    /// componente ou dois itens disputam o mesmo componente) ⇒ false. Sem I/O.
     /// </summary>
     public static bool ItensCasamComComponentes(
         IReadOnlyList<ConsumoMaterialItem> itens,
@@ -292,21 +295,33 @@ public sealed class ConsumoMaterialConsultaServico
         => string.Equals(NormalizarCampo(item.CodigoMaterial), NormalizarCampo(componente.CodigoMaterial), StringComparison.Ordinal)
         && string.Equals(NormalizarCampo(item.NumeroReserva), NormalizarCampo(componente.NumeroReserva), StringComparison.Ordinal)
         && string.Equals(NormalizarCampo(item.ItemReserva), NormalizarCampo(componente.ItemReserva), StringComparison.Ordinal)
-        && string.Equals(NormalizarCampo(item.Lote), NormalizarCampo(componente.Lote), StringComparison.Ordinal)
-        && string.Equals(NormalizarCampo(item.DepositoConsumo), NormalizarCampo(componente.DepositoConsumo), StringComparison.Ordinal);
+        && string.Equals(NormalizarCampo(item.DepositoConsumo), NormalizarCampo(componente.DepositoConsumo), StringComparison.Ordinal)
+        && LoteCompativel(item, componente);
+
+    // GATE 102B: o lote só discrimina quando o COMPONENTE da ocorrência tem batch (raro pré-consumo). Quando o
+    // componente não tem lote (reserva antes da pesagem), o lote do item NÃO é usado para rejeitar — a identidade
+    // da RESERVA (material/reserva/item/depósito) já vincula a ocorrência. Batch divergente comprovado ⇒ rejeita.
+    private static bool LoteCompativel(ConsumoMaterialItem item, ComponenteConsumoMaterial componente)
+    {
+        string loteComponente = NormalizarCampo(componente.Lote);
+        if (loteComponente.Length == 0)
+        {
+            return true;
+        }
+
+        return string.Equals(NormalizarCampo(item.Lote), loteComponente, StringComparison.Ordinal);
+    }
 
     private static bool IdentidadeItemIncompleta(ConsumoMaterialItem item)
         => string.IsNullOrWhiteSpace(item.CodigoMaterial)
         || string.IsNullOrWhiteSpace(item.NumeroReserva)
         || string.IsNullOrWhiteSpace(item.ItemReserva)
-        || string.IsNullOrWhiteSpace(item.Lote)
         || string.IsNullOrWhiteSpace(item.DepositoConsumo);
 
     private static bool IdentidadeComponenteIncompleta(ComponenteConsumoMaterial componente)
         => string.IsNullOrWhiteSpace(componente.CodigoMaterial)
         || string.IsNullOrWhiteSpace(componente.NumeroReserva)
         || string.IsNullOrWhiteSpace(componente.ItemReserva)
-        || string.IsNullOrWhiteSpace(componente.Lote)
         || string.IsNullOrWhiteSpace(componente.DepositoConsumo);
 
     private static string NormalizarCampo(string? valor) => valor?.Trim() ?? string.Empty;
