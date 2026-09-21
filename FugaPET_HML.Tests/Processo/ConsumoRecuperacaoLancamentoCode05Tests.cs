@@ -345,10 +345,126 @@ public sealed class ConsumoRecuperacaoLancamentoCode05Tests
     }
 
     // ======================================================================================
+    // GATE 101L — FAIL-CLOSED da resolução persistida (F01–F16)
+    // ======================================================================================
+
+    [Fact] // F01: resolvedor lança exceção → NÃO devolve Nenhum; propaga (a Form materializa FalhaResolucaoPersistida).
+    public async Task F01_ResolvedorLancaExcecao_NaoViraNenhum()
+    {
+        var repo = new FakeRepoFalha();
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => Servico(repo).ResolverRecuperacaoPendenteAsync(Contexto(), Ocorrencia()));
+    }
+
+    [Fact] // F01(Form): o catch materializa FalhaResolucaoPersistida (≠ Nenhum) e NÃO chama LimparEstadoRecuperacao.
+    public void F01_FormCatch_MaterializaFalhaFailClosed()
+    {
+        string form = Fonte("Tela", "Processo", "ProcessoConsumoMaterialForm.cs");
+        string metodo = ExtrairMetodo(form, "private async Task ResolverRecuperacaoPersistidaDoContextoAsync");
+        string corpoCatch = ExtrairBloco(metodo, "catch (Exception ex)");
+        Assert.Contains("ModalidadeRecuperacaoConsumo.FalhaResolucaoPersistida", corpoCatch, StringComparison.Ordinal);
+        // §2/§3: o catch NÃO pode reduzir a Nenhum via LimparEstadoRecuperacao.
+        Assert.DoesNotContain("LimparEstadoRecuperacao()", corpoCatch, StringComparison.Ordinal);
+    }
+
+    [Theory] // F02–F07: falha bloqueia leitura/pesagem(ler+digitar)/confirmar/save/lançamento (default-deny).
+    [InlineData(ModalidadeRecuperacaoConsumo.FalhaResolucaoPersistida)]
+    [InlineData(ModalidadeRecuperacaoConsumo.UmPendente)]
+    [InlineData(ModalidadeRecuperacaoConsumo.AmbiguoPendente)]
+    [InlineData(ModalidadeRecuperacaoConsumo.EnviandoReconciliacao)]
+    public void F02_a_F07_ModalidadesBloqueantes_BloqueiamNovoConsumo(ModalidadeRecuperacaoConsumo modalidade)
+        => Assert.True(RecuperacaoConsumoPolitica.BloqueiaNovoConsumo(modalidade));
+
+    [Fact] // Fresh flow só com Nenhum.
+    public void SomenteNenhum_LiberaNovoConsumo()
+        => Assert.False(RecuperacaoConsumoPolitica.BloqueiaNovoConsumo(ModalidadeRecuperacaoConsumo.Nenhum));
+
+    [Fact] // F08/F09/F10/F11: falha NÃO habilita envio recuperado ⇒ zero capability/claim/HTTP; PK não é inventado.
+    public void F08_a_F11_Falha_NaoHabilitaEnvioRecuperado()
+    {
+        Assert.False(RecuperacaoConsumoPolitica.PermiteEnvioRecuperado(ModalidadeRecuperacaoConsumo.FalhaResolucaoPersistida, null));
+        // Mesmo que um PK residual existisse, a modalidade Falha nunca autoriza envio.
+        Assert.False(RecuperacaoConsumoPolitica.PermiteEnvioRecuperado(ModalidadeRecuperacaoConsumo.FalhaResolucaoPersistida, 8));
+        // Só UmPendente + PK autoriza.
+        Assert.True(RecuperacaoConsumoPolitica.PermiteEnvioRecuperado(ModalidadeRecuperacaoConsumo.UmPendente, 8));
+        Assert.False(RecuperacaoConsumoPolitica.PermiteEnvioRecuperado(ModalidadeRecuperacaoConsumo.UmPendente, null));
+    }
+
+    [Fact] // F11(Form): o catch zera o PK recuperado (nenhum PK inventado na falha).
+    public void F11_FormCatch_ZeraPkRecuperado()
+    {
+        string form = Fonte("Tela", "Processo", "ProcessoConsumoMaterialForm.cs");
+        string metodo = ExtrairMetodo(form, "private async Task ResolverRecuperacaoPersistidaDoContextoAsync");
+        string corpoCatch = ExtrairBloco(metodo, "catch (Exception ex)");
+        Assert.Contains("_codigoLancamentoRecuperado = null;", corpoCatch, StringComparison.Ordinal);
+        Assert.Contains("_snapshotRecuperacao = null;", corpoCatch, StringComparison.Ordinal);
+    }
+
+    [Fact] // F12: falha seguida de nova resolução bem-sucedida com 0 candidatos → SOMENTE então Nenhum.
+    public async Task F12_FalhaDepoisSucessoZero_ViraNenhum()
+    {
+        var repo = new FakeRepoFalhaDepoisSucesso { Candidatos = [] };
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => Servico(repo).ResolverRecuperacaoPendenteAsync(Contexto(), Ocorrencia()));
+        var res = await Servico(repo).ResolverRecuperacaoPendenteAsync(Contexto(), Ocorrencia());
+        Assert.Equal(ModalidadeRecuperacaoConsumo.Nenhum, res.Modalidade);
+    }
+
+    [Fact] // F13: falha seguida de nova resolução com 1 PENDENTE → UmPendente / PK correto.
+    public async Task F13_FalhaDepoisSucessoUmPendente_RecuperaPk()
+    {
+        var repo = new FakeRepoFalhaDepoisSucesso
+        {
+            Candidatos = [Resumo(8)],
+            Detalhes = { [8] = Lanc(8, [Item("185", "1", "1000186", dep: "PP01")]) }
+        };
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => Servico(repo).ResolverRecuperacaoPendenteAsync(Contexto(), Ocorrencia()));
+        var res = await Servico(repo).ResolverRecuperacaoPendenteAsync(Contexto(), Ocorrencia());
+        Assert.Equal(ModalidadeRecuperacaoConsumo.UmPendente, res.Modalidade);
+        Assert.Equal(8, res.CodigoLancamento);
+    }
+
+    [Fact] // F14: falha seguida de ENVIANDO → EnviandoReconciliacao.
+    public async Task F14_FalhaDepoisEnviando_Reconciliacao()
+    {
+        var repo = new FakeRepoFalhaDepoisSucesso
+        {
+            Candidatos = [Resumo(8, status: "ENVIANDO_SAP")],
+            Detalhes = { [8] = Lanc(8, [Item("185", "1", "1000186", dep: "PP01")], status: "ENVIANDO_SAP") }
+        };
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => Servico(repo).ResolverRecuperacaoPendenteAsync(Contexto(), Ocorrencia()));
+        var res = await Servico(repo).ResolverRecuperacaoPendenteAsync(Contexto(), Ocorrencia());
+        Assert.Equal(ModalidadeRecuperacaoConsumo.EnviandoReconciliacao, res.Modalidade);
+    }
+
+    [Fact] // F15: diagnóstico do catch NÃO expõe exception bruta/segredo (só EXCEPTION_TYPE + tipo).
+    public void F15_Diagnostico_NaoExpoeExceptionBruta()
+    {
+        string form = Fonte("Tela", "Processo", "ProcessoConsumoMaterialForm.cs");
+        string metodo = ExtrairMetodo(form, "private async Task ResolverRecuperacaoPersistidaDoContextoAsync");
+        string corpoCatch = ExtrairBloco(metodo, "catch (Exception ex)");
+        Assert.Contains("ex.GetType().Name", corpoCatch, StringComparison.Ordinal);
+        Assert.DoesNotContain("ex.Message", corpoCatch, StringComparison.Ordinal);
+        Assert.DoesNotContain("ex.ToString()", corpoCatch, StringComparison.Ordinal);
+        Assert.DoesNotContain("ex.StackTrace", corpoCatch, StringComparison.Ordinal);
+        Assert.DoesNotContain("ex.InnerException", corpoCatch, StringComparison.Ordinal);
+    }
+
+    [Fact] // F16: valor de modalidade DESCONHECIDO → bloqueia por padrão (default-deny).
+    public void F16_ModalidadeDesconhecida_BloqueiaPorPadrao()
+    {
+        var desconhecida = (ModalidadeRecuperacaoConsumo)999;
+        Assert.True(RecuperacaoConsumoPolitica.BloqueiaNovoConsumo(desconhecida));
+        Assert.False(RecuperacaoConsumoPolitica.PermiteEnvioRecuperado(desconhecida, 8));
+    }
+
+    // ======================================================================================
     // helpers
     // ======================================================================================
 
-    private static ConsumoMaterialConsultaServico Servico(FakeRepoRecuperacao repo)
+    private static ConsumoMaterialConsultaServico Servico(IConsumoMaterialRepositorio repo)
         => new(() => repo, new ConsumoMaterialServico());
 
     private static ContextoApontamentoProcesso Contexto()
@@ -409,6 +525,29 @@ public sealed class ConsumoRecuperacaoLancamentoCode05Tests
         }
 
         throw new FileNotFoundException($"Fonte não encontrada: {string.Join('/', partes)}");
+    }
+
+    /// <summary>Extrai o bloco { ... } balanceado que começa no primeiro '{' após <paramref name="ancora"/>.</summary>
+    private static string ExtrairBloco(string fonte, string ancora)
+    {
+        int inicio = fonte.IndexOf(ancora, StringComparison.Ordinal);
+        Assert.True(inicio >= 0, $"Âncora não encontrada: {ancora}");
+        int abre = fonte.IndexOf('{', inicio);
+        int profundidade = 0;
+        for (int i = abre; i < fonte.Length; i++)
+        {
+            if (fonte[i] == '{') profundidade++;
+            else if (fonte[i] == '}')
+            {
+                profundidade--;
+                if (profundidade == 0)
+                {
+                    return fonte.Substring(abre, i - abre + 1);
+                }
+            }
+        }
+
+        return fonte[abre..];
     }
 
     private static string ExtrairMetodo(string fonte, string assinatura)
@@ -475,5 +614,68 @@ public sealed class ConsumoRecuperacaoLancamentoCode05Tests
             Confirmacoes++;
             return Task.CompletedTask;
         }
+    }
+
+    /// <summary>Repo que SEMPRE falha ao consultar — simula indisponibilidade técnica na resolução (F01–F11).</summary>
+    private sealed class FakeRepoFalha : IConsumoMaterialRepositorio
+    {
+        public Task<long> SalvarConsumoLocalAsync(ConsumoMaterialLancamento lancamento, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("falha simulada");
+
+        public Task<ConsumoMaterialLancamento?> ObterPorCodigoAsync(long codigoLancamento, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("falha simulada");
+
+        public Task<IReadOnlyList<ResumoConsumoMaterialLancamento>> ConsultarLancamentosAsync(ConsultaConsumoMaterialFiltro filtro, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("falha simulada");
+
+        public Task<ConsumoMaterialLancamento?> ObterDetalheCompletoAsync(long codigoLancamento, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("falha simulada");
+
+        public Task<bool> TentarReservarEnvioSapAsync(long codigoLancamento, DateTime reservadoEmUtc, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("falha simulada");
+
+        public Task MarcarFalhaSapAsync(long codigoLancamento, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("falha simulada");
+
+        public Task MarcarConsumoConfirmadoSapAsync(long codigoLancamento, string? documentoMaterialSap, string? exercicioDocumentoMaterialSap, DateTime enviadoSapEmUtc, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("falha simulada");
+    }
+
+    /// <summary>Repo que FALHA na 1ª consulta e SUCEDE nas seguintes — prova retentativa READ-ONLY (F12–F14).</summary>
+    private sealed class FakeRepoFalhaDepoisSucesso : IConsumoMaterialRepositorio
+    {
+        private int _consultas;
+
+        public IReadOnlyList<ResumoConsumoMaterialLancamento> Candidatos { get; init; } = [];
+        public Dictionary<long, ConsumoMaterialLancamento> Detalhes { get; init; } = new();
+
+        public Task<long> SalvarConsumoLocalAsync(ConsumoMaterialLancamento lancamento, CancellationToken cancellationToken = default)
+            => Task.FromResult(1L);
+
+        public Task<ConsumoMaterialLancamento?> ObterPorCodigoAsync(long codigoLancamento, CancellationToken cancellationToken = default)
+            => Task.FromResult(Detalhes.TryGetValue(codigoLancamento, out ConsumoMaterialLancamento? l) ? l : null);
+
+        public Task<IReadOnlyList<ResumoConsumoMaterialLancamento>> ConsultarLancamentosAsync(ConsultaConsumoMaterialFiltro filtro, CancellationToken cancellationToken = default)
+        {
+            _consultas++;
+            if (_consultas == 1)
+            {
+                throw new InvalidOperationException("falha simulada na primeira consulta");
+            }
+
+            return Task.FromResult(Candidatos);
+        }
+
+        public Task<ConsumoMaterialLancamento?> ObterDetalheCompletoAsync(long codigoLancamento, CancellationToken cancellationToken = default)
+            => Task.FromResult(Detalhes.TryGetValue(codigoLancamento, out ConsumoMaterialLancamento? l) ? l : null);
+
+        public Task<bool> TentarReservarEnvioSapAsync(long codigoLancamento, DateTime reservadoEmUtc, CancellationToken cancellationToken = default)
+            => Task.FromResult(false);
+
+        public Task MarcarFalhaSapAsync(long codigoLancamento, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task MarcarConsumoConfirmadoSapAsync(long codigoLancamento, string? documentoMaterialSap, string? exercicioDocumentoMaterialSap, DateTime enviadoSapEmUtc, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 }

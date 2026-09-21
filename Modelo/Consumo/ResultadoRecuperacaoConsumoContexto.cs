@@ -20,7 +20,15 @@ public enum ModalidadeRecuperacaoConsumo
     /// Existe lançamento ENVIANDO_SAP correspondente: reconciliação pendente. Não recupera para envio,
     /// mas bloqueia novo consumo. Autoridade do bloqueio vem do estado persistido (sobrevive a restart).
     /// </summary>
-    EnviandoReconciliacao = 3
+    EnviandoReconciliacao = 3,
+
+    /// <summary>
+    /// GATE 101L — FAIL-CLOSED: NÃO foi possível comprovar com segurança se existe consumo persistido que
+    /// bloqueia/precisa de recovery (exceção/falha técnica ao resolver). NUNCA equivale a "não existe estado":
+    /// bloqueia toda nova operação até uma nova resolução READ-ONLY concluir COM SUCESSO. Só o sucesso da
+    /// consulta pode transitar para <see cref="Nenhum"/>.
+    /// </summary>
+    FalhaResolucaoPersistida = 4
 }
 
 /// <summary>
@@ -48,4 +56,27 @@ public sealed class ResultadoRecuperacaoConsumoContexto
 
     public static ResultadoRecuperacaoConsumoContexto EnviandoReconciliacao(IReadOnlyList<long> correspondentes)
         => new() { Modalidade = ModalidadeRecuperacaoConsumo.EnviandoReconciliacao, Candidatos = correspondentes };
+
+    /// <summary>GATE 101L: estado FAIL-CLOSED de falha técnica na resolução (nunca "Nenhum").</summary>
+    public static ResultadoRecuperacaoConsumoContexto FalhaResolucaoPersistida { get; } =
+        new() { Modalidade = ModalidadeRecuperacaoConsumo.FalhaResolucaoPersistida };
+}
+
+/// <summary>
+/// GATE 101L — política FAIL-CLOSED, PURA e testável, do recovery de consumo. Centraliza as decisões de
+/// bloqueio para que a Form e os testes compartilhem exatamente a mesma regra. Regra de ouro: SOMENTE
+/// <see cref="ModalidadeRecuperacaoConsumo.Nenhum"/> libera fluxo novo; qualquer outro valor — inclusive um
+/// valor de enum NÃO reconhecido — bloqueia (default-deny).
+/// </summary>
+public static class RecuperacaoConsumoPolitica
+{
+    /// <summary>True quando a modalidade BLOQUEIA novo consumo (leitura/pesagem/save/lançamento). Fail-closed:
+    /// só <see cref="ModalidadeRecuperacaoConsumo.Nenhum"/> não bloqueia; desconhecido ⇒ bloqueia.</summary>
+    public static bool BloqueiaNovoConsumo(ModalidadeRecuperacaoConsumo modalidade)
+        => modalidade != ModalidadeRecuperacaoConsumo.Nenhum;
+
+    /// <summary>True SOMENTE quando é seguro materializar/executar o envio 261 recuperado: exatamente um
+    /// PENDENTE recuperado E com PK. Falha/ambíguo/enviando/desconhecido ⇒ false (zero capability/claim/HTTP).</summary>
+    public static bool PermiteEnvioRecuperado(ModalidadeRecuperacaoConsumo modalidade, long? codigoLancamentoRecuperado)
+        => modalidade == ModalidadeRecuperacaoConsumo.UmPendente && codigoLancamentoRecuperado.HasValue;
 }

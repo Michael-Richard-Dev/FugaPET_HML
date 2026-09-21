@@ -3090,7 +3090,7 @@ public partial class ProcessoConsumoMaterialForm : Form
     /// <summary>True quando existe estado persistido correspondente que BLOQUEIA novo consumo/pesagem/PK
     /// (qualquer modalidade ≠ Nenhum: PENDENTE recuperado, ambíguo ou ENVIANDO/reconciliação).</summary>
     private bool RecuperacaoBloqueiaNovoConsumo()
-        => _modalidadeRecuperacao != global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.Nenhum;
+        => global::FugaPET_HML.Modelo.Consumo.RecuperacaoConsumoPolitica.BloqueiaNovoConsumo(_modalidadeRecuperacao);
 
     private RecuperacaoContextoSnapshot? SnapshotContextoRecuperacaoAtual()
         => _contextoApontamento is null
@@ -3126,9 +3126,18 @@ public partial class ProcessoConsumoMaterialForm : Form
         }
         catch (Exception ex)
         {
+            // GATE 101L: FAIL-CLOSED. Uma exceção/falha técnica NÃO pode virar "Nenhum" (isso liberaria o
+            // fluxo novo). Materializa FalhaResolucaoPersistida (bloqueia tudo) com diagnóstico SANITIZADO:
+            // apenas o nome do TIPO da exceção — nunca o texto bruto/stack, que poderia carregar dados sensíveis.
+            // Uma nova resolução READ-ONLY bem-sucedida pode substituir este estado depois (§9).
             System.Diagnostics.Trace.TraceWarning(
-                $"[Consumo][Recovery] Falha ao resolver recuperação persistida: {ex.GetType().Name}");
-            LimparEstadoRecuperacao();
+                $"[Consumo][Recovery] EVENTO=FALHA_RESOLUCAO_PERSISTIDA; EXCEPTION_TYPE={ex.GetType().Name}");
+            _codigoLancamentoRecuperado = null;
+            _snapshotRecuperacao = null;
+            _modalidadeRecuperacao = global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.FalhaResolucaoPersistida;
+            AplicarBloqueioReconciliacao(
+                "Não foi possível validar o estado persistido deste consumo. Novas operações estão "
+                + "bloqueadas até que a consulta seja executada com sucesso.");
             return;
         }
 
@@ -3197,8 +3206,8 @@ public partial class ProcessoConsumoMaterialForm : Form
 
     private void AtualizarBotoesRecuperacao()
     {
-        if (_modalidadeRecuperacao == global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.UmPendente
-            && _codigoLancamentoRecuperado is long)
+        if (global::FugaPET_HML.Modelo.Consumo.RecuperacaoConsumoPolitica.PermiteEnvioRecuperado(
+                _modalidadeRecuperacao, _codigoLancamentoRecuperado))
         {
             if (_confirmarConsumoButton is not null) { _confirmarConsumoButton.Visible = false; _confirmarConsumoButton.Enabled = false; }
             if (_naoConsumidoButton is not null) { _naoConsumidoButton.Visible = false; _naoConsumidoButton.Enabled = false; }
@@ -3397,9 +3406,11 @@ public partial class ProcessoConsumoMaterialForm : Form
             return;
         }
 
-        // GATE 101J §14/§15: recovery de PENDENTE persistido → envia o PK RECUPERADO (estado dedicado),
-        // revalidando o snapshot de contexto, pela MESMA cerimônia/seam do 101E. Sem nova pesagem/save.
-        if (_modalidadeRecuperacao == global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.UmPendente
+        // GATE 101J §14/§15 + 101L: recovery de PENDENTE persistido → envia o PK RECUPERADO (estado dedicado),
+        // revalidando o snapshot, pela MESMA cerimônia/seam do 101E. O gate de envio passa pela política
+        // fail-closed: SÓ UmPendente+PK habilita (Falha/ambíguo/enviando ⇒ zero capability/claim/HTTP).
+        if (global::FugaPET_HML.Modelo.Consumo.RecuperacaoConsumoPolitica.PermiteEnvioRecuperado(
+                _modalidadeRecuperacao, _codigoLancamentoRecuperado)
             && _codigoLancamentoRecuperado is long codigoRecuperado)
         {
             await EnviarSap261RecuperadoAsync(codigoRecuperado);
