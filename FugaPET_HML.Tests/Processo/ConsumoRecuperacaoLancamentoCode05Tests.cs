@@ -666,11 +666,14 @@ public sealed class ConsumoRecuperacaoLancamentoCode05Tests
     public void P13_SemPkRecuperado_EnvioRecoveryNaoAcionavel()
     {
         Assert.False(RecuperacaoConsumoPolitica.PermiteEnvioRecuperado(ModalidadeRecuperacaoConsumo.UmPendente, null));
-        // O disparo de envio recuperado no botão exige PermiteEnvioRecuperado(...) + PK vinculado.
+        // O disparo de envio recuperado no botão exige o PK do recovery (via seam PkEnvioRecuperadoAtual, que
+        // por sua vez exige PermiteEnvioRecuperado + PK). Prova comportamental do PK está no teste STA da Form.
         string form = Fonte("Tela", "Processo", "ProcessoConsumoMaterialForm.cs");
         string enviar = ExtrairMetodo(form, "private async Task EnviarSap261Async");
-        Assert.Contains("PermiteEnvioRecuperado(", enviar, StringComparison.Ordinal);
-        Assert.Contains("_codigoLancamentoRecuperado is long codigoRecuperado", enviar, StringComparison.Ordinal);
+        Assert.Contains("PkEnvioRecuperadoAtual() is long codigoRecuperado", enviar, StringComparison.Ordinal);
+        string seam = ExtrairMetodo(form, "internal long? PkEnvioRecuperadoAtual");
+        Assert.Contains("PermiteEnvioRecuperado(", seam, StringComparison.Ordinal);
+        Assert.Contains("_codigoLancamentoRecuperado", seam, StringComparison.Ordinal);
     }
 
     // ======================================================================================

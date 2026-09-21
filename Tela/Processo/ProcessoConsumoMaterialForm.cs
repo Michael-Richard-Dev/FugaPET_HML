@@ -3123,6 +3123,19 @@ public partial class ProcessoConsumoMaterialForm : Form
     private bool RecuperacaoBloqueiaNovoConsumo()
         => global::FugaPET_HML.Modelo.Consumo.RecuperacaoConsumoPolitica.BloqueiaNovoConsumo(_modalidadeRecuperacao);
 
+    /// <summary>
+    /// GATE 101W: PK que o envio de recovery usaria AGORA (mesma seleção fail-closed executada por
+    /// <see cref="EnviarSap261Async"/> em runtime): retorna o codigo_lancamento RECUPERADO somente quando a
+    /// política autoriza (UmPendente + PK), senão null. Sem efeito colateral — nunca usa o save de sessão
+    /// (<see cref="_ultimoCodigoLancamentoSalvo"/>). É a MESMA lógica de runtime, apenas nomeada para ser
+    /// verificável sem disparar a cerimônia/MessageBox.
+    /// </summary>
+    internal long? PkEnvioRecuperadoAtual()
+        => global::FugaPET_HML.Modelo.Consumo.RecuperacaoConsumoPolitica.PermiteEnvioRecuperado(
+               _modalidadeRecuperacao, _codigoLancamentoRecuperado)
+           ? _codigoLancamentoRecuperado
+           : null;
+
     private RecuperacaoContextoSnapshot? SnapshotContextoRecuperacaoAtual()
         => _contextoApontamento is null
             ? null
@@ -3467,9 +3480,7 @@ public partial class ProcessoConsumoMaterialForm : Form
         // GATE 101J §14/§15 + 101L: recovery de PENDENTE persistido → envia o PK RECUPERADO (estado dedicado),
         // revalidando o snapshot, pela MESMA cerimônia/seam do 101E. O gate de envio passa pela política
         // fail-closed: SÓ UmPendente+PK habilita (Falha/ambíguo/enviando ⇒ zero capability/claim/HTTP).
-        if (global::FugaPET_HML.Modelo.Consumo.RecuperacaoConsumoPolitica.PermiteEnvioRecuperado(
-                _modalidadeRecuperacao, _codigoLancamentoRecuperado)
-            && _codigoLancamentoRecuperado is long codigoRecuperado)
+        if (PkEnvioRecuperadoAtual() is long codigoRecuperado)
         {
             await EnviarSap261RecuperadoAsync(codigoRecuperado);
             return;
