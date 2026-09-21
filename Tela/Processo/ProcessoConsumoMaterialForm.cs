@@ -1826,7 +1826,38 @@ public partial class ProcessoConsumoMaterialForm : Form
             return;
         }
 
+        // GATE 101U §10: o RECOVERY BLOCKER é a autoridade FINAL. Um refresh genérico de seleção do grid
+        // (inclusive os disparados de forma deferida após a materialização do recovery, pós-retomada) NÃO pode
+        // reabilitar/apresentar fresh-flow ("inicie a leitura") por cima do estado de recovery. Enquanto a
+        // modalidade efetiva bloquear novo consumo, reaplica o estado de recovery e NÃO segue o caminho normal.
+        if (RecuperacaoBloqueiaNovoConsumo())
+        {
+            ReaplicarEstadoRecuperacao();
+            return;
+        }
+
         CapturarComponenteSelecionadoDoGridPrincipal();
+    }
+
+    /// <summary>
+    /// GATE 101U: reaplica o estado visual/controle do recovery vigente SEM reconsultar o banco (idempotente).
+    /// UmPendente ⇒ materializa PENDENTE + "Enviar SAP 261" (PK recuperado) e bloqueia leitura/pesagem/confirmar;
+    /// qualquer outra modalidade bloqueante (Ambíguo/Enviando/Falha/desconhecida) ⇒ bloqueio de reconciliação.
+    /// Garante que refreshes genéricos posteriores nunca degradem o bloqueio (§10/§12).
+    /// </summary>
+    private void ReaplicarEstadoRecuperacao()
+    {
+        if (global::FugaPET_HML.Modelo.Consumo.RecuperacaoConsumoPolitica.PermiteEnvioRecuperado(
+                _modalidadeRecuperacao, _codigoLancamentoRecuperado)
+            && _codigoLancamentoRecuperado is long codigoRecuperado)
+        {
+            AplicarMaterializacaoRecuperacaoPendente(codigoRecuperado);
+            return;
+        }
+
+        // Ambíguo / ENVIANDO / Falha / desconhecido: bloqueio total, sem materializar envio.
+        AplicarBloqueioReconciliacao(
+            "Estado persistido deste consumo requer reconciliação/ação de suporte. Novo consumo bloqueado.");
     }
 
     private bool CapturarComponenteSelecionadoDoGridPrincipal()

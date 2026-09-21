@@ -549,6 +549,131 @@ public sealed class ConsumoRecuperacaoLancamentoCode05Tests
     }
 
     // ======================================================================================
+    // GATE 101U — pós-retomada: refresh genérico NÃO reabilita fresh-flow (P01–P14)
+    // Contexto operacional congelado: OP 1000170 / operação 0010 / PK 8 / material 1000186 /
+    // reserva 185 item 1 / depósito PP01 / lote 0000000222 / movimento 261.
+    // ======================================================================================
+
+    private static ContextoApontamentoProcesso ContextoRetomada()
+        => new() { NumeroOrdem = "1000170", Operacao = "0010", Sequencia = "0", TipoProcesso = "CONSUMO_MATERIA_PRIMA" };
+
+    private static List<ComponenteConsumoMaterial> OcorrenciaRetomada()
+        => [new()
+        {
+            CodigoMaterial = "1000186", NumeroReserva = "185", ItemReserva = "1",
+            DepositoConsumo = "PP01", Lote = "0000000222", TipoMovimento = "261"
+        }];
+
+    private static ConsumoMaterialItem ItemPk8()
+        => new()
+        {
+            CodigoMaterial = "1000186", NumeroReserva = "185", ItemReserva = "1",
+            DepositoConsumo = "PP01", Lote = "0000000222", TipoMovimentoSap = "261"
+        };
+
+    [Fact] // P01/P02: retomada + exatamente 1 PENDENTE (PK8) → UmPendente / PK recuperado 8 (por match, sem hardcode).
+    public async Task P01_P02_Retomada_UmPendentePk8()
+    {
+        var repo = new FakeRepoRecuperacao
+        {
+            Candidatos = [new() { CodigoLancamento = 8, NumeroOrdem = "1000170", StatusLancamento = "PENDENTE_SAP" }],
+            Detalhes = { [8] = new() { Codigo = 8, NumeroOrdem = "1000170", StatusLancamento = "PENDENTE_SAP", Itens = [ItemPk8()] } }
+        };
+        var res = await Servico(repo).ResolverRecuperacaoPendenteAsync(ContextoRetomada(), OcorrenciaRetomada());
+        Assert.Equal(ModalidadeRecuperacaoConsumo.UmPendente, res.Modalidade);
+        Assert.Equal(8, res.CodigoLancamento);
+    }
+
+    [Fact] // P14: a RESOLUÇÃO (materialização) é read-only: zero save/weight/claim/capability/HTTP.
+    public async Task P14_Materializacao_ZeroEfeitos()
+    {
+        var repo = new FakeRepoRecuperacao
+        {
+            Candidatos = [new() { CodigoLancamento = 8, NumeroOrdem = "1000170", StatusLancamento = "PENDENTE_SAP" }],
+            Detalhes = { [8] = new() { Codigo = 8, NumeroOrdem = "1000170", StatusLancamento = "PENDENTE_SAP", Itens = [ItemPk8()] } }
+        };
+        _ = await Servico(repo).ResolverRecuperacaoPendenteAsync(ContextoRetomada(), OcorrenciaRetomada());
+        Assert.Equal(0, repo.Saves);      // SAVE_COUNT
+        Assert.Equal(0, repo.Reservas);   // CLAIM_COUNT (TentarReservarEnvioSap)
+        Assert.Equal(0, repo.Confirmacoes);
+        Assert.Equal(0, repo.Falhas);
+    }
+
+    [Fact] // P03/P04/P05: sob UmPendente, o refresh genérico de seleção YIELDS ao recovery (não segue fresh-flow).
+    public void P03_a_P05_RefreshGenerico_YieldsAoRecovery()
+    {
+        string form = Fonte("Tela", "Processo", "ProcessoConsumoMaterialForm.cs");
+        string metodo = ExtrairMetodo(form, "private void AtualizarComponenteSelecionadoDoGrid");
+        // O entrypoint de refresh de seleção consulta o blocker ANTES de capturar/normalizar seleção.
+        Assert.Contains("if (RecuperacaoBloqueiaNovoConsumo())", metodo, StringComparison.Ordinal);
+        Assert.Contains("ReaplicarEstadoRecuperacao();", metodo, StringComparison.Ordinal);
+        int idxGuard = metodo.IndexOf("RecuperacaoBloqueiaNovoConsumo()", StringComparison.Ordinal);
+        int idxCaptura = metodo.IndexOf("CapturarComponenteSelecionadoDoGridPrincipal()", StringComparison.Ordinal);
+        Assert.True(idxGuard >= 0 && idxCaptura > idxGuard, "O guard de recovery deve preceder a captura normal.");
+    }
+
+    [Fact] // Leitura/peso/confirmar continuam bloqueados sob UmPendente (blocker é autoridade final).
+    public void P03_a_P05_UmPendente_BloqueiaLeituraPesoConfirmar()
+    {
+        // PodeIniciarLeituraConsumo consulta o blocker (leitura); a reaplicação bloqueia peso/confirmar.
+        Assert.True(RecuperacaoConsumoPolitica.BloqueiaNovoConsumo(ModalidadeRecuperacaoConsumo.UmPendente));
+        string form = Fonte("Tela", "Processo", "ProcessoConsumoMaterialForm.cs");
+        string pode = ExtrairMetodo(form, "private bool PodeIniciarLeituraConsumo");
+        Assert.Contains("!RecuperacaoBloqueiaNovoConsumo()", pode, StringComparison.Ordinal);
+        string reaplicar = ExtrairMetodo(form, "private void ReaplicarEstadoRecuperacao");
+        Assert.Contains("AplicarMaterializacaoRecuperacaoPendente", reaplicar, StringComparison.Ordinal);
+        string materializa = ExtrairMetodo(form, "private void AplicarMaterializacaoRecuperacaoPendente");
+        Assert.Contains("BloquearAcoesConcorrentesRecuperacao();", materializa, StringComparison.Ordinal);
+    }
+
+    [Fact] // P06/P07: sob UmPendente o refresh reaplica "Enviar SAP 261" para o PK recuperado (mesma cerimônia/PK).
+    public void P06_P07_RefreshMantemEnvioComPkRecuperado()
+    {
+        string form = Fonte("Tela", "Processo", "ProcessoConsumoMaterialForm.cs");
+        string reaplicar = ExtrairMetodo(form, "private void ReaplicarEstadoRecuperacao");
+        // Só materializa envio quando a política autoriza (UmPendente + PK), usando o PK recuperado.
+        Assert.Contains("PermiteEnvioRecuperado(", reaplicar, StringComparison.Ordinal);
+        Assert.Contains("_codigoLancamentoRecuperado is long codigoRecuperado", reaplicar, StringComparison.Ordinal);
+        Assert.Contains("AplicarMaterializacaoRecuperacaoPendente(codigoRecuperado)", reaplicar, StringComparison.Ordinal);
+        // O envio recuperado usa o PK recuperado (não save de sessão), pela cerimônia única.
+        string envio = ExtrairMetodo(form, "private async Task EnviarSap261RecuperadoAsync");
+        Assert.Contains("AutorizarEEnviarSap261Async(codigoLancamento, usuario)", envio, StringComparison.Ordinal);
+    }
+
+    [Fact] // P08: Nenhum (resolução com sucesso, sem estado) → fresh-flow preservado (refresh segue caminho normal).
+    public void P08_Nenhum_FreshFlowPreservado()
+    {
+        Assert.False(RecuperacaoConsumoPolitica.BloqueiaNovoConsumo(ModalidadeRecuperacaoConsumo.Nenhum));
+        // Com Nenhum, AtualizarComponenteSelecionadoDoGrid NÃO entra no guard e segue para a captura normal.
+        string form = Fonte("Tela", "Processo", "ProcessoConsumoMaterialForm.cs");
+        string metodo = ExtrairMetodo(form, "private void AtualizarComponenteSelecionadoDoGrid");
+        Assert.Contains("CapturarComponenteSelecionadoDoGridPrincipal();", metodo, StringComparison.Ordinal);
+    }
+
+    [Theory] // P09/P10/P11/P12: Ambíguo/Enviando/Falha/desconhecido continuam bloqueados após refresh (default-deny).
+    [InlineData(ModalidadeRecuperacaoConsumo.AmbiguoPendente)]
+    [InlineData(ModalidadeRecuperacaoConsumo.EnviandoReconciliacao)]
+    [InlineData(ModalidadeRecuperacaoConsumo.FalhaResolucaoPersistida)]
+    [InlineData((ModalidadeRecuperacaoConsumo)999)]
+    public void P09_a_P12_EstadosBloqueantes_ContinuamBloqueadosAposRefresh(ModalidadeRecuperacaoConsumo modalidade)
+    {
+        Assert.True(RecuperacaoConsumoPolitica.BloqueiaNovoConsumo(RecuperacaoConsumoPolitica.ModalidadeEfetiva(modalidade)));
+        // Não materializam envio (não são UmPendente).
+        Assert.False(RecuperacaoConsumoPolitica.PermiteEnvioRecuperado(RecuperacaoConsumoPolitica.ModalidadeEfetiva(modalidade), 8));
+    }
+
+    [Fact] // P13: sem recovered PK, "Enviar SAP 261" não pode ficar acionável como recovery.
+    public void P13_SemPkRecuperado_EnvioRecoveryNaoAcionavel()
+    {
+        Assert.False(RecuperacaoConsumoPolitica.PermiteEnvioRecuperado(ModalidadeRecuperacaoConsumo.UmPendente, null));
+        // O disparo de envio recuperado no botão exige PermiteEnvioRecuperado(...) + PK vinculado.
+        string form = Fonte("Tela", "Processo", "ProcessoConsumoMaterialForm.cs");
+        string enviar = ExtrairMetodo(form, "private async Task EnviarSap261Async");
+        Assert.Contains("PermiteEnvioRecuperado(", enviar, StringComparison.Ordinal);
+        Assert.Contains("_codigoLancamentoRecuperado is long codigoRecuperado", enviar, StringComparison.Ordinal);
+    }
+
+    // ======================================================================================
     // helpers
     // ======================================================================================
 
