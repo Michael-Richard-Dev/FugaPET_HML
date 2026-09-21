@@ -14,6 +14,7 @@ public sealed class ProcessoConsumoMaterialController
 {
     private readonly ConsumoMaterialServico _consumoMaterialServico;
     private readonly TaraController _taraController;
+    private readonly ConsumoMaterialConsultaServico _consultaServico;
 
     public ProcessoConsumoMaterialController()
         : this(new ConsumoMaterialServico(), FabricaControladoresCadastro.CriarTaraController())
@@ -31,7 +32,18 @@ public sealed class ProcessoConsumoMaterialController
     {
         _consumoMaterialServico = consumoMaterialServico;
         _taraController = taraController;
+        _consultaServico = new ConsumoMaterialConsultaServico();
     }
+
+    /// <summary>
+    /// GATE 101J: resolução READ-ONLY do consumo persistido correspondente à ocorrência do apontamento.
+    /// Sem POST/claim/save. Delega ao serviço de consulta (mesmo repositório governado da tela).
+    /// </summary>
+    public Task<ResultadoRecuperacaoConsumoContexto> ResolverRecuperacaoPendenteAsync(
+        ContextoApontamentoProcesso contexto,
+        IReadOnlyList<ComponenteConsumoMaterial> componentes,
+        CancellationToken cancellationToken = default)
+        => _consultaServico.ResolverRecuperacaoPendenteAsync(contexto, componentes, cancellationToken);
 
     /// <summary>Taras ATIVAS do setor (mesma fonte da Entrada). Para a selecao de tara por componente.</summary>
     public Task<IReadOnlyList<TaraCadastro>> ListarTarasAtivasPorSetorAsync(

@@ -79,6 +79,17 @@ public partial class ProcessoConsumoMaterialForm : Form
     // Envio controlado SAP 261 (Tarefa 7): governado por WRITE_ENABLED; trava clique duplo.
     private bool _enviandoSap;
     private Button? _enviarSap261Button;
+
+    // GATE 101J: RECOVERY do consumo PERSISTIDO por contexto (fecha o gap do 101I). Estado DEDICADO
+    // (nunca reaproveita _ultimoCodigoLancamentoSalvo, que é só o save da sessão) + snapshot mínimo do
+    // contexto para invalidação. A autoridade vem do banco (PENDENTE/ENVIANDO), então sobrevive a restart.
+    private long? _codigoLancamentoRecuperado;
+    private RecuperacaoContextoSnapshot? _snapshotRecuperacao;
+    private global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo _modalidadeRecuperacao =
+        global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.Nenhum;
+
+    /// <summary>Snapshot mínimo do contexto do apontamento (§14): OP + operação + sequência.</summary>
+    private readonly record struct RecuperacaoContextoSnapshot(string NumeroOrdem, string Operacao, string Sequencia);
     private ToolTip? _envioSap261ToolTip;
     private ToolTip? _apontamentoInfoToolTip;
     private ToolTip? _sapStatusToolTip;
@@ -1023,6 +1034,13 @@ public partial class ProcessoConsumoMaterialForm : Form
             {
                 MessageBox.Show(resultado.Mensagem, "Ordem de Produção", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
+
+            // GATE 101J §12 passo 5: SOMENTE após materializar OP + componentes exatos da ocorrência,
+            // resolve READ-ONLY o estado persistido de consumo. Fora de apontamento, no-op.
+            if (_contextoApontamento is not null)
+            {
+                await ResolverRecuperacaoPersistidaDoContextoAsync(componentesOperacionais);
+            }
         }
         finally
         {
@@ -1941,7 +1959,9 @@ public partial class ProcessoConsumoMaterialForm : Form
     /// <summary>Tarefa 18.2 (padrao Entrada): pode iniciar leitura = permissao EXECUTAR + OP valida carregada.</summary>
     private bool PodeIniciarLeituraConsumo()
         => PossuiPermissaoLeituraProducao(AutorizacaoServico.AcaoExecutar)
-           && OrdemConsumoSelecionadaValida();
+           && OrdemConsumoSelecionadaValida()
+           // GATE 101J §13: recovery de PENDENTE/ENVIANDO/ambíguo bloqueia iniciar nova leitura (concorrência).
+           && !RecuperacaoBloqueiaNovoConsumo();
 
     private bool OrdemConsumoSelecionadaValida()
     {
@@ -1991,6 +2011,7 @@ public partial class ProcessoConsumoMaterialForm : Form
         _proximaSequenciaPesagem = 1;
         _consumoSalvoNaSessao = false;
         _ultimoCodigoLancamentoSalvo = null;
+        LimparEstadoRecuperacao(); // GATE 101J: PK recuperado não sobrevive à troca/limpeza de OP (§14).
         UpdateProductionState(false);
         BloquearAcoesSemOrdemCarregada();
         AtualizarBotaoConfirmar();
@@ -3020,6 +3041,15 @@ public partial class ProcessoConsumoMaterialForm : Form
 
     private void AtualizarBotaoConfirmar()
     {
+        // GATE 101J: em recovery de PENDENTE persistido, a ação primária é ENVIAR SAP 261 do PK recuperado —
+        // nunca uma nova pesagem/Confirmar Consumo (evita criar PK concorrente). Blocker ENVIANDO/AMBÍGUO
+        // não materializa envio; apenas bloqueia novo consumo.
+        if (_modalidadeRecuperacao != global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.Nenhum)
+        {
+            AtualizarBotoesRecuperacao();
+            return;
+        }
+
         if (_confirmarConsumoButton is not null)
         {
             // Ajuste 5 (Tarefa 18.2): CONFIRMAR CONSUMO visivel so FORA da leitura, com pesagem local e
@@ -3051,6 +3081,148 @@ public partial class ProcessoConsumoMaterialForm : Form
         if (_enviarSap261Button is not null) { _enviarSap261Button.Visible = false; }
         if (_previewConfirmacaoButton is not null) { _previewConfirmacaoButton.Visible = false; }
         if (_enviarConfirmacaoButton is not null) { _enviarConfirmacaoButton.Visible = false; }
+    }
+
+    // ==========================================================================================
+    // GATE 101J — RECOVERY de consumo PENDENTE_SAP persistido por contexto.
+    // ==========================================================================================
+
+    /// <summary>True quando existe estado persistido correspondente que BLOQUEIA novo consumo/pesagem/PK
+    /// (qualquer modalidade ≠ Nenhum: PENDENTE recuperado, ambíguo ou ENVIANDO/reconciliação).</summary>
+    private bool RecuperacaoBloqueiaNovoConsumo()
+        => _modalidadeRecuperacao != global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.Nenhum;
+
+    private RecuperacaoContextoSnapshot? SnapshotContextoRecuperacaoAtual()
+        => _contextoApontamento is null
+            ? null
+            : new RecuperacaoContextoSnapshot(
+                NormalizarNumeroOrdem(_contextoApontamento.NumeroOrdem),
+                _contextoApontamento.Operacao ?? string.Empty,
+                _contextoApontamento.Sequencia ?? string.Empty);
+
+    private void LimparEstadoRecuperacao()
+    {
+        _codigoLancamentoRecuperado = null;
+        _snapshotRecuperacao = null;
+        _modalidadeRecuperacao = global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.Nenhum;
+    }
+
+    /// <summary>
+    /// §12 passo 5/6: resolve READ-ONLY o consumo persistido da ocorrência e aplica a modalidade. NUNCA cria
+    /// lançamento/pesagem, NUNCA faz POST/claim. Falha ⇒ fail-closed: limpa recovery e segue fluxo novo.
+    /// </summary>
+    private async Task ResolverRecuperacaoPersistidaDoContextoAsync(
+        IReadOnlyList<ComponenteConsumoMaterial> componentes)
+    {
+        if (_contextoApontamento is null)
+        {
+            return;
+        }
+
+        global::FugaPET_HML.Modelo.Consumo.ResultadoRecuperacaoConsumoContexto resultado;
+        try
+        {
+            resultado = await _controller.ResolverRecuperacaoPendenteAsync(_contextoApontamento, componentes);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                $"[Consumo][Recovery] Falha ao resolver recuperação persistida: {ex.GetType().Name}");
+            LimparEstadoRecuperacao();
+            return;
+        }
+
+        _modalidadeRecuperacao = resultado.Modalidade;
+        switch (resultado.Modalidade)
+        {
+            case global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.UmPendente:
+                _codigoLancamentoRecuperado = resultado.CodigoLancamento;
+                _snapshotRecuperacao = SnapshotContextoRecuperacaoAtual();
+                AplicarMaterializacaoRecuperacaoPendente(resultado.CodigoLancamento!.Value);
+                break;
+
+            case global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.AmbiguoPendente:
+                _codigoLancamentoRecuperado = null;
+                _snapshotRecuperacao = null;
+                AplicarBloqueioReconciliacao(
+                    "Mais de um consumo PENDENTE_SAP corresponde a esta ocorrência. Envio bloqueado até "
+                    + "reconciliação/ação de suporte. Nenhum novo consumo será criado.");
+                break;
+
+            case global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.EnviandoReconciliacao:
+                _codigoLancamentoRecuperado = null;
+                _snapshotRecuperacao = null;
+                AplicarBloqueioReconciliacao(
+                    "Consumo em ENVIANDO_SAP para esta ocorrência: reconciliação SAP pendente. Novo consumo "
+                    + "bloqueado; nenhum novo envio é habilitado até a reconciliação.");
+                break;
+
+            default:
+                LimparEstadoRecuperacao();
+                break;
+        }
+    }
+
+    /// <summary>§13: materializa PENDENTE_SAP + PK recuperado + ação "Enviar SAP 261"; bloqueia ações que
+    /// poderiam criar concorrência (iniciar leitura / ler / digitar peso / Confirmar Consumo).</summary>
+    private void AplicarMaterializacaoRecuperacaoPendente(long codigoLancamentoRecuperado)
+    {
+        BloquearAcoesConcorrentesRecuperacao();
+
+        if (_enviarSap261Button is not null)
+        {
+            _enviarSap261Button.Text = "Enviar SAP 261";
+            _enviarSap261Button.Visible = true;
+            _enviarSap261Button.Enabled = !_enviandoSap;
+        }
+
+        statusLabel.Text =
+            $"PENDENTE_SAP — Lançamento {codigoLancamentoRecuperado} recuperado. "
+            + "Autorize o envio SAP 261 (não é necessária nova pesagem).";
+    }
+
+    /// <summary>§10/§11: blocker de reconciliação/ambíguo — nenhuma ação de envio materializada; novo consumo
+    /// bloqueado. ZERO capability, ZERO claim, ZERO POST.</summary>
+    private void AplicarBloqueioReconciliacao(string mensagem)
+    {
+        BloquearAcoesConcorrentesRecuperacao();
+        if (_enviarSap261Button is not null)
+        {
+            _enviarSap261Button.Visible = false;
+            _enviarSap261Button.Enabled = false;
+        }
+
+        statusLabel.Text = mensagem;
+    }
+
+    private void AtualizarBotoesRecuperacao()
+    {
+        if (_modalidadeRecuperacao == global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.UmPendente
+            && _codigoLancamentoRecuperado is long)
+        {
+            if (_confirmarConsumoButton is not null) { _confirmarConsumoButton.Visible = false; _confirmarConsumoButton.Enabled = false; }
+            if (_naoConsumidoButton is not null) { _naoConsumidoButton.Visible = false; _naoConsumidoButton.Enabled = false; }
+            if (_enviarSap261Button is not null)
+            {
+                _enviarSap261Button.Visible = true;
+                _enviarSap261Button.Enabled = !_enviandoSap;
+            }
+            return;
+        }
+
+        // Ambíguo / ENVIANDO: nada de envio nem de novo consumo.
+        if (_confirmarConsumoButton is not null) { _confirmarConsumoButton.Visible = false; _confirmarConsumoButton.Enabled = false; }
+        if (_naoConsumidoButton is not null) { _naoConsumidoButton.Visible = false; _naoConsumidoButton.Enabled = false; }
+        if (_enviarSap261Button is not null) { _enviarSap261Button.Visible = false; _enviarSap261Button.Enabled = false; }
+    }
+
+    private void BloquearAcoesConcorrentesRecuperacao()
+    {
+        iniciarLeituraButton.Enabled = false;
+        iniciarLeituraButton.Cursor = Cursors.Default;
+        SetReadWeightEnabled(false);
+        if (_confirmarConsumoButton is not null) { _confirmarConsumoButton.Visible = false; _confirmarConsumoButton.Enabled = false; }
+        if (_naoConsumidoButton is not null) { _naoConsumidoButton.Visible = false; _naoConsumidoButton.Enabled = false; }
     }
 
     /// <summary>
@@ -3225,6 +3397,15 @@ public partial class ProcessoConsumoMaterialForm : Form
             return;
         }
 
+        // GATE 101J §14/§15: recovery de PENDENTE persistido → envia o PK RECUPERADO (estado dedicado),
+        // revalidando o snapshot de contexto, pela MESMA cerimônia/seam do 101E. Sem nova pesagem/save.
+        if (_modalidadeRecuperacao == global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.UmPendente
+            && _codigoLancamentoRecuperado is long codigoRecuperado)
+        {
+            await EnviarSap261RecuperadoAsync(codigoRecuperado);
+            return;
+        }
+
         if (_ultimoCodigoLancamentoSalvo is not long codigoLancamento)
         {
             statusLabel.Text = "Salve o consumo local antes de enviar ao SAP.";
@@ -3269,6 +3450,67 @@ public partial class ProcessoConsumoMaterialForm : Form
                 "Enviar SAP 261",
                 MessageBoxButtons.OK,
                 resultado.Sucesso ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            _enviandoSap = false;
+            AtualizarBotaoConfirmar();
+        }
+    }
+
+    /// <summary>
+    /// GATE 101J §14–§18: envio do consumo RECUPERADO (PENDENTE persistido). Revalida o snapshot de contexto
+    /// (§14: PK não sobrevive a troca de contexto ⇒ zero claim/POST); usa o SEAM ÚNICO 101E bound ao MESMO PK
+    /// (§15); recusa/auditoria falha ⇒ PENDENTE preservado, claim 0, HTTP 0, recovery segue disponível (§16);
+    /// sucesso inequívoco ⇒ ConfirmadoSap com vínculo = MESMO PK (§17). Não cria lançamento/pesagem, não
+    /// implementa segundo writer, não contorna a capability.
+    /// </summary>
+    private async Task EnviarSap261RecuperadoAsync(long codigoLancamento)
+    {
+        // §14: PK recuperado NÃO pode sobreviver a mudança de contexto — revalida OP/operação/sequência.
+        if (_snapshotRecuperacao is not { } snapshot || !snapshot.Equals(SnapshotContextoRecuperacaoAtual()))
+        {
+            LimparEstadoRecuperacao();
+            statusLabel.Text = "Contexto do apontamento mudou. Recuperação invalidada; nenhum envio realizado.";
+            AtualizarBotaoConfirmar();
+            return; // ZERO claim, ZERO POST.
+        }
+
+        _enviandoSap = true;
+        AtualizarBotaoConfirmar();
+        try
+        {
+            string usuario = global::FugaPET_HML.Tela.Comum.UsuarioLogadoUiHelper.ObterLogin();
+            // SEAM ÚNICO 101E: confirmação humana + capability BOUND ao MESMO PK + envio controlado.
+            ResultadoEnvioConsumoSap261? resultado = await AutorizarEEnviarSap261Async(codigoLancamento, usuario);
+            if (resultado is null)
+            {
+                // §16: recusa/auditoria falha ⇒ nada armado, nada enviado; PENDENTE preservado; recovery segue.
+                return;
+            }
+
+            if (resultado.Sucesso
+                && !string.IsNullOrWhiteSpace(resultado.DocumentoMaterialSap)
+                && !string.IsNullOrWhiteSpace(resultado.ExercicioDocumentoMaterialSap))
+            {
+                // §17: sucesso inequívoco ⇒ ConfirmadoSap; vínculo = MESMO PK recuperado; libera término.
+                string mensagemFinal = FinalizarApontamentoEnviadoSapELiberarNovaPesagem(resultado.Mensagem);
+                RegistrarResultadoApontamento(
+                    ResultadoExecucaoProcessoApontamento.ConfirmadoSap, codigoLancamento, mensagemFinal, confirmadoSap: true);
+                LimparEstadoRecuperacao();
+                statusLabel.Text = mensagemFinal;
+                MessageBox.Show(mensagemFinal, "Enviar SAP 261", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            // §18: indeterminado / rejeição comprovada ⇒ o contrato 101E já ajustou o estado persistido
+            // (ENVIANDO_SAP + reconciliação, ou PENDENTE_SAP reenviável). Não conclui a atividade aqui.
+            statusLabel.Text = resultado.Mensagem;
+            MessageBox.Show(
+                resultado.Mensagem,
+                "Enviar SAP 261",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
         }
         finally
         {
@@ -3888,6 +4130,17 @@ public partial class ProcessoConsumoMaterialForm : Form
     {
         if (_salvandoConsumo)
         {
+            return;
+        }
+
+        // GATE 101J §10/§11/§13: enquanto houver PENDENTE recuperado/ambíguo/ENVIANDO para a ocorrência,
+        // NÃO criar novo lançamento (evita PK concorrente / segundo POST). Fail-closed antes de qualquer save.
+        if (RecuperacaoBloqueiaNovoConsumo())
+        {
+            statusLabel.Text = _modalidadeRecuperacao == global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.UmPendente
+                ? "Há um consumo PENDENTE_SAP recuperado para esta ocorrência. Use Enviar SAP 261; não é criado novo lançamento."
+                : "Consumo bloqueado: reconciliação SAP pendente para esta ocorrência. Nenhum novo lançamento será criado.";
+            AtualizarBotaoConfirmar();
             return;
         }
 

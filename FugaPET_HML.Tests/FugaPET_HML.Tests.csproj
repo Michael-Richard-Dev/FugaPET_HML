@@ -28,8 +28,8 @@
     <Compile Remove="IntegracaoSap\ProdutoAcabadoHandlingUnitGatewayHml1Tests.cs" />
     <Compile Remove="IntegracaoSap\ProdutoAcabadoHuPostUnicoHml2Tests.cs" />
     <!-- FUGAPET-Q-TEST-SNAPSHOT-QA-ADJUDICATION-08:
-         preservados fisicamente, fora da compilacao ativa do snapshot Q atual. -->
-    <Compile Remove="Processo\ConsumoRecuperacaoLancamentoCode05Tests.cs" />
+         preservados fisicamente, fora da compilacao ativa do snapshot Q atual.
+         GATE 101J: Code05 reabilitado — reescrito contra o contrato de recovery PENDENTE_SAP atual. -->
     <Compile Remove="IntegracaoSap\ProductionRoutingPpFormFixTests.cs" />
     <!-- GATE 093D: reabilitado após implementar routing por WorkCenter + perfil normalizado no runtime produtivo. -->
     <Compile Remove="Processo\OutOfSnapshot\ControleApontamentosResultadoSemiAcabadoOutOfSnapshotTests.cs" />
