@@ -434,6 +434,78 @@ public sealed class ConsumoRecuperacaoFormPosRetomadaBehavioralTests
         Assert.False(casaComLoteObrigatorio);
     }
 
+    // ==================================================================
+    // GATE 102K-A — SUPERFÍCIE VISUAL do recovery (status card + apontamento) deve representar PENDENTE SAP.
+    // ==================================================================
+
+    private static string TextoControle(object form, string campo)
+        => GetField<System.Windows.Forms.Control>(form, campo)?.Text ?? string.Empty;
+
+    private static object PrepararFormComRecoveryUmPendente()
+    {
+        object form = CriarFormComContexto();
+        var repo = new FakeRepo
+        {
+            Candidatos = [new() { CodigoLancamento = 8, NumeroOrdem = "1000170", StatusLancamento = "PENDENTE_SAP" }],
+            Detalhes = { [8] = new() { Codigo = 8, NumeroOrdem = "1000170", StatusLancamento = "PENDENTE_SAP", Itens = [ItemPk8()] } }
+        };
+        ResolverEReceber(form, repo); // materializa UmPendente/8 via código produtivo real
+        Assert.Equal(ModalidadeRecuperacaoConsumo.UmPendente, GetField<ModalidadeRecuperacaoConsumo>(form, "_modalidadeRecuperacao"));
+        Assert.Equal(8L, GetField<long?>(form, "_codigoLancamentoRecuperado"));
+        return form;
+    }
+
+    private static void AferirSuperficieRecovery(object form)
+    {
+        // Status card NÃO pode dominar como fresh-flow (INATIVA / "Leitura aguardando").
+        string statusValue = TextoControle(form, "statusValueLabel");
+        string statusHint = TextoControle(form, "statusHintLabel");
+        Assert.DoesNotContain("INATIVA", statusValue, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("PENDENTE", statusValue, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Leitura aguardando", statusHint, StringComparison.OrdinalIgnoreCase);
+
+        // Orientação NÃO pode ser fresh-flow ("Selecione um componente" / "Pronto para leitura").
+        string orientacao = TextoControle(form, "apontamentoInfoValueLabel");
+        Assert.DoesNotContain("Selecione um componente", orientacao, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Pronto para leitura", orientacao, StringComparison.OrdinalIgnoreCase);
+
+        // statusLabel mantém a mensagem completa de recovery.
+        Assert.Contains("PENDENTE_SAP", StatusText(form), StringComparison.OrdinalIgnoreCase);
+
+        // Controles bloqueados; envio 261 visível.
+        Assert.False(ControleEnabled(form, "iniciarLeituraButton"));
+        Assert.False(ControleEnabled(form, "lerEtiquetaButton"));
+        Assert.False(ControleEnabled(form, "leituraManualButton"));
+        Assert.False(ControleEnabled(form, "_confirmarConsumoButton"));
+        Assert.True(ControleVisible(form, "_enviarSap261Button"));
+    }
+
+    [Fact] // RED/GREEN: a superfície visual (status card + orientação) representa PENDENTE SAP, não fresh-flow.
+    public void UmPendente_SuperficieVisual_RepresentaPendenteSap()
+    {
+        RunSta(() =>
+        {
+            object form = PrepararFormComRecoveryUmPendente();
+            AferirSuperficieRecovery(form);
+        });
+    }
+
+    [Fact] // §7/§11: a superfície visual de recovery é preservada após refreshes genéricos (idempotência).
+    public void UmPendente_SuperficieVisual_PreservadaAposRefresh()
+    {
+        RunSta(() =>
+        {
+            object form = PrepararFormComRecoveryUmPendente();
+
+            // refreshes genéricos que os eventos disparam no runtime real
+            Invoke(form, "AtualizarComponenteSelecionadoDoGrid");
+            Invoke(form, "AtualizarLiberacaoInicioLeitura");
+            Invoke(form, "ReaplicarEstadoRecuperacao");
+
+            AferirSuperficieRecovery(form);
+        });
+    }
+
     // ---------------- fake repo READ-ONLY (sem banco/SAP) ----------------
 
     private sealed class FakeOrderServico : IProductionOrderSapServico

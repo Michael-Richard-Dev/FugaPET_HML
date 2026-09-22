@@ -3243,6 +3243,37 @@ public partial class ProcessoConsumoMaterialForm : Form
         statusLabel.Text =
             $"PENDENTE_SAP — Lançamento {codigoLancamentoRecuperado} recuperado. "
             + "Autorize o envio SAP 261 (não é necessária nova pesagem).";
+
+        // GATE 102K-A: a SUPERFÍCIE VISUAL (status card + apontamento) também deve representar PENDENTE SAP —
+        // sem isso o card ficava "INATIVA/Leitura aguardando" e a orientação "Selecione um componente" (fresh-flow),
+        // embora o estado interno de recovery estivesse correto. Idempotente (reaplicado por ReaplicarEstadoRecuperacao).
+        AplicarSuperficieVisualRecuperacaoPendente();
+    }
+
+    /// <summary>GATE 102K-A: representação visual EXPLÍCITA de RECOVERY PENDENTE SAP no status card e no bloco de
+    /// apontamento. Não altera regra dos controles; só a superfície visual, para o recovery ser autoridade final.</summary>
+    private void AplicarSuperficieVisualRecuperacaoPendente()
+    {
+        Color pendenteTexto = Color.FromArgb(181, 106, 8);
+
+        statusCard.BackColor = Color.Transparent;
+        statusCard.FillColor = Color.FromArgb(255, 246, 224);
+        statusCard.BorderColor = Color.FromArgb(250, 224, 160);
+        statusCardIcon.Text = "!";
+        statusCardIcon.ForeColor = pendenteTexto;
+        statusValueLabel.Text = "PENDENTE SAP";
+        statusValueLabel.ForeColor = pendenteTexto;
+        statusHintLabel.Text = "Consumo já pesado e salvo. Aguardando envio ao SAP.";
+        statusHintLabel.ForeColor = Color.FromArgb(98, 108, 124);
+        statusCard.Invalidate(true);
+        statusCardIcon.Invalidate();
+        statusValueLabel.Invalidate();
+        statusHintLabel.Invalidate();
+
+        apontamentoChipCaptionLabel.Text = "ROTA SAP";
+        apontamentoChipValueLabel.Text = "261 Direto";
+        apontamentoInfoCaptionLabel.Text = "ORIENTAÇÃO";
+        AtualizarApontamentoInfo("Consumo salvo.\nPendente de envio SAP.", statusLabel.Text);
     }
 
     /// <summary>§10/§11: blocker de reconciliação/ambíguo — nenhuma ação de envio materializada; novo consumo
