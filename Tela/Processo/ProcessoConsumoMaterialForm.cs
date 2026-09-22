@@ -1662,7 +1662,12 @@ public partial class ProcessoConsumoMaterialForm : Form
             return false;
         }
 
-        if (!ComponentePertenceAoModoAtual(componente))
+        // GATE 103D: no fluxo de APONTAMENTO (_contextoApontamento != null) a operação configurada já é
+        // autoridade para a tela — os componentes foram filtrados por ManufacturingOrderOperation/Sequence e
+        // ProductType/ProductGroup entram apenas como enriquecimento/diagnóstico, NÃO podem re-bloquear a
+        // operação depois disso. O filtro de modo por ClassificacaoConsumo permanece obrigatório SOMENTE no
+        // fluxo MANUAL (_contextoApontamento == null), onde não há rota de operação autoritativa.
+        if (_contextoApontamento is null && !ComponentePertenceAoModoAtual(componente))
         {
             motivoBloqueio = $"Componente não pertence ao modo {NomeOperacionalConsumo}.";
             return false;
