@@ -1,4 +1,6 @@
 using System.Reflection;
+using FugaPET_HML.Modelo.Consumo;
+using FugaPET_HML.Modelo.Processo;
 using FugaPET_HML.Servicos.Diagnostico;
 
 namespace FugaPET_HML.Tests.Diagnostico;
@@ -80,13 +82,14 @@ public sealed class RecoveryDiag102JTests
         Assert.Contains(m!.GetParameters(), p => p.ParameterType == typeof(OrientacaoClass102J));
     }
 
-    [Fact] // §5: identidade de componente só expõe os 6 campos allowlisted (sem texto livre).
-    public void ComponenteDiag_SoTemCamposAllowlisted()
+    [Fact] // §5: componente entra como domínio; não existe DTO intermediário com strings persistíveis.
+    public void ComponenteDiag_RecebeDominioSemDtoLivre()
     {
-        string[] campos = typeof(ComponenteDiag102J).GetProperties().Select(p => p.Name).OrderBy(x => x).ToArray();
-        Assert.Equal(
-            new[] { "Batch", "Material", "Movement", "Reservation", "ReservationItem", "StorageLocation" },
-            campos);
+        Assert.Null(typeof(RecoveryDiag102J).Assembly.GetType(
+            "FugaPET_HML.Servicos.Diagnostico.ComponenteDiag102J"));
+        MethodInfo metodo = typeof(RecoveryDiag102J).GetMethod(nameof(RecoveryDiag102J.LogComponente))!;
+        Assert.Contains(metodo.GetParameters(), p => p.ParameterType == typeof(ComponenteConsumoMaterial));
+        Assert.DoesNotContain(metodo.GetParameters(), p => p.ParameterType == typeof(string));
     }
 
     // ---------- Sanitização por construção da linha ----------
@@ -95,9 +98,13 @@ public sealed class RecoveryDiag102JTests
     public void Formatar_ContemMetadados_ESemSegredos()
     {
         Guid cid = Guid.NewGuid();
-        // 'camposEstruturados' aqui é o que os métodos tipados produzem (enum/valores allowlisted) — nunca texto de UI.
-        string linha = RecoveryDiag102J.Formatar(cid, PontoDiag102J.G_AfterRecoveryResolver,
-            "modalidadeBruta=UmPendente;modalidadeEfetiva=UmPendente;pk=8;candidatos=0");
+        string linha = RecoveryDiag102J.FormatarResultadoParaTeste(
+            cid,
+            PontoDiag102J.G_AfterRecoveryResolver,
+            ModalidadeRecuperacaoConsumo.UmPendente,
+            ModalidadeRecuperacaoConsumo.UmPendente,
+            8,
+            0);
 
         Assert.Contains("PID=", linha, StringComparison.Ordinal);
         Assert.Contains("TID=", linha, StringComparison.Ordinal);
@@ -113,7 +120,7 @@ public sealed class RecoveryDiag102JTests
     [Fact]
     public void Formatar_SemDetalhe_NaoAdicionaPipeFinal()
     {
-        string linha = RecoveryDiag102J.Formatar(Guid.Empty, PontoDiag102J.B_ShownEnter, null);
+        string linha = RecoveryDiag102J.FormatarMarcoParaTeste(Guid.Empty, PontoDiag102J.B_ShownEnter);
         Assert.EndsWith("|B_ShownEnter", linha, StringComparison.Ordinal);
     }
 
@@ -126,22 +133,14 @@ public sealed class RecoveryDiag102JTests
     }
 
     [Fact]
-    public void EscreverLinha_CriaArquivoEAppenda()
+    public void PersistirLinha_EhExclusivamentePrivado()
     {
-        string dir = Path.Combine(Path.GetTempPath(), "FugaPET_Q_102J_TESTE", Guid.NewGuid().ToString("N"));
-        string caminho = Path.Combine(dir, "recovery_teste.log");
-        try
-        {
-            RecoveryDiag102J.EscreverLinha(caminho, "linha-1");
-            RecoveryDiag102J.EscreverLinha(caminho, "linha-2");
-            Assert.True(File.Exists(caminho));
-            string[] linhas = File.ReadAllLines(caminho);
-            Assert.Equal(2, linhas.Length);
-        }
-        finally
-        {
-            try { Directory.Delete(dir, recursive: true); } catch { /* best-effort */ }
-        }
+        MethodInfo? metodo = typeof(RecoveryDiag102J).GetMethod(
+            "PersistirLinha", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(metodo);
+        Assert.True(metodo!.IsPrivate);
+        Assert.Null(typeof(RecoveryDiag102J).GetMethod(
+            "EscreverLinha", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static));
     }
 
     [Fact] // §10.D: DIAG OFF → nenhum arquivo criado por LogSnapshot/LogMarco.
@@ -152,7 +151,8 @@ public sealed class RecoveryDiag102JTests
 
         RecoveryDiag102J.LogMarco(Guid.NewGuid(), PontoDiag102J.K_FinalSnapshot);
         RecoveryDiag102J.LogSnapshot(Guid.NewGuid(), PontoDiag102J.I_AfterAplicarMaterializacao,
-            new SnapshotDiag102J("UmPendente", 8, StatusClass102J.RecoveryPendente, false, false, false, false, false, false, true, true));
+            new SnapshotDiag102J(ModalidadeRecuperacaoConsumo.UmPendente, 8,
+                StatusClass102J.RecoveryPendente, false, false, false, false, false, false, true, true));
 
         Assert.False(RecoveryDiag102J.Ativo);
         Assert.False(File.Exists(caminho));

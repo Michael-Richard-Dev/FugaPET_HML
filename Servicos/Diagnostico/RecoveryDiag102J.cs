@@ -1,3 +1,6 @@
+using FugaPET_HML.Modelo.Consumo;
+using FugaPET_HML.Modelo.Processo;
+
 namespace FugaPET_HML.Servicos.Diagnostico;
 
 /// <summary>Ponto de diagnóstico ALLOWLISTED (enum fechado — nunca texto operacional arbitrário).</summary>
@@ -43,21 +46,9 @@ public enum OrientacaoClass102J
     Outro
 }
 
-/// <summary>Contexto do apontamento — campos allowlisted.</summary>
-public readonly record struct ContextoDiag102J(
-    long CodigoApontamento, string Op, string Operacao, string Sequencia, string TipoProcesso);
-
-/// <summary>Identidade de um componente da ocorrência — campos allowlisted (identidade de reserva/matcher).</summary>
-public readonly record struct ComponenteDiag102J(
-    string Material, string Reservation, string ReservationItem, string StorageLocation, string Batch, string Movement);
-
-/// <summary>Resultado do resolver — campos allowlisted.</summary>
-public readonly record struct ResultadoDiag102J(
-    string ModalidadeBruta, string ModalidadeEfetiva, long? CodigoLancamento, int CandidateCount);
-
 /// <summary>Snapshot de estado — SOMENTE modalidade/PK + classificação de status + booleans de controles.</summary>
 public readonly record struct SnapshotDiag102J(
-    string Modalidade,
+    ModalidadeRecuperacaoConsumo Modalidade,
     long? CodigoLancamento,
     StatusClass102J StatusClass,
     bool StartEnabled,
@@ -80,6 +71,7 @@ public static class RecoveryDiag102J
 {
     internal const string NomeFlag = "FUGAPET_Q_RECOVERY_DIAG_102J";
     private const string MarcadorAmbienteQ = "ambiente.q.json";
+    private const string ValorInvalido = "INVALID";
 
     public static bool Ativo { get; } = AvaliarAtivo(
         Environment.GetEnvironmentVariable(NomeFlag, EnvironmentVariableTarget.Process),
@@ -108,33 +100,42 @@ public static class RecoveryDiag102J
     public static void LogMarco(Guid cid, PontoDiag102J ponto)
         => Emitir(cid, ponto, null);
 
-    public static void LogContexto(Guid cid, PontoDiag102J ponto, in ContextoDiag102J ctx)
+    public static void LogContexto(Guid cid, PontoDiag102J ponto, ContextoApontamentoProcesso contexto)
         => Emitir(cid, ponto,
-            $"CodApont={ctx.CodigoApontamento};OP={ctx.Op};Op={ctx.Operacao};Seq={ctx.Sequencia};Tipo={ctx.TipoProcesso}");
+            CamposContexto(contexto.CodigoApontamento, contexto.NumeroOrdem, contexto.Operacao,
+                contexto.Sequencia, contexto.TipoProcesso));
 
-    public static void LogComponente(Guid cid, PontoDiag102J ponto, int index, in ComponenteDiag102J c)
+    public static void LogComponente(Guid cid, PontoDiag102J ponto, int index, ComponenteConsumoMaterial componente)
         => Emitir(cid, ponto,
-            $"idx={index};Mat={c.Material};Res={c.Reservation};Item={c.ReservationItem};"
-            + $"Dep={c.StorageLocation};Batch={c.Batch};Mov={c.Movement}");
+            CamposComponente(index, componente.CodigoMaterial, componente.NumeroReserva,
+                componente.ItemReserva, componente.DepositoConsumo, componente.Lote,
+                componente.TipoMovimento, componente.Operacao, componente.SequenciaOperacao));
 
     public static void LogContagemComponentes(Guid cid, PontoDiag102J ponto, int count)
         => Emitir(cid, ponto, $"count={count}");
 
-    public static void LogResultado(Guid cid, PontoDiag102J ponto, in ResultadoDiag102J r)
+    public static void LogResultado(
+        Guid cid,
+        PontoDiag102J ponto,
+        ModalidadeRecuperacaoConsumo modalidadeBruta,
+        ModalidadeRecuperacaoConsumo modalidadeEfetiva,
+        long? codigoLancamento,
+        int candidateCount)
         => Emitir(cid, ponto,
-            $"modalidadeBruta={r.ModalidadeBruta};modalidadeEfetiva={r.ModalidadeEfetiva};"
-            + $"pk={(r.CodigoLancamento?.ToString() ?? "null")};candidatos={r.CandidateCount}");
+            CamposResultado(modalidadeBruta.ToString(), modalidadeEfetiva.ToString(), codigoLancamento, candidateCount));
 
     public static void LogSnapshot(Guid cid, PontoDiag102J ponto, in SnapshotDiag102J s)
         => Emitir(cid, ponto,
-            $"modalidade={s.Modalidade};pk={(s.CodigoLancamento?.ToString() ?? "null")};statusClass={s.StatusClass};"
+            $"modalidade={SanitizarModalidade(s.Modalidade.ToString())};"
+            + $"pk={(s.CodigoLancamento?.ToString() ?? "null")};statusClass={s.StatusClass};"
             + $"start.En={s.StartEnabled};read.En={s.ReadEnabled};read.Vis={s.ReadVisible};"
             + $"manual.En={s.ManualEnabled};manual.Vis={s.ManualVisible};confirm.En={s.ConfirmEnabled};"
             + $"send.Vis={s.SendVisible};send.En={s.SendEnabled}");
 
     public static void LogSnapshotComOrientacao(Guid cid, PontoDiag102J ponto, in SnapshotDiag102J s, OrientacaoClass102J orientacao)
         => Emitir(cid, ponto,
-            $"orientacaoClass={orientacao};modalidade={s.Modalidade};pk={(s.CodigoLancamento?.ToString() ?? "null")};"
+            $"orientacaoClass={orientacao};modalidade={SanitizarModalidade(s.Modalidade.ToString())};"
+            + $"pk={(s.CodigoLancamento?.ToString() ?? "null")};"
             + $"statusClass={s.StatusClass};start.En={s.StartEnabled};read.En={s.ReadEnabled};read.Vis={s.ReadVisible};"
             + $"manual.En={s.ManualEnabled};manual.Vis={s.ManualVisible};confirm.En={s.ConfirmEnabled};"
             + $"send.Vis={s.SendVisible};send.En={s.SendEnabled}");
@@ -150,7 +151,7 @@ public static class RecoveryDiag102J
 
         try
         {
-            EscreverLinha(CaminhoLog(), Formatar(cid, ponto, camposEstruturados));
+            PersistirLinha(CaminhoLog(), FormatarLinha(cid, ponto, camposEstruturados));
         }
         catch
         {
@@ -158,8 +159,7 @@ public static class RecoveryDiag102J
         }
     }
 
-    // internal para teste — recebe SOMENTE enum + campos já estruturados por esta classe (nunca entrada externa livre).
-    internal static string Formatar(Guid cid, PontoDiag102J ponto, string? camposEstruturados)
+    private static string FormatarLinha(Guid cid, PontoDiag102J ponto, string? camposEstruturados)
     {
         string baseLinha =
             $"{DateTime.UtcNow:O}|PID={Environment.ProcessId}|TID={Environment.CurrentManagedThreadId}"
@@ -170,7 +170,33 @@ public static class RecoveryDiag102J
     internal static string CaminhoLog()
         => Path.Combine(Path.GetTempPath(), "FugaPET_Q", "102J", $"recovery_{Environment.ProcessId}.log");
 
-    internal static void EscreverLinha(string caminho, string linha)
+    internal static string FormatarContextoParaTeste(
+        Guid cid, PontoDiag102J ponto, ContextoApontamentoProcesso contexto)
+        => FormatarLinha(cid, ponto,
+            CamposContexto(contexto.CodigoApontamento, contexto.NumeroOrdem, contexto.Operacao,
+                contexto.Sequencia, contexto.TipoProcesso));
+
+    internal static string FormatarMarcoParaTeste(Guid cid, PontoDiag102J ponto)
+        => FormatarLinha(cid, ponto, null);
+
+    internal static string FormatarComponenteParaTeste(
+        Guid cid, PontoDiag102J ponto, int index, ComponenteConsumoMaterial componente)
+        => FormatarLinha(cid, ponto,
+            CamposComponente(index, componente.CodigoMaterial, componente.NumeroReserva,
+                componente.ItemReserva, componente.DepositoConsumo, componente.Lote,
+                componente.TipoMovimento, componente.Operacao, componente.SequenciaOperacao));
+
+    internal static string FormatarResultadoParaTeste(
+        Guid cid,
+        PontoDiag102J ponto,
+        ModalidadeRecuperacaoConsumo modalidadeBruta,
+        ModalidadeRecuperacaoConsumo modalidadeEfetiva,
+        long? codigoLancamento,
+        int candidateCount)
+        => FormatarLinha(cid, ponto,
+            CamposResultado(modalidadeBruta.ToString(), modalidadeEfetiva.ToString(), codigoLancamento, candidateCount));
+
+    private static void PersistirLinha(string caminho, string linha)
     {
         string? dir = Path.GetDirectoryName(caminho);
         if (!string.IsNullOrEmpty(dir))
@@ -180,4 +206,68 @@ public static class RecoveryDiag102J
 
         File.AppendAllText(caminho, linha + Environment.NewLine);
     }
+
+    private static string CamposContexto(
+        long codigoApontamento, string? op, string? operacao, string? sequencia, string? tipoProcesso)
+        => $"CodApont={SanitizarPositivo(codigoApontamento)};OP={SanitizarNumerico(op, 20)};"
+            + $"Op={SanitizarTecnico(operacao, 20)};Seq={SanitizarTecnico(sequencia, 20)};"
+            + $"Tipo={SanitizarTipoProcesso(tipoProcesso)}";
+
+    private static string CamposComponente(
+        int index, string? material, string? reserva, string? itemReserva, string? deposito,
+        string? lote, string? movimento, string? operacao, string? sequencia)
+        => $"idx={SanitizarNaoNegativo(index)};Mat={SanitizarTecnico(material, 40)};"
+            + $"Res={SanitizarNumerico(reserva, 20)};Item={SanitizarNumerico(itemReserva, 10)};"
+            + $"Dep={SanitizarTecnico(deposito, 10)};Batch={SanitizarTecnico(lote, 40)};"
+            + $"Mov={SanitizarNumerico(movimento, 4)};Op={SanitizarTecnico(operacao, 20)};"
+            + $"Seq={SanitizarTecnico(sequencia, 20)}";
+
+    private static string CamposResultado(
+        string? modalidadeBruta, string? modalidadeEfetiva, long? codigoLancamento, int candidateCount)
+        => $"modalidadeBruta={SanitizarModalidade(modalidadeBruta)};"
+            + $"modalidadeEfetiva={SanitizarModalidade(modalidadeEfetiva)};"
+            + $"pk={SanitizarOpcionalPositivo(codigoLancamento)};candidatos={SanitizarNaoNegativo(candidateCount)}";
+
+    private static string SanitizarNumerico(string? valor, int tamanhoMaximo)
+        => ValorPermitido(valor, tamanhoMaximo, char.IsAsciiDigit);
+
+    private static string SanitizarTecnico(string? valor, int tamanhoMaximo)
+        => ValorPermitido(valor, tamanhoMaximo, char.IsAsciiLetterOrDigit);
+
+    private static string ValorPermitido(string? valor, int tamanhoMaximo, Func<char, bool> caracterePermitido)
+    {
+        if (string.IsNullOrEmpty(valor) || valor.Length > tamanhoMaximo)
+        {
+            return ValorInvalido;
+        }
+
+        return valor.All(caracterePermitido) ? valor : ValorInvalido;
+    }
+
+    private static string SanitizarTipoProcesso(string? tipoProcesso)
+        => tipoProcesso switch
+        {
+            TipoProcessoOperacao.ConsumoMateriaPrima => TipoProcessoOperacao.ConsumoMateriaPrima,
+            TipoProcessoOperacao.ConsumoQuimicos => TipoProcessoOperacao.ConsumoQuimicos,
+            TipoProcessoOperacao.SemiAcabado => TipoProcessoOperacao.SemiAcabado,
+            TipoProcessoOperacao.ProdutoAcabado => TipoProcessoOperacao.ProdutoAcabado,
+            TipoProcessoOperacao.ResultadoApontamento => TipoProcessoOperacao.ResultadoApontamento,
+            TipoProcessoOperacao.SemDestinoConfigurado => TipoProcessoOperacao.SemDestinoConfigurado,
+            _ => ValorInvalido
+        };
+
+    private static string SanitizarModalidade(string? modalidade)
+        => Enum.TryParse(modalidade, ignoreCase: false, out ModalidadeRecuperacaoConsumo valor)
+            && Enum.IsDefined(valor)
+                ? valor.ToString()
+                : ValorInvalido;
+
+    private static string SanitizarPositivo(long valor)
+        => valor > 0 ? valor.ToString(System.Globalization.CultureInfo.InvariantCulture) : ValorInvalido;
+
+    private static string SanitizarOpcionalPositivo(long? valor)
+        => valor is null ? "null" : SanitizarPositivo(valor.Value);
+
+    private static string SanitizarNaoNegativo(int valor)
+        => valor >= 0 ? valor.ToString(System.Globalization.CultureInfo.InvariantCulture) : ValorInvalido;
 }

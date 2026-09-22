@@ -3367,12 +3367,7 @@ public partial class ProcessoConsumoMaterialForm : Form
         global::FugaPET_HML.Servicos.Diagnostico.RecoveryDiag102J.LogContexto(
             CidDiag102J(),
             ponto,
-            new global::FugaPET_HML.Servicos.Diagnostico.ContextoDiag102J(
-                _contextoApontamento.CodigoApontamento,
-                _contextoApontamento.NumeroOrdem,
-                _contextoApontamento.Operacao,
-                _contextoApontamento.Sequencia,
-                _contextoApontamento.TipoProcesso));
+            _contextoApontamento);
     }
 
     private void Diag102JComponentes(global::FugaPET_HML.Servicos.Diagnostico.PontoDiag102J ponto, IReadOnlyList<ComponenteConsumoMaterial>? componentes)
@@ -3388,9 +3383,7 @@ public partial class ProcessoConsumoMaterialForm : Form
         {
             ComponenteConsumoMaterial c = componentes[i];
             global::FugaPET_HML.Servicos.Diagnostico.RecoveryDiag102J.LogComponente(
-                cid, ponto, i,
-                new global::FugaPET_HML.Servicos.Diagnostico.ComponenteDiag102J(
-                    c.CodigoMaterial, c.NumeroReserva, c.ItemReserva, c.DepositoConsumo, c.Lote, c.TipoMovimento));
+                cid, ponto, i, c);
         }
     }
 
@@ -3409,8 +3402,10 @@ public partial class ProcessoConsumoMaterialForm : Form
         global::FugaPET_HML.Servicos.Diagnostico.RecoveryDiag102J.LogResultado(
             CidDiag102J(),
             ponto,
-            new global::FugaPET_HML.Servicos.Diagnostico.ResultadoDiag102J(
-                modalidadeBruta.ToString(), modalidadeEfetiva.ToString(), codigoLancamento, candidateCount));
+            modalidadeBruta,
+            modalidadeEfetiva,
+            codigoLancamento,
+            candidateCount);
     }
 
     private void Diag102JVisual(
@@ -3436,7 +3431,7 @@ public partial class ProcessoConsumoMaterialForm : Form
     /// nunca do texto) + booleans dos controles. NUNCA persiste statusLabel.Text/orientação.</summary>
     private global::FugaPET_HML.Servicos.Diagnostico.SnapshotDiag102J MontarSnapshotDiag102J()
         => new(
-            _modalidadeRecuperacao.ToString(),
+            _modalidadeRecuperacao,
             _codigoLancamentoRecuperado,
             ClassificarStatusDiag102J(),
             iniciarLeituraButton?.Enabled ?? false,
@@ -5294,8 +5289,6 @@ public partial class ProcessoConsumoMaterialForm : Form
         grid.CurrentCell = null;
     }
 }
-
-
 
 
 
