@@ -90,6 +90,9 @@ public partial class ProcessoConsumoMaterialForm : Form
 
     /// <summary>Snapshot mínimo do contexto do apontamento (§14): OP + operação + sequência.</summary>
     private readonly record struct RecuperacaoContextoSnapshot(string NumeroOrdem, string Operacao, string Sequencia);
+
+    // GATE 102J-C: correlation id somente-diagnóstico (instrumentação temporária DESLIGADA por padrão).
+    private readonly Guid _diag102JCid = global::FugaPET_HML.Servicos.Diagnostico.RecoveryDiag102J.NovaCorrelacao();
     private ToolTip? _envioSap261ToolTip;
     private ToolTip? _apontamentoInfoToolTip;
     private ToolTip? _sapStatusToolTip;
@@ -218,6 +221,7 @@ public partial class ProcessoConsumoMaterialForm : Form
         Shown += ProcessoProdutoAcabadoForm_Shown;
         FormClosing += ProcessoProdutoAcabadoForm_FormClosing;
         AplicarContextoApontamento();
+        Diag102JContexto("A_FORM_CONSTRUCTOR"); // GATE 102J-C (no-op quando diag desligado)
     }
 
     /// <summary>
@@ -252,10 +256,16 @@ public partial class ProcessoConsumoMaterialForm : Form
 
         Shown += async (_, _) =>
         {
+            Diag102J("B_SHOWN_ENTER"); // GATE 102J-C
             statusLabel.Text =
                 $"OP {_contextoApontamento.NumeroOrdem} vinculada ao apontamento "
                 + $"(operação {_contextoApontamento.Operacao}).";
             await ConsultarOrdemProducaoAsync(exibirAvisoOrdemObrigatoria: false);
+            // GATE 102J-C — K: snapshot FINAL após callbacks deferidos (só quando diag ligado; senão nenhum BeginInvoke).
+            if (global::FugaPET_HML.Servicos.Diagnostico.RecoveryDiag102J.Ativo)
+            {
+                BeginInvoke((Action)(() => Diag102J("K_FINAL_SNAPSHOT")));
+            }
         };
     }
 
@@ -922,9 +932,12 @@ public partial class ProcessoConsumoMaterialForm : Form
 
     private async Task ConsultarOrdemProducaoAsync(bool exibirAvisoOrdemObrigatoria = true)
     {
+        Diag102J("C_CONSULTAR_OP_ENTER"); // GATE 102J-C
+
         // Correcao 1 (Tarefa 15): nao reentrar (ex.: Validated disparando durante uma consulta em curso).
         if (_consultandoOrdem)
         {
+            Diag102J("C_CONSULTAR_OP_REENTRANCIA_BLOQUEADA");
             return;
         }
 
@@ -962,6 +975,7 @@ public partial class ProcessoConsumoMaterialForm : Form
         try
         {
             ResultadoConsultaOrdemConsumo resultado = await _controller.ConsultarOrdemProducaoAsync(numeroOrdem);
+            Diag102JComponentes("D_COMPONENTES_SAP", resultado.Ordem?.Componentes); // GATE 102J-C
 
             // OP obrigatoria / nao encontrada / SAP indisponível: limpa dados e avisa.
             if (resultado.Cenario is CenarioConsultaOrdemConsumo.OrdemObrigatoria
@@ -995,8 +1009,10 @@ public partial class ProcessoConsumoMaterialForm : Form
                 // complemento/diagnóstico dos componentes efetivamente vinculados à operação.
                 IReadOnlyList<ComponenteConsumoMaterial> componentesOperacao =
                     FiltrarComponentesPorOperacaoDoApontamento(resultado.Ordem.Componentes);
+                Diag102JComponentes("E_APOS_FILTRO_OPERACAO", componentesOperacao); // GATE 102J-C
                 if (componentesOperacao.Count == 0)
                 {
+                    Diag102J("E_FILTRO_ZERO_COMPONENTES");
                     BloquearOrdemSemComponenteDaOperacao(resultado.Ordem, resultado.NumeroOrdem);
                     return;
                 }
@@ -1039,7 +1055,9 @@ public partial class ProcessoConsumoMaterialForm : Form
             // resolve READ-ONLY o estado persistido de consumo. Fora de apontamento, no-op.
             if (_contextoApontamento is not null)
             {
+                Diag102JComponentes("F_BEFORE_RECOVERY_RESOLVER", componentesOperacionais); // GATE 102J-C
                 await ResolverRecuperacaoPersistidaDoContextoAsync(componentesOperacionais);
+                Diag102J("K1_APOS_RESOLVER_NO_CONSULTAR"); // GATE 102J-C — estado logo após o resolver, dentro do consultar
             }
         }
         finally
@@ -1819,6 +1837,8 @@ public partial class ProcessoConsumoMaterialForm : Form
 
     private void AtualizarComponenteSelecionadoDoGrid()
     {
+        if (_contextoApontamento is not null) { Diag102J("J_ATUALIZAR_COMPONENTE_SELECIONADO_ENTER"); } // GATE 102J-C
+
         // Correcao 2: so ignora durante uma LEITURA DE PESO em andamento; permite trocar de componente
         // com a leitura ativa (sem precisar parar/iniciar de novo).
         if (_isReadingWeight || _restaurandoSelecaoLinhaComponentes)
@@ -1847,6 +1867,7 @@ public partial class ProcessoConsumoMaterialForm : Form
     /// </summary>
     private void ReaplicarEstadoRecuperacao()
     {
+        Diag102J("J_REAPLICAR_ESTADO_RECUPERACAO_ENTER"); // GATE 102J-C (só apontamento chega aqui)
         if (global::FugaPET_HML.Modelo.Consumo.RecuperacaoConsumoPolitica.PermiteEnvioRecuperado(
                 _modalidadeRecuperacao, _codigoLancamentoRecuperado)
             && _codigoLancamentoRecuperado is long codigoRecuperado)
@@ -1965,6 +1986,8 @@ public partial class ProcessoConsumoMaterialForm : Form
     /// </summary>
     private void AtualizarLiberacaoInicioLeitura()
     {
+        if (_contextoApontamento is not null) { Diag102J("J_ATUALIZAR_LIBERACAO_INICIO_LEITURA_ENTER"); } // GATE 102J-C
+
         if (_isProductionStarted)
         {
             return;
@@ -3163,6 +3186,7 @@ public partial class ProcessoConsumoMaterialForm : Form
             return;
         }
 
+        Diag102JComponentes("F2_RESOLVER_INPUT", componentes); // GATE 102J-C
         global::FugaPET_HML.Modelo.Consumo.ResultadoRecuperacaoConsumoContexto resultado;
         try
         {
@@ -3185,6 +3209,9 @@ public partial class ProcessoConsumoMaterialForm : Form
         // A tela decide o wiring por ESTA modalidade efetiva. NUNCA um valor desconhecido vira Nenhum.
         global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo modalidadeEfetiva =
             global::FugaPET_HML.Modelo.Consumo.RecuperacaoConsumoPolitica.ModalidadeEfetiva(resultado.Modalidade);
+        // GATE 102J-C — G: resultado do resolver (modalidade bruta/efetiva + PK + candidatos).
+        Diag102J($"G_AFTER_RECOVERY_RESOLVER|modalidadeBruta={resultado.Modalidade};modalidadeEfetiva={modalidadeEfetiva};"
+            + $"pk={(resultado.CodigoLancamento?.ToString() ?? "null")};candidatos={resultado.Candidatos.Count}");
         switch (modalidadeEfetiva)
         {
             case global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.Nenhum:
@@ -3196,7 +3223,9 @@ public partial class ProcessoConsumoMaterialForm : Form
                 _modalidadeRecuperacao = global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.UmPendente;
                 _codigoLancamentoRecuperado = resultado.CodigoLancamento;
                 _snapshotRecuperacao = SnapshotContextoRecuperacaoAtual();
+                Diag102J("H_BEFORE_APLICAR_MATERIALIZACAO");
                 AplicarMaterializacaoRecuperacaoPendente(resultado.CodigoLancamento!.Value);
+                Diag102J("I_AFTER_APLICAR_MATERIALIZACAO");
                 break;
 
             case global::FugaPET_HML.Modelo.Consumo.ModalidadeRecuperacaoConsumo.AmbiguoPendente:
@@ -3304,6 +3333,63 @@ public partial class ProcessoConsumoMaterialForm : Form
         if (_confirmarConsumoButton is not null) { _confirmarConsumoButton.Visible = false; _confirmarConsumoButton.Enabled = false; }
         if (_naoConsumidoButton is not null) { _naoConsumidoButton.Visible = false; _naoConsumidoButton.Enabled = false; }
     }
+
+    // ==========================================================================================
+    // GATE 102J-C — INSTRUMENTAÇÃO TEMPORÁRIA E SANITIZADA (DESLIGADA por padrão; só Q + flag de processo).
+    // Todos os métodos são NO-OP imediato quando RecoveryDiag102J.Ativo == false (custo nulo, zero efeito).
+    // São SOMENTE leitura de estado + escrita best-effort em arquivo temporário; NUNCA alteram o fluxo.
+    // ==========================================================================================
+
+    private void Diag102J(string ponto)
+    {
+        if (!global::FugaPET_HML.Servicos.Diagnostico.RecoveryDiag102J.Ativo)
+        {
+            return;
+        }
+
+        global::FugaPET_HML.Servicos.Diagnostico.RecoveryDiag102J.Log(_diag102JCid, ponto, MontarSnapshotDiag102J());
+    }
+
+    private void Diag102JContexto(string ponto)
+    {
+        if (!global::FugaPET_HML.Servicos.Diagnostico.RecoveryDiag102J.Ativo || _contextoApontamento is null)
+        {
+            return;
+        }
+
+        global::FugaPET_HML.Servicos.Diagnostico.RecoveryDiag102J.Log(
+            _diag102JCid,
+            ponto,
+            $"CodApont={_contextoApontamento.CodigoApontamento};OP={_contextoApontamento.NumeroOrdem};"
+            + $"Op={_contextoApontamento.Operacao};Seq={_contextoApontamento.Sequencia};Tipo={_contextoApontamento.TipoProcesso}");
+    }
+
+    private void Diag102JComponentes(string ponto, IReadOnlyList<ComponenteConsumoMaterial>? componentes)
+    {
+        if (!global::FugaPET_HML.Servicos.Diagnostico.RecoveryDiag102J.Ativo || _contextoApontamento is null || componentes is null)
+        {
+            return;
+        }
+
+        global::FugaPET_HML.Servicos.Diagnostico.RecoveryDiag102J.Log(_diag102JCid, ponto, $"count={componentes.Count}");
+        foreach (ComponenteConsumoMaterial c in componentes)
+        {
+            global::FugaPET_HML.Servicos.Diagnostico.RecoveryDiag102J.Log(
+                _diag102JCid,
+                ponto + "_ITEM",
+                $"Mat={c.CodigoMaterial};Res={c.NumeroReserva};Item={c.ItemReserva};Dep={c.DepositoConsumo};"
+                + $"Batch=[{c.Lote}];Mov={c.TipoMovimento};Op={c.Operacao};Seq=[{c.SequenciaOperacao}]");
+        }
+    }
+
+    /// <summary>Snapshot SANITIZADO do estado de recovery + controles operacionais. Só identificadores/estados.</summary>
+    private string MontarSnapshotDiag102J()
+        => $"modalidade={_modalidadeRecuperacao};pkRec={(_codigoLancamentoRecuperado?.ToString() ?? "null")};"
+        + $"status={statusLabel?.Text};iniciar.En={iniciarLeituraButton?.Enabled};"
+        + $"ler.En={lerEtiquetaButton?.Enabled};ler.Vis={lerEtiquetaButton?.Visible};"
+        + $"dig.En={leituraManualButton?.Enabled};dig.Vis={leituraManualButton?.Visible};"
+        + $"confirmar.En={(_confirmarConsumoButton?.Enabled)};"
+        + $"send.Vis={(_enviarSap261Button?.Visible)};send.En={(_enviarSap261Button?.Enabled)}";
 
     /// <summary>
     /// Ajuste 3/6 (Tarefa 18.2): após salvar o consumo, orquestra o envio pela ROTA. 261 direto reaproveita
@@ -3966,6 +4052,8 @@ public partial class ProcessoConsumoMaterialForm : Form
     /// </summary>
     private void AtualizarApontamentoVisual(ComponenteConsumoMaterial? componente = null, string? orientacao = null)
     {
+        if (_contextoApontamento is not null) { Diag102J($"J_ATUALIZAR_APONTAMENTO_VISUAL_ENTER|comp={(componente?.CodigoMaterial ?? "null")};orient={orientacao}"); } // GATE 102J-C
+
         apontamentoChipCaptionLabel.Text = "ROTA SAP";
         apontamentoInfoCaptionLabel.Text = "ORIENTAÇÃO";
 
@@ -5123,8 +5211,10 @@ public partial class ProcessoConsumoMaterialForm : Form
 
     private void ClearGridSelections()
     {
+        if (_contextoApontamento is not null) { Diag102J("J_CLEAR_GRID_SELECTIONS_ENTER"); } // GATE 102J-C
         ClearGridSelection(materialDataGridView);
         ClearGridSelection(productionDataGridView);
+        if (_contextoApontamento is not null) { Diag102J("J_CLEAR_GRID_SELECTIONS_EXIT"); } // GATE 102J-C
     }
 
     private static void ClearGridSelection(DataGridView grid)
