@@ -16,6 +16,18 @@ public partial class ProcessoSemiAcabadoForm : Form
     internal const string MensagemBalancaSemiAcabadoNaoConfigurada = "Balança de produto semi-acabado não configurada para esta operação.";
 
     private readonly SemiAcabadoController _controller;
+
+    // GATE 103V: quando aberta pelo Controle de Apontamentos, a tela nasce com a OP deste contexto
+    // (autoritativa; o operador não troca de OP). Null no fluxo manual — o comportamento manual é preservado.
+    private readonly ContextoApontamentoProcesso? _contextoApontamento;
+
+    /// <summary>
+    /// GATE 103V: resultado devolvido ao Controle de Apontamentos. Inicia SEMPRE NaoConcluido — fechar a tela,
+    /// cancelar a confirmação, abandonar a pesagem ou falhar antes do 101 NÃO fabrica conclusão. Só o sucesso
+    /// inequívoco do movimento 101 (com codigo_semi_acabado_lancamento persistido) devolve ConfirmadoSap.
+    /// </summary>
+    internal ResultadoExecucaoProcesso ResultadoExecucaoApontamento { get; private set; }
+        = ResultadoExecucaoProcesso.NaoConcluido;
     private readonly BalancaLeituraServico _balancaLeituraServico = new();
     private readonly ImpressaoSemiAcabadoServico _impressaoSemiAcabadoServico = new();
     private readonly Dictionary<string, List<PesagemSemiAcabado>> _pesagensPorItemOrdem = [];
@@ -73,6 +85,18 @@ public partial class ProcessoSemiAcabadoForm : Form
     {
     }
 
+    // GATE 103V: abertura a partir do Controle de Apontamentos — a tela nasce com a OP do contexto.
+    public ProcessoSemiAcabadoForm(ContextoApontamentoProcesso contexto)
+        : this(new SemiAcabadoController(), contexto ?? throw new ArgumentNullException(nameof(contexto)))
+    {
+    }
+
+    internal ProcessoSemiAcabadoForm(SemiAcabadoController controller, ContextoApontamentoProcesso? contexto)
+        : this(controller)
+    {
+        _contextoApontamento = contexto;
+    }
+
     internal ProcessoSemiAcabadoForm(SemiAcabadoController controller)
     {
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
@@ -98,7 +122,28 @@ public partial class ProcessoSemiAcabadoForm : Form
             return;
         }
 
+        // GATE 103V: modo apontamento — carrega a OP do contexto automaticamente após validar permissão.
+        if (_contextoApontamento is not null)
+        {
+            AplicarContextoApontamentoSemiAcabado();
+            await ConsultarOpSelecionadaAsync();
+            return;
+        }
+
         pedidoComboBox.Focus();
+    }
+
+    // GATE 103V: no modo apontamento a OP vem do contexto (autoritativa) e o operador NÃO pode trocar de OP.
+    // Fora do contexto (fluxo manual) este método não é chamado e o seletor permanece livre.
+    private void AplicarContextoApontamentoSemiAcabado()
+    {
+        if (_contextoApontamento is null)
+        {
+            return;
+        }
+
+        pedidoComboBox.Text = _contextoApontamento.NumeroOrdem;
+        pedidoComboBox.Enabled = false;
     }
 
     private void AplicarModoProdutoSemiAcabado()
@@ -1307,6 +1352,16 @@ public partial class ProcessoSemiAcabadoForm : Form
                 statusHintLabel.Text = $"Documento {resultado.MaterialDocument}/{resultado.MaterialDocumentYear}. Histórico preservado para reimpressão.";
                 statusLabel.Text = $"Semi-acabado CONFIRMADO no SAP. Documento {resultado.MaterialDocument}/{resultado.MaterialDocumentYear}.";
                 AtualizarEstadoLeitura(false);
+                // GATE 103V: só o sucesso INEQUÍVOCO do 101 (documento + ano + lançamento persistido > 0) devolve
+                // ConfirmadoSap ao apontamento, com o MESMO codigo_semi_acabado_lancamento persistido.
+                if (resultado.CodigoLancamento is > 0)
+                {
+                    ResultadoExecucaoApontamento = new ResultadoExecucaoProcesso(
+                        ResultadoExecucaoProcessoApontamento.ConfirmadoSap,
+                        resultado.CodigoLancamento,
+                        statusLabel.Text,
+                        indicadorConfirmadoSap: true);
+                }
                 MessageBox.Show(
                     $"Produção confirmada no SAP.\n\nDocumento de material: {resultado.MaterialDocument}/{resultado.MaterialDocumentYear}.",
                     "Produto Semi-Acabado",
@@ -1329,6 +1384,12 @@ public partial class ProcessoSemiAcabadoForm : Form
                 statusValueLabel.Text = "DIVERGÊNCIA SAP";
                 statusHintLabel.Text = resultado.Mensagem;
                 statusLabel.Text = resultado.Mensagem;
+                // GATE 103V: divergência NÃO conclui — reflete DivergenciaSap (término bloqueado até regularização).
+                ResultadoExecucaoApontamento = new ResultadoExecucaoProcesso(
+                    ResultadoExecucaoProcessoApontamento.DivergenciaSap,
+                    resultado.CodigoLancamento,
+                    resultado.Mensagem,
+                    indicadorConfirmadoSap: false);
                 MessageBox.Show(resultado.Mensagem, "Divergência SAP", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
@@ -1336,6 +1397,12 @@ public partial class ProcessoSemiAcabadoForm : Form
             statusValueLabel.Text = resultado.EstruturaPendente ? "ESTRUTURA PENDENTE" : "ERRO SAP";
             statusHintLabel.Text = resultado.Mensagem;
             statusLabel.Text = resultado.Mensagem;
+            // GATE 103V: erro/estrutura pendente NÃO conclui — reflete ErroSap (término bloqueado).
+            ResultadoExecucaoApontamento = new ResultadoExecucaoProcesso(
+                ResultadoExecucaoProcessoApontamento.ErroSap,
+                resultado.CodigoLancamento,
+                resultado.Mensagem,
+                indicadorConfirmadoSap: false);
             MessageBox.Show(resultado.Mensagem, "Produto Semi-Acabado", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         catch (Exception ex)
@@ -1411,6 +1478,12 @@ public partial class ProcessoSemiAcabadoForm : Form
                 statusValueLabel.Text = "DIVERGÊNCIA SAP";
                 statusHintLabel.Text = "Confira o documento no SAP. Não reenviar sem suporte.";
                 statusLabel.Text = resultado.Mensagem;
+                // GATE 103V: divergência não conclui.
+                ResultadoExecucaoApontamento = new ResultadoExecucaoProcesso(
+                    ResultadoExecucaoProcessoApontamento.DivergenciaSap,
+                    resultado.CodigoLancamento,
+                    resultado.Mensagem,
+                    indicadorConfirmadoSap: false);
                 break;
 
             case "CONFIRMADO_SAP":
@@ -1422,6 +1495,16 @@ public partial class ProcessoSemiAcabadoForm : Form
                     ? "Lançamento já confirmado no SAP."
                     : $"Documento {persistido.MaterialDocument}/{persistido.MaterialDocumentYear}.";
                 statusLabel.Text = statusHintLabel.Text;
+                // GATE 103V: lançamento genuinamente CONFIRMADO_SAP devolve o MESMO codigo persistido (sem novo registro).
+                if (resultado.CodigoLancamento is > 0)
+                {
+                    ResultadoExecucaoApontamento = new ResultadoExecucaoProcesso(
+                        ResultadoExecucaoProcessoApontamento.ConfirmadoSap,
+                        resultado.CodigoLancamento,
+                        statusLabel.Text,
+                        indicadorConfirmadoSap: true);
+                }
+
                 break;
 
             case "ERRO_SAP":
@@ -1437,6 +1520,12 @@ public partial class ProcessoSemiAcabadoForm : Form
                 statusValueLabel.Text = "ERRO SAP";
                 statusHintLabel.Text = "Reenvio controlado do mesmo lançamento (não cria novo).";
                 statusLabel.Text = resultado.Mensagem;
+                // GATE 103V: erro não conclui.
+                ResultadoExecucaoApontamento = new ResultadoExecucaoProcesso(
+                    ResultadoExecucaoProcessoApontamento.ErroSap,
+                    resultado.CodigoLancamento,
+                    resultado.Mensagem,
+                    indicadorConfirmadoSap: false);
                 break;
 
             default:

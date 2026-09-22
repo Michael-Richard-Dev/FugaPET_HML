@@ -427,6 +427,7 @@ public partial class ProcessoControleApontamentosForm : Form
             {
                 TipoProcessoOperacao.ConsumoMateriaPrima => AbrirConsumo(contexto, ModoConsumoMaterial.MateriaPrima),
                 TipoProcessoOperacao.ConsumoQuimicos => AbrirConsumo(contexto, ModoConsumoMaterial.Quimico),
+                TipoProcessoOperacao.SemiAcabado => AbrirSemiAcabado(contexto),
                 TipoProcessoOperacao.ResultadoApontamento => AbrirResultadoApontamento(contexto),
                 _ => AvisarDestinoNaoConectado(contexto)
             };
@@ -665,6 +666,25 @@ public partial class ProcessoControleApontamentosForm : Form
         try
         {
             using ProcessoResultadoApontamentoForm form = new(contexto);
+            form.ShowDialog(this);
+            return form.ResultadoExecucaoApontamento;
+        }
+        finally
+        {
+            Show();
+        }
+    }
+
+    // GATE 103V: operação SEMI_ACABADO (ex.: OP1000173/0140/WC3007043) reusa integralmente a tela existente
+    // ProcessoSemiAcabadoForm, abrindo-a JÁ com a OP do contexto. O roteamento é SEMPRE por TipoProcesso
+    // (nunca por operação/descrição). O fechamento da tela não conclui o apontamento: só um resultado
+    // ConfirmadoSap/ConcluidoLocalmente devolvido libera a transição para AGUARDANDO_FINALIZACAO.
+    private ResultadoExecucaoProcesso AbrirSemiAcabado(ContextoApontamentoProcesso contexto)
+    {
+        Hide();
+        try
+        {
+            using ProcessoSemiAcabadoForm form = new(contexto);
             form.ShowDialog(this);
             return form.ResultadoExecucaoApontamento;
         }

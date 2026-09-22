@@ -32,6 +32,5 @@
          GATE 101J: Code05 reabilitado — reescrito contra o contrato de recovery PENDENTE_SAP atual. -->
     <Compile Remove="IntegracaoSap\ProductionRoutingPpFormFixTests.cs" />
     <!-- GATE 093D: reabilitado após implementar routing por WorkCenter + perfil normalizado no runtime produtivo. -->
-    <Compile Remove="Processo\OutOfSnapshot\ControleApontamentosResultadoSemiAcabadoOutOfSnapshotTests.cs" />
   </ItemGroup>
 </Project>
