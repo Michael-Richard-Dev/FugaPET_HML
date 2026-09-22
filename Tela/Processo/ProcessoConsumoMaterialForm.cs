@@ -3263,7 +3263,14 @@ public partial class ProcessoConsumoMaterialForm : Form
         statusCardIcon.ForeColor = pendenteTexto;
         statusValueLabel.Text = "PENDENTE SAP";
         statusValueLabel.ForeColor = pendenteTexto;
-        statusHintLabel.Text = "Consumo já pesado e salvo. Aguardando envio ao SAP.";
+        // GATE 102K-J: a mensagem completa tem duas frases. Em uma única linha o Label (AutoSize) crescia
+        // horizontalmente e era CLIPADO pela borda do card (só "Consumo já pesado e salvo." ficava visível).
+        // Config determinística de 2 linhas dentro do card (183px): AutoSize off, sem ellipse, altura p/ 2 linhas.
+        statusHintLabel.AutoSize = false;
+        statusHintLabel.AutoEllipsis = false;
+        statusHintLabel.Size = new Size(165, 28);
+        statusHintLabel.TextAlign = ContentAlignment.TopLeft;
+        statusHintLabel.Text = "Consumo já pesado e salvo." + Environment.NewLine + "Aguardando envio ao SAP.";
         statusHintLabel.ForeColor = Color.FromArgb(98, 108, 124);
         statusCard.Invalidate(true);
         statusCardIcon.Invalidate();

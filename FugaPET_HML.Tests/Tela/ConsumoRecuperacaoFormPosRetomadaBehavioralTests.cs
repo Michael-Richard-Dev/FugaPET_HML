@@ -490,6 +490,37 @@ public sealed class ConsumoRecuperacaoFormPosRetomadaBehavioralTests
         });
     }
 
+    [Fact] // GATE 102K-J: o statusHint contém a mensagem COMPLETA e o Label comporta visualmente as 2 linhas.
+    public void UmPendente_StatusHint_ExibeMensagemCompleta()
+    {
+        RunSta(() =>
+        {
+            object form = PrepararFormComRecoveryUmPendente();
+
+            var hint = GetField<System.Windows.Forms.Label>(form, "statusHintLabel")!;
+
+            // STATUS_HINT_TEXT_HAS_FULL_MESSAGE
+            Assert.Contains("Consumo já pesado e salvo.", hint.Text, StringComparison.Ordinal);
+            Assert.Contains("Aguardando envio ao SAP.", hint.Text, StringComparison.Ordinal);
+
+            // STATUS_HINT_VISUAL_CAPACITY_FOR_FULL_MESSAGE: a altura do label comporta o texto renderizado na sua largura.
+            Assert.False(hint.AutoSize);
+            Assert.False(hint.AutoEllipsis);
+            System.Drawing.Size medido = System.Windows.Forms.TextRenderer.MeasureText(
+                hint.Text, hint.Font, new System.Drawing.Size(hint.Width, int.MaxValue),
+                System.Windows.Forms.TextFormatFlags.WordBreak | System.Windows.Forms.TextFormatFlags.TextBoxControl);
+            Assert.True(hint.Height >= medido.Height, $"altura do hint {hint.Height} < necessário {medido.Height}");
+
+            // Dentro dos limites do card (não extrapola/clipa).
+            var card = GetField<System.Windows.Forms.Control>(form, "statusCard")!;
+            Assert.True(hint.Right <= card.Width, $"hint.Right {hint.Right} > card.Width {card.Width}");
+            Assert.True(hint.Bottom <= card.Height, $"hint.Bottom {hint.Bottom} > card.Height {card.Height}");
+
+            // Demais elementos do modo recovery preservados.
+            AferirSuperficieRecovery(form);
+        });
+    }
+
     [Fact] // §7/§11: a superfície visual de recovery é preservada após refreshes genéricos (idempotência).
     public void UmPendente_SuperficieVisual_PreservadaAposRefresh()
     {
