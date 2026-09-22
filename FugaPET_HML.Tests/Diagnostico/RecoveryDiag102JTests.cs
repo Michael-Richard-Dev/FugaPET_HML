@@ -157,4 +157,84 @@ public sealed class RecoveryDiag102JTests
         Assert.False(RecoveryDiag102J.Ativo);
         Assert.False(File.Exists(caminho));
     }
+
+    // ---------- §3/§4/§6/§7/§8: SINK TIPADO OPACO — nenhum caminho de string arbitrária ----------
+
+    [Fact]
+    public void SinkOpaco_SemCaminhoDeStringArbitraria()
+    {
+        Type t = typeof(RecoveryDiag102J);
+
+        // Os antigos pipelines textuais genéricos NÃO existem mais.
+        Assert.Null(t.GetMethod("Emitir", TodosMetodos));
+        Assert.Null(t.GetMethod("FormatarLinha", TodosMetodos));
+
+        // WRITER_ACCEPTS_ARBITRARY_STRING=NAO — PersistirLinha recebe SOMENTE o tipo opaco (nenhum string).
+        MethodInfo persistir = t.GetMethod("PersistirLinha", BindingFlags.NonPublic | BindingFlags.Static)!;
+        Assert.DoesNotContain(persistir.GetParameters(), p => p.ParameterType == typeof(string));
+
+        // FORMATTER_ACCEPTS_ARBITRARY_STRING=NAO — nenhum método "Formatar*" recebe string como payload.
+        foreach (MethodInfo m in t.GetMethods(TodosMetodos).Where(x => x.Name.StartsWith("Formatar", StringComparison.Ordinal)))
+        {
+            Assert.DoesNotContain(m.GetParameters(), p => p.ParameterType == typeof(string));
+        }
+
+        // Tipo OPACO privado com construtor PRIVADO (nunca public/internal aceitando string).
+        Type? opaco = t.GetNestedType("LinhaDiag102J", BindingFlags.NonPublic);
+        Assert.NotNull(opaco);
+        Assert.True(opaco!.IsNestedPrivate);
+
+        foreach (ConstructorInfo ctor in opaco.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+        {
+            if (ctor.GetParameters().Any(p => p.ParameterType == typeof(string)))
+            {
+                Assert.True(ctor.IsPrivate, "Construtor do tipo opaco que aceita string DEVE ser privado.");
+            }
+        }
+
+        // ARBITRARY_VALUE_PERSISTENCE_PATH_COUNT=0 — as factories do tipo opaco recebem SOMENTE tipos aprovados.
+        foreach (MethodInfo f in opaco.GetMethods(BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)
+                     .Where(x => x.ReturnType == opaco))
+        {
+            Assert.DoesNotContain(f.GetParameters(), p => p.ParameterType == typeof(string));
+        }
+    }
+
+    [Fact] // §8: os valores funcionais válidos continuam aparecendo corretamente no log.
+    public void ValoresFuncionais_ContinuamAparecendo()
+    {
+        var contexto = new ContextoApontamentoProcesso
+        {
+            CodigoApontamento = 4,
+            NumeroOrdem = "1000170",
+            Operacao = "0010",
+            Sequencia = "0",
+            TipoProcesso = "CONSUMO_MATERIA_PRIMA"
+        };
+        var componente = new ComponenteConsumoMaterial
+        {
+            CodigoMaterial = "1000186",
+            NumeroReserva = "185",
+            ItemReserva = "1",
+            DepositoConsumo = "PP01",
+            Lote = "0000000222",
+            TipoMovimento = "261",
+            Operacao = "0010",
+            SequenciaOperacao = "0"
+        };
+
+        string ctx = RecoveryDiag102J.FormatarContextoParaTeste(Guid.NewGuid(), PontoDiag102J.A_FormConstructor, contexto);
+        string comp = RecoveryDiag102J.FormatarComponenteParaTeste(Guid.NewGuid(), PontoDiag102J.D_ComponentesSap, 0, componente);
+
+        Assert.Contains("OP=1000170", ctx, StringComparison.Ordinal);
+        Assert.Contains("Op=0010", ctx, StringComparison.Ordinal);
+        Assert.Contains("Tipo=CONSUMO_MATERIA_PRIMA", ctx, StringComparison.Ordinal);
+
+        Assert.Contains("Mat=1000186", comp, StringComparison.Ordinal);
+        Assert.Contains("Res=185", comp, StringComparison.Ordinal);
+        Assert.Contains("Item=1", comp, StringComparison.Ordinal);
+        Assert.Contains("Dep=PP01", comp, StringComparison.Ordinal);
+        Assert.Contains("Batch=0000000222", comp, StringComparison.Ordinal);
+        Assert.Contains("Mov=261", comp, StringComparison.Ordinal);
+    }
 }

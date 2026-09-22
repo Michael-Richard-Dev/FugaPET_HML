@@ -61,11 +61,12 @@ public readonly record struct SnapshotDiag102J(
     bool SendEnabled);
 
 /// <summary>
-/// GATE 102J-C/102J-E — instrumentação TEMPORÁRIA e SANITIZADA POR CONSTRUÇÃO (allowlist estrutural).
-/// DESLIGADA por padrão. Só ativa em ambiente Q (marcador ambiente.q.json) E com a flag de PROCESSO
-/// <c>FUGAPET_Q_RECOVERY_DIAG_102J=1</c>. NÃO existe API que aceite texto livre para o log: cada método aceita
-/// SOMENTE estruturas/enum/campos conhecidos, formatados internamente. Best-effort: falha de escrita é engolida
-/// e NUNCA altera o fluxo. Não escreve banco/SAP; não registra segredos nem texto de UI (status/orientação).
+/// GATE 102J-C/102J-E/102J-I — instrumentação TEMPORÁRIA e SANITIZADA POR CONSTRUÇÃO (allowlist estrutural
+/// + de valores). DESLIGADA por padrão (só ambiente Q + flag de PROCESSO FUGAPET_Q_RECOVERY_DIAG_102J=1).
+/// NÃO existe API/formatter/writer que aceite string arbitrária como payload: a linha é um tipo OPACO
+/// (<see cref="LinhaDiag102J"/>) com construtor PRIVADO, produzível apenas por factories privadas TIPADAS a
+/// partir de tipos/campos já aprovados. Best-effort: falha de escrita é engolida e NUNCA altera o fluxo.
+/// Não escreve banco/SAP; não registra segredos nem texto de UI (status/orientação).
 /// </summary>
 public static class RecoveryDiag102J
 {
@@ -95,24 +96,31 @@ public static class RecoveryDiag102J
     /// <summary>Correlation id somente-diagnóstico. NUNCA gerar quando desligado (§9).</summary>
     public static Guid NovaCorrelacao() => Ativo ? Guid.NewGuid() : Guid.Empty;
 
-    // ---------- API TIPADA (sem texto livre) ----------
+    // ---------- API TIPADA pública (assinaturas INALTERADAS — call-sites intocados) ----------
 
     public static void LogMarco(Guid cid, PontoDiag102J ponto)
-        => Emitir(cid, ponto, null);
+    {
+        if (!Ativo) { return; }
+        Escrever(LinhaDiag102J.Marco(cid, ponto));
+    }
 
     public static void LogContexto(Guid cid, PontoDiag102J ponto, ContextoApontamentoProcesso contexto)
-        => Emitir(cid, ponto,
-            CamposContexto(contexto.CodigoApontamento, contexto.NumeroOrdem, contexto.Operacao,
-                contexto.Sequencia, contexto.TipoProcesso));
+    {
+        if (!Ativo) { return; }
+        Escrever(LinhaDiag102J.Contexto(cid, ponto, contexto));
+    }
 
     public static void LogComponente(Guid cid, PontoDiag102J ponto, int index, ComponenteConsumoMaterial componente)
-        => Emitir(cid, ponto,
-            CamposComponente(index, componente.CodigoMaterial, componente.NumeroReserva,
-                componente.ItemReserva, componente.DepositoConsumo, componente.Lote,
-                componente.TipoMovimento, componente.Operacao, componente.SequenciaOperacao));
+    {
+        if (!Ativo) { return; }
+        Escrever(LinhaDiag102J.Componente(cid, ponto, index, componente));
+    }
 
     public static void LogContagemComponentes(Guid cid, PontoDiag102J ponto, int count)
-        => Emitir(cid, ponto, $"count={count}");
+    {
+        if (!Ativo) { return; }
+        Escrever(LinhaDiag102J.Contagem(cid, ponto, count));
+    }
 
     public static void LogResultado(
         Guid cid,
@@ -121,37 +129,30 @@ public static class RecoveryDiag102J
         ModalidadeRecuperacaoConsumo modalidadeEfetiva,
         long? codigoLancamento,
         int candidateCount)
-        => Emitir(cid, ponto,
-            CamposResultado(modalidadeBruta.ToString(), modalidadeEfetiva.ToString(), codigoLancamento, candidateCount));
+    {
+        if (!Ativo) { return; }
+        Escrever(LinhaDiag102J.Resultado(cid, ponto, modalidadeBruta, modalidadeEfetiva, codigoLancamento, candidateCount));
+    }
 
     public static void LogSnapshot(Guid cid, PontoDiag102J ponto, in SnapshotDiag102J s)
-        => Emitir(cid, ponto,
-            $"modalidade={SanitizarModalidade(s.Modalidade.ToString())};"
-            + $"pk={(s.CodigoLancamento?.ToString() ?? "null")};statusClass={s.StatusClass};"
-            + $"start.En={s.StartEnabled};read.En={s.ReadEnabled};read.Vis={s.ReadVisible};"
-            + $"manual.En={s.ManualEnabled};manual.Vis={s.ManualVisible};confirm.En={s.ConfirmEnabled};"
-            + $"send.Vis={s.SendVisible};send.En={s.SendEnabled}");
+    {
+        if (!Ativo) { return; }
+        Escrever(LinhaDiag102J.Snapshot(cid, ponto, in s));
+    }
 
     public static void LogSnapshotComOrientacao(Guid cid, PontoDiag102J ponto, in SnapshotDiag102J s, OrientacaoClass102J orientacao)
-        => Emitir(cid, ponto,
-            $"orientacaoClass={orientacao};modalidade={SanitizarModalidade(s.Modalidade.ToString())};"
-            + $"pk={(s.CodigoLancamento?.ToString() ?? "null")};"
-            + $"statusClass={s.StatusClass};start.En={s.StartEnabled};read.En={s.ReadEnabled};read.Vis={s.ReadVisible};"
-            + $"manual.En={s.ManualEnabled};manual.Vis={s.ManualVisible};confirm.En={s.ConfirmEnabled};"
-            + $"send.Vis={s.SendVisible};send.En={s.SendEnabled}");
-
-    // ---------- Formatação/escrita interna (NÃO acessível como texto livre externo) ----------
-
-    private static void Emitir(Guid cid, PontoDiag102J ponto, string? camposEstruturados)
     {
-        if (!Ativo)
-        {
-            return;
-        }
+        if (!Ativo) { return; }
+        Escrever(LinhaDiag102J.SnapshotComOrientacao(cid, ponto, in s, orientacao));
+    }
 
+    // ---------- Writer OPACO: recebe SOMENTE LinhaDiag102J (nunca string). ----------
+
+    private static void Escrever(in LinhaDiag102J linha)
+    {
         try
         {
-            PersistirLinha(CaminhoLog(), FormatarLinha(cid, ponto, camposEstruturados));
+            PersistirLinha(in linha);
         }
         catch
         {
@@ -159,32 +160,32 @@ public static class RecoveryDiag102J
         }
     }
 
-    private static string FormatarLinha(Guid cid, PontoDiag102J ponto, string? camposEstruturados)
+    private static void PersistirLinha(in LinhaDiag102J linha)
     {
-        string baseLinha =
-            $"{DateTime.UtcNow:O}|PID={Environment.ProcessId}|TID={Environment.CurrentManagedThreadId}"
-            + $"|CID={cid}|{ponto}";
-        return camposEstruturados is null ? baseLinha : baseLinha + "|" + camposEstruturados;
+        string caminho = CaminhoLog();
+        string? dir = Path.GetDirectoryName(caminho);
+        if (!string.IsNullOrEmpty(dir))
+        {
+            Directory.CreateDirectory(dir);
+        }
+
+        // ÚNICO ponto de conversão do tipo opaco em texto, encapsulado no writer.
+        File.AppendAllText(caminho, linha.ObterTexto() + Environment.NewLine);
     }
 
     internal static string CaminhoLog()
         => Path.Combine(Path.GetTempPath(), "FugaPET_Q", "102J", $"recovery_{Environment.ProcessId}.log");
 
-    internal static string FormatarContextoParaTeste(
-        Guid cid, PontoDiag102J ponto, ContextoApontamentoProcesso contexto)
-        => FormatarLinha(cid, ponto,
-            CamposContexto(contexto.CodigoApontamento, contexto.NumeroOrdem, contexto.Operacao,
-                contexto.Sequencia, contexto.TipoProcesso));
+    // ---------- Formatters TIPADOS para teste (retornam texto para inspeção; sem string livre de entrada). ----------
 
     internal static string FormatarMarcoParaTeste(Guid cid, PontoDiag102J ponto)
-        => FormatarLinha(cid, ponto, null);
+        => LinhaDiag102J.Marco(cid, ponto).ObterTexto();
 
-    internal static string FormatarComponenteParaTeste(
-        Guid cid, PontoDiag102J ponto, int index, ComponenteConsumoMaterial componente)
-        => FormatarLinha(cid, ponto,
-            CamposComponente(index, componente.CodigoMaterial, componente.NumeroReserva,
-                componente.ItemReserva, componente.DepositoConsumo, componente.Lote,
-                componente.TipoMovimento, componente.Operacao, componente.SequenciaOperacao));
+    internal static string FormatarContextoParaTeste(Guid cid, PontoDiag102J ponto, ContextoApontamentoProcesso contexto)
+        => LinhaDiag102J.Contexto(cid, ponto, contexto).ObterTexto();
+
+    internal static string FormatarComponenteParaTeste(Guid cid, PontoDiag102J ponto, int index, ComponenteConsumoMaterial componente)
+        => LinhaDiag102J.Componente(cid, ponto, index, componente).ObterTexto();
 
     internal static string FormatarResultadoParaTeste(
         Guid cid,
@@ -193,19 +194,53 @@ public static class RecoveryDiag102J
         ModalidadeRecuperacaoConsumo modalidadeEfetiva,
         long? codigoLancamento,
         int candidateCount)
-        => FormatarLinha(cid, ponto,
-            CamposResultado(modalidadeBruta.ToString(), modalidadeEfetiva.ToString(), codigoLancamento, candidateCount));
+        => LinhaDiag102J.Resultado(cid, ponto, modalidadeBruta, modalidadeEfetiva, codigoLancamento, candidateCount).ObterTexto();
 
-    private static void PersistirLinha(string caminho, string linha)
+    // ==========================================================================================
+    // Tipo OPACO da linha de diagnóstico. Construtor PRIVADO: NUNCA public/internal aceitando string.
+    // Só as factories TIPADAS abaixo (que recebem tipos/valores já aprovados) podem produzi-lo.
+    // ==========================================================================================
+    private readonly struct LinhaDiag102J
     {
-        string? dir = Path.GetDirectoryName(caminho);
-        if (!string.IsNullOrEmpty(dir))
-        {
-            Directory.CreateDirectory(dir);
-        }
+        private readonly string _texto;
 
-        File.AppendAllText(caminho, linha + Environment.NewLine);
+        private LinhaDiag102J(string texto) => _texto = texto;
+
+        internal string ObterTexto() => _texto;
+
+        internal static LinhaDiag102J Marco(Guid cid, PontoDiag102J ponto)
+            => new(Prefixo(cid, ponto));
+
+        internal static LinhaDiag102J Contexto(Guid cid, PontoDiag102J ponto, ContextoApontamentoProcesso contexto)
+            => new($"{Prefixo(cid, ponto)}|{CamposContexto(contexto.CodigoApontamento, contexto.NumeroOrdem, contexto.Operacao, contexto.Sequencia, contexto.TipoProcesso)}");
+
+        internal static LinhaDiag102J Componente(Guid cid, PontoDiag102J ponto, int index, ComponenteConsumoMaterial componente)
+            => new($"{Prefixo(cid, ponto)}|{CamposComponente(index, componente.CodigoMaterial, componente.NumeroReserva, componente.ItemReserva, componente.DepositoConsumo, componente.Lote, componente.TipoMovimento, componente.Operacao, componente.SequenciaOperacao)}");
+
+        internal static LinhaDiag102J Contagem(Guid cid, PontoDiag102J ponto, int count)
+            => new($"{Prefixo(cid, ponto)}|count={SanitizarNaoNegativo(count)}");
+
+        internal static LinhaDiag102J Resultado(
+            Guid cid, PontoDiag102J ponto, ModalidadeRecuperacaoConsumo modalidadeBruta,
+            ModalidadeRecuperacaoConsumo modalidadeEfetiva, long? codigoLancamento, int candidateCount)
+            => new($"{Prefixo(cid, ponto)}|{CamposResultado(modalidadeBruta.ToString(), modalidadeEfetiva.ToString(), codigoLancamento, candidateCount)}");
+
+        internal static LinhaDiag102J Snapshot(Guid cid, PontoDiag102J ponto, in SnapshotDiag102J s)
+            => new($"{Prefixo(cid, ponto)}|{CamposSnapshot(in s)}");
+
+        internal static LinhaDiag102J SnapshotComOrientacao(Guid cid, PontoDiag102J ponto, in SnapshotDiag102J s, OrientacaoClass102J orientacao)
+            => new($"{Prefixo(cid, ponto)}|orientacaoClass={orientacao};{CamposSnapshot(in s)}");
     }
+
+    private static string Prefixo(Guid cid, PontoDiag102J ponto)
+        => $"{DateTime.UtcNow:O}|PID={Environment.ProcessId}|TID={Environment.CurrentManagedThreadId}|CID={cid}|{ponto}";
+
+    private static string CamposSnapshot(in SnapshotDiag102J s)
+        => $"modalidade={SanitizarModalidade(s.Modalidade.ToString())};"
+            + $"pk={(s.CodigoLancamento?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null")};"
+            + $"statusClass={s.StatusClass};start.En={s.StartEnabled};read.En={s.ReadEnabled};read.Vis={s.ReadVisible};"
+            + $"manual.En={s.ManualEnabled};manual.Vis={s.ManualVisible};confirm.En={s.ConfirmEnabled};"
+            + $"send.Vis={s.SendVisible};send.En={s.SendEnabled}";
 
     private static string CamposContexto(
         long codigoApontamento, string? op, string? operacao, string? sequencia, string? tipoProcesso)
