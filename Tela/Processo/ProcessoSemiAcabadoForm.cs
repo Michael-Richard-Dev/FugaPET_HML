@@ -1444,6 +1444,22 @@ public partial class ProcessoSemiAcabadoForm : Form
         }
     }
 
+    // GATE 103Y: EnvioDuplicadoBloqueado NUNCA conclui o apontamento — nem quando o lançamento persistido
+    // consultado está CONFIRMADO_SAP. Só o caminho NORMAL do 101 (sucesso inequívoco) conclui. Fail-closed.
+    // internal static para teste direto (InternalsVisibleTo) sem instanciar o Form nem tocar banco/SAP.
+    internal static ResultadoExecucaoProcesso ResolverResultadoApontamentoEnvioDuplicadoBloqueado(
+        string? statusPersistido,
+        long? codigoLancamento,
+        string mensagem)
+        => (statusPersistido ?? string.Empty) switch
+        {
+            "DIVERGENCIA_SAP" => new ResultadoExecucaoProcesso(
+                ResultadoExecucaoProcessoApontamento.DivergenciaSap, codigoLancamento, mensagem, indicadorConfirmadoSap: false),
+            "ERRO_SAP" => new ResultadoExecucaoProcesso(
+                ResultadoExecucaoProcessoApontamento.ErroSap, codigoLancamento, mensagem, indicadorConfirmadoSap: false),
+            _ => ResultadoExecucaoProcesso.NaoConcluido
+        };
+
     private async Task TratarEnvioDuplicadoBloqueadoAsync(ResultadoEnvioSemiAcabadoSap resultado, SemiAcabadoOrdem ordemConfirmada, string chave)
     {
         LancamentoSemiAcabado? persistido = null;
@@ -1478,12 +1494,6 @@ public partial class ProcessoSemiAcabadoForm : Form
                 statusValueLabel.Text = "DIVERGÊNCIA SAP";
                 statusHintLabel.Text = "Confira o documento no SAP. Não reenviar sem suporte.";
                 statusLabel.Text = resultado.Mensagem;
-                // GATE 103V: divergência não conclui.
-                ResultadoExecucaoApontamento = new ResultadoExecucaoProcesso(
-                    ResultadoExecucaoProcessoApontamento.DivergenciaSap,
-                    resultado.CodigoLancamento,
-                    resultado.Mensagem,
-                    indicadorConfirmadoSap: false);
                 break;
 
             case "CONFIRMADO_SAP":
@@ -1495,16 +1505,6 @@ public partial class ProcessoSemiAcabadoForm : Form
                     ? "Lançamento já confirmado no SAP."
                     : $"Documento {persistido.MaterialDocument}/{persistido.MaterialDocumentYear}.";
                 statusLabel.Text = statusHintLabel.Text;
-                // GATE 103V: lançamento genuinamente CONFIRMADO_SAP devolve o MESMO codigo persistido (sem novo registro).
-                if (resultado.CodigoLancamento is > 0)
-                {
-                    ResultadoExecucaoApontamento = new ResultadoExecucaoProcesso(
-                        ResultadoExecucaoProcessoApontamento.ConfirmadoSap,
-                        resultado.CodigoLancamento,
-                        statusLabel.Text,
-                        indicadorConfirmadoSap: true);
-                }
-
                 break;
 
             case "ERRO_SAP":
@@ -1520,12 +1520,6 @@ public partial class ProcessoSemiAcabadoForm : Form
                 statusValueLabel.Text = "ERRO SAP";
                 statusHintLabel.Text = "Reenvio controlado do mesmo lançamento (não cria novo).";
                 statusLabel.Text = resultado.Mensagem;
-                // GATE 103V: erro não conclui.
-                ResultadoExecucaoApontamento = new ResultadoExecucaoProcesso(
-                    ResultadoExecucaoProcessoApontamento.ErroSap,
-                    resultado.CodigoLancamento,
-                    resultado.Mensagem,
-                    indicadorConfirmadoSap: false);
                 break;
 
             default:
@@ -1536,6 +1530,13 @@ public partial class ProcessoSemiAcabadoForm : Form
                 statusLabel.Text = resultado.Mensagem;
                 break;
         }
+
+        // GATE 103Y: o caminho duplicado NUNCA conclui o apontamento — nem quando o persistido está
+        // CONFIRMADO_SAP (o estado visual/bloqueio acima é preservado; só o resultado do apontamento muda).
+        // A decisão é centralizada e fail-closed: apenas DIVERGENCIA_SAP/ERRO_SAP refletem estado; o resto
+        // (incluindo CONFIRMADO_SAP e ENVIANDO_SAP) permanece NaoConcluido. Só o 101 NORMAL conclui.
+        ResultadoExecucaoApontamento = ResolverResultadoApontamentoEnvioDuplicadoBloqueado(
+            status, resultado.CodigoLancamento, resultado.Mensagem);
 
         AtualizarBotoesOperacao();
         MessageBox.Show(resultado.Mensagem, "Produto Semi-Acabado", MessageBoxButtons.OK, MessageBoxIcon.Warning);
