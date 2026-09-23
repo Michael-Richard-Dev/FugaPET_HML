@@ -159,17 +159,20 @@ public sealed class ProcessoSemiAcabado101Capability104CTests : IDisposable
     // ---------- contrato de fonte (ordenação e fail-closed na tela) ----------
 
     [Fact]
-    public void ConfirmarSemiAcabado_ArmaAntesDoEnvio_EFailClosed()
+    public void ConfirmarSemiAcabado_PersisteIdentidadeAntesDeArmar_ArmaAntesDoEnvio_EFailClosed()
     {
         string form = LerArquivoProjeto("Tela", "Processo", "ProcessoSemiAcabadoForm.cs");
         string metodo = ExtrairMetodo(form, "private async Task ConfirmarSemiAcabadoAsync");
 
+        int prepara = metodo.IndexOf("PrepararEnvio101Async", StringComparison.Ordinal);
         int arma = metodo.IndexOf("_habilitacaoEscritaSap.HabilitarParaEnvioAsync", StringComparison.Ordinal);
-        int envio = metodo.IndexOf("SalvarEEnviarMaterialDocument101Async", StringComparison.Ordinal);
+        int envio = metodo.IndexOf("EnviarPreparado101Async", StringComparison.Ordinal);
         int failClosed = metodo.IndexOf("if (!habilitacaoEscrita.Sucesso)", StringComparison.Ordinal);
 
-        Assert.True(arma >= 0, "cerimônia de habilitação ausente no envio.");
-        Assert.True(envio > arma, "a habilitação deve ocorrer ANTES do envio 101.");
+        // GATE 104C-D: identidade durável (Preparar) ANTES de armar; armar ANTES do envio; fail-closed entre eles.
+        Assert.True(prepara >= 0, "preparo de identidade durável ausente.");
+        Assert.True(arma > prepara, "a capability deve ser armada DEPOIS da identidade durável (Preparar).");
+        Assert.True(envio > arma, "o envio deve ocorrer DEPOIS de armar.");
         Assert.True(failClosed > arma && failClosed < envio, "fail-closed deve interromper antes do envio.");
         // reuso do mesmo lançamento (ERRO_SAP/reenvio) preservado.
         Assert.Contains("lancamento.CodigoSemiAcabadoLancamento = _codigoLancamentoPersistido;", form, StringComparison.Ordinal);

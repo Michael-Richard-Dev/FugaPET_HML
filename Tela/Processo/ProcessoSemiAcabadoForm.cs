@@ -1331,36 +1331,56 @@ public partial class ProcessoSemiAcabadoForm : Form
             return;
         }
 
-        // GATE 104C: cerimônia one-shot 101 — DETALHE INTERNO do envio (a confirmação acima é a ÚNICA ação do
-        // operador). Valida HABILITAR_ESCRITA_SAP, executa a auditoria durável fail-closed (ENABLE_REQUESTED +
-        // ENABLED) e ARMA a capability imediatamente antes do writer. Falha de sessão/permissão/auditoria/
-        // armamento/config/CSRF => ZERO POST e o apontamento permanece NaoConcluido (sem blind retry). O writer
-        // (MaterialDocumentSapServico) consome one-shot (ARMADA→CONSUMIDA) antes do HTTP. No reenvio/ERRO_SAP a
-        // identidade já está persistida; no primeiro envio a persistência ocorre no mesmo Salvar+Enviar logo a
-        // seguir — reutilizando o MESMO codigo_semi_acabado_lancamento (sem novo cabeçalho/pesagens).
-        global::FugaPET_HML.Servicos.Cadastro.ResultadoOperacao habilitacaoEscrita =
-            await _habilitacaoEscritaSap.HabilitarParaEnvioAsync(CancellationToken.None);
-        if (!habilitacaoEscrita.Sucesso)
-        {
-            statusValueLabel.Text = "ENVIO BLOQUEADO";
-            statusHintLabel.Text = habilitacaoEscrita.Mensagem;
-            statusLabel.Text = habilitacaoEscrita.Mensagem;
-            MessageBox.Show(
-                habilitacaoEscrita.Mensagem,
-                "Produto Semi-Acabado",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
-            return;
-        }
-
         _operacaoEmAndamento = true;
         productionDataGridView.Enabled = false;
         AtualizarBotoesOperacao();
-        statusLabel.Text = "Enviando lançamento ao SAP (movimento 101)...";
+        statusLabel.Text = "Preparando lançamento para envio ao SAP (movimento 101)...";
         try
         {
-            ResultadoEnvioSemiAcabadoSap resultado =
-                await _controller.SalvarEEnviarMaterialDocument101Async(lancamento, CancellationToken.None);
+            // GATE 104C-D: IDENTIDADE DURÁVEL ANTES de armar a capability. Persiste (1º envio) ou recupera
+            // (reenvio/ERRO_SAP) o lançamento e valida OP/item/status — SEM armar, SEM claim, SEM HTTP. Falha
+            // aqui: capability permanece DESABILITADA, ZERO POST.
+            PreparacaoEnvioSemiAcabado preparo =
+                await _controller.PrepararEnvio101Async(lancamento, CancellationToken.None);
+            if (preparo.CodigoLancamento > 0)
+            {
+                _codigoLancamentoPersistido = preparo.CodigoLancamento;
+                _codigoLancamentoPersistidoPorItem[chaveConfirmada] = preparo.CodigoLancamento;
+            }
+
+            ResultadoEnvioSemiAcabadoSap resultado;
+            if (!preparo.Sucesso)
+            {
+                resultado = preparo.Falha!;
+            }
+            else
+            {
+                // GATE 104C: cerimônia one-shot 101 — DETALHE INTERNO do envio (a confirmação humana é a ÚNICA
+                // ação do operador). Só agora que a PK durável existe: valida HABILITAR_ESCRITA_SAP, executa a
+                // auditoria durável fail-closed (ENABLE_REQUESTED + ENABLED) e ARMA a capability imediatamente
+                // antes do claim/writer. Falha de sessão/permissão/auditoria/armamento/config/CSRF => ZERO POST e
+                // o apontamento permanece NaoConcluido (sem blind retry). O writer (MaterialDocumentSapServico)
+                // consome one-shot (ARMADA→CONSUMIDA) antes do HTTP.
+                global::FugaPET_HML.Servicos.Cadastro.ResultadoOperacao habilitacaoEscrita =
+                    await _habilitacaoEscritaSap.HabilitarParaEnvioAsync(CancellationToken.None);
+                if (!habilitacaoEscrita.Sucesso)
+                {
+                    statusValueLabel.Text = "ENVIO BLOQUEADO";
+                    statusHintLabel.Text = habilitacaoEscrita.Mensagem;
+                    statusLabel.Text = habilitacaoEscrita.Mensagem;
+                    MessageBox.Show(
+                        habilitacaoEscrita.Mensagem,
+                        "Produto Semi-Acabado",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    return;
+                }
+
+                statusLabel.Text = "Enviando lançamento ao SAP (movimento 101)...";
+                // GATE 104C-D: envia o MESMO lançamento persistido (claim FINALIZADO_LOCAL/ERRO_SAP → ENVIANDO_SAP,
+                // writer consome one-shot → CONSUMIDA, exatamente 1 POST). Sem novo cabeçalho/pesagens.
+                resultado = await _controller.EnviarPreparado101Async(preparo, CancellationToken.None);
+            }
 
             // Preserva o código persistido ANTES de analisar sucesso/falha: um ERRO_SAP reenviável deve
             // reutilizar exatamente esta linha no próximo clique (não duplicar cabeçalho nem pesagens).

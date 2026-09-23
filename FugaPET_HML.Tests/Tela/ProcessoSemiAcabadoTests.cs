@@ -87,7 +87,9 @@ public sealed class ProcessoSemiAcabadoTests
         Assert.Contains("Dictionary<string, List<PesagemSemiAcabado>> _pesagensPorItemOrdem", form, StringComparison.Ordinal);
         Assert.Contains("LancamentoSemiAcabado lancamento", form, StringComparison.Ordinal);
         Assert.Contains("MontarLancamentoLocal(", form, StringComparison.Ordinal);
-        Assert.Contains("SalvarEEnviarMaterialDocument101Async", form, StringComparison.Ordinal);
+        // GATE 104C-D: o envio passou a persistir a identidade durável antes de armar/enviar (Preparar + Enviar).
+        Assert.Contains("PrepararEnvio101Async", form, StringComparison.Ordinal);
+        Assert.Contains("EnviarPreparado101Async", form, StringComparison.Ordinal);
         Assert.Contains("Usuário sem permissão para executar produto semi-acabado.", form, StringComparison.Ordinal);
         Assert.Contains("TODO Permissões", form, StringComparison.Ordinal);
     }
@@ -447,14 +449,15 @@ public sealed class ProcessoSemiAcabadoTests
     [Fact]
     public void SemiAcabado_ConfirmarEnviaAoSapComProtecaoContraDuploClique()
     {
-        // O botão passou a acionar o envio REAL (SalvarEEnviarMaterialDocument101Async) com guarda
-        // de concorrência (_operacaoEmAndamento em try/finally) contra duplo clique.
+        // GATE 104C-D: o botão aciona o envio REAL (Preparar identidade durável → armar → EnviarPreparado) com
+        // guarda de concorrência (_operacaoEmAndamento em try/finally) contra duplo clique.
         string form = LerArquivoProjeto("Tela", "Processo", "ProcessoSemiAcabadoForm.cs");
         string confirmar = ExtrairMetodo(form, "private async Task ConfirmarSemiAcabadoAsync()");
 
         Assert.Contains("if (_operacaoEmAndamento)", confirmar, StringComparison.Ordinal);
         Assert.Contains("_operacaoEmAndamento = true;", confirmar, StringComparison.Ordinal);
-        Assert.Contains("await _controller.SalvarEEnviarMaterialDocument101Async(lancamento, CancellationToken.None);", confirmar, StringComparison.Ordinal);
+        Assert.Contains("await _controller.PrepararEnvio101Async(lancamento, CancellationToken.None);", confirmar, StringComparison.Ordinal);
+        Assert.Contains("await _controller.EnviarPreparado101Async(preparo, CancellationToken.None);", confirmar, StringComparison.Ordinal);
         Assert.Contains("finally", confirmar, StringComparison.Ordinal);
         Assert.Contains("_operacaoEmAndamento = false;", confirmar, StringComparison.Ordinal);
     }
@@ -664,6 +667,95 @@ public sealed class ProcessoSemiAcabadoTests
         SemiAcabadoServico servico = CriarServico(repo, sap);
 
         ResultadoEnvioSemiAcabadoSap resultado = await servico.SalvarEEnviarSap101Async(LancamentoValido(2.5m));
+
+        Assert.True(resultado.EnvioDuplicadoBloqueado);
+        Assert.Equal(0, sap.Chamadas);
+        Assert.Empty(repo.Transicoes);
+    }
+
+    // ======================================================================
+    // GATE 104C-D — split Preparar (identidade durável, ANTES de armar) × EnviarPreparado (claim + POST).
+    // ======================================================================
+
+    [Fact] // Preparar persiste a IDENTIDADE DURÁVEL sem claim e sem POST (a capability nem é tocada aqui).
+    public async Task Preparar_PersisteIdentidade_SemClaimSemPost()
+    {
+        SemiAcabadoRepositorioFake repo = new();
+        MaterialDocumentSapFake sap = new(SucessoSap());
+        SemiAcabadoServico servico = CriarServico(repo, sap);
+
+        PreparacaoEnvioSemiAcabado preparo = await servico.PrepararEnvio101Async(LancamentoValido(2.5m));
+
+        Assert.True(preparo.Sucesso);
+        Assert.Equal(42L, preparo.CodigoLancamento);   // PK durável já existe após Preparar
+        Assert.Equal(1, repo.SalvouLocal);
+        Assert.Empty(repo.Reservas);                    // sem claim
+        Assert.Equal(0, sap.Chamadas);                  // ZERO POST
+        Assert.Empty(repo.Transicoes);
+    }
+
+    [Fact] // Falha ao persistir ⇒ sem PK, sem POST (form não chega a armar; capability permanece DESABILITADA).
+    public async Task Preparar_FalhaPersistencia_SemPkSemPost()
+    {
+        SemiAcabadoRepositorioFake repo = new() { Estrutura = false };
+        MaterialDocumentSapFake sap = new(SucessoSap());
+        SemiAcabadoServico servico = CriarServico(repo, sap);
+
+        PreparacaoEnvioSemiAcabado preparo = await servico.PrepararEnvio101Async(LancamentoValido(2.5m));
+
+        Assert.False(preparo.Sucesso);
+        Assert.NotNull(preparo.Falha);
+        Assert.True(preparo.Falha!.EstruturaPendente);
+        Assert.Equal(0, repo.SalvouLocal);
+        Assert.Equal(0, sap.Chamadas);
+    }
+
+    [Fact] // Reenvio ERRO_SAP: reutiliza a MESMA PK persistida, sem novo cabeçalho/pesagens.
+    public async Task Preparar_RecoveryErroSap_ReutilizaMesmaPkSemNovoHeader()
+    {
+        LancamentoSemiAcabado persistido = LancamentoValido(2.5m);
+        persistido.CodigoSemiAcabadoLancamento = 1;
+        persistido.StatusLancamento = "ERRO_SAP";
+        SemiAcabadoRepositorioFake repo = new() { LancamentoPersistido = persistido };
+        MaterialDocumentSapFake sap = new(SucessoSap());
+        SemiAcabadoServico servico = CriarServico(repo, sap);
+
+        LancamentoSemiAcabado reenvio = LancamentoValido(2.5m);
+        reenvio.CodigoSemiAcabadoLancamento = 1;
+        PreparacaoEnvioSemiAcabado preparo = await servico.PrepararEnvio101Async(reenvio);
+
+        Assert.True(preparo.Sucesso);
+        Assert.Equal(1L, preparo.CodigoLancamento);
+        Assert.Equal(0, repo.SalvouLocal);   // nenhum novo cabeçalho/pesagem no reenvio
+        Assert.Equal(0, sap.Chamadas);
+    }
+
+    [Fact] // EnviarPreparado faz o claim e EXATAMENTE 1 POST, confirmando com a MESMA PK real.
+    public async Task EnviarPreparado_ClaimEUmPost_ConfirmaComPkReal()
+    {
+        SemiAcabadoRepositorioFake repo = new();
+        MaterialDocumentSapFake sap = new(SucessoSap());
+        SemiAcabadoServico servico = CriarServico(repo, sap);
+
+        PreparacaoEnvioSemiAcabado preparo = await servico.PrepararEnvio101Async(LancamentoValido(2.5m));
+        ResultadoEnvioSemiAcabadoSap resultado = await servico.EnviarPreparado101Async(preparo);
+
+        Assert.True(resultado.Sucesso);
+        Assert.Equal(42L, resultado.CodigoLancamento);
+        Assert.Equal([42L], repo.Reservas);    // claim exatamente uma vez
+        Assert.Equal(1, sap.Chamadas);          // EXATAMENTE 1 POST
+        Assert.Equal(["CONFIRMADO"], repo.Transicoes);
+    }
+
+    [Fact] // Claim recusado no EnviarPreparado ⇒ ZERO POST (não fabrica ConfirmadoSap).
+    public async Task EnviarPreparado_ClaimRecusado_ZeroPost()
+    {
+        SemiAcabadoRepositorioFake repo = new() { ReservaConcedida = false };
+        MaterialDocumentSapFake sap = new(SucessoSap());
+        SemiAcabadoServico servico = CriarServico(repo, sap);
+
+        PreparacaoEnvioSemiAcabado preparo = await servico.PrepararEnvio101Async(LancamentoValido(2.5m));
+        ResultadoEnvioSemiAcabadoSap resultado = await servico.EnviarPreparado101Async(preparo);
 
         Assert.True(resultado.EnvioDuplicadoBloqueado);
         Assert.Equal(0, sap.Chamadas);
