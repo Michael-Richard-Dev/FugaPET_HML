@@ -30,6 +30,12 @@ public partial class ProcessoSemiAcabadoForm : Form
         = ResultadoExecucaoProcesso.NaoConcluido;
     private readonly BalancaLeituraServico _balancaLeituraServico = new();
     private readonly ImpressaoSemiAcabadoServico _impressaoSemiAcabadoServico = new();
+
+    // GATE 104C: cerimônia one-shot de habilitação da escrita SAP 101 (mesma política HABILITAR_ESCRITA_SAP
+    // certificada na Entrada). Rótulo de tela próprio para a auditoria identificar o Semi-Acabado, sem alterar
+    // a policy nem criar env/permissão novos. A confirmação humana do envio permanece a única ação do operador.
+    private readonly global::FugaPET_HML.Servicos.IntegracaoSap.HabilitacaoEscritaSapServico _habilitacaoEscritaSap
+        = new("ProcessoSemiAcabadoForm");
     private readonly Dictionary<string, List<PesagemSemiAcabado>> _pesagensPorItemOrdem = [];
     private readonly Dictionary<string, TaraCadastro> _tarasPorItemOrdem = [];
     private IReadOnlyList<SemiAcabadoOrdem> _itensOrdem = [];
@@ -1322,6 +1328,28 @@ public partial class ProcessoSemiAcabadoForm : Form
         if (confirmacao != DialogResult.Yes)
         {
             statusLabel.Text = "Confirmação cancelada.";
+            return;
+        }
+
+        // GATE 104C: cerimônia one-shot 101 — DETALHE INTERNO do envio (a confirmação acima é a ÚNICA ação do
+        // operador). Valida HABILITAR_ESCRITA_SAP, executa a auditoria durável fail-closed (ENABLE_REQUESTED +
+        // ENABLED) e ARMA a capability imediatamente antes do writer. Falha de sessão/permissão/auditoria/
+        // armamento/config/CSRF => ZERO POST e o apontamento permanece NaoConcluido (sem blind retry). O writer
+        // (MaterialDocumentSapServico) consome one-shot (ARMADA→CONSUMIDA) antes do HTTP. No reenvio/ERRO_SAP a
+        // identidade já está persistida; no primeiro envio a persistência ocorre no mesmo Salvar+Enviar logo a
+        // seguir — reutilizando o MESMO codigo_semi_acabado_lancamento (sem novo cabeçalho/pesagens).
+        global::FugaPET_HML.Servicos.Cadastro.ResultadoOperacao habilitacaoEscrita =
+            await _habilitacaoEscritaSap.HabilitarParaEnvioAsync(CancellationToken.None);
+        if (!habilitacaoEscrita.Sucesso)
+        {
+            statusValueLabel.Text = "ENVIO BLOQUEADO";
+            statusHintLabel.Text = habilitacaoEscrita.Mensagem;
+            statusLabel.Text = habilitacaoEscrita.Mensagem;
+            MessageBox.Show(
+                habilitacaoEscrita.Mensagem,
+                "Produto Semi-Acabado",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
             return;
         }
 

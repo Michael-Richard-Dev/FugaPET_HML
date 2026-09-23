@@ -14,16 +14,19 @@ namespace FugaPET_HML.Servicos.IntegracaoSap;
 /// </summary>
 public sealed class HabilitacaoEscritaSapServico
 {
-    private const string Tela = "ProcessoEntradaProdutoForm";
+    private const string TelaPadrao = "ProcessoEntradaProdutoForm";
 
     private readonly IRuntimeSapWriteCapabilityService _capability;
     private readonly Func<bool> _usuarioAutorizado;
     // (acao, resultado, mensagem, ct) — durável (propaga exceção) e best-effort (suprime).
     private readonly Func<string, string, string, CancellationToken, Task> _auditarDuravelAsync;
     private readonly Func<string, string, string, CancellationToken, Task> _auditarBestEffortAsync;
+    // GATE 104C: rótulo da tela para a auditoria. Default preserva EXATAMENTE o comportamento da Entrada;
+    // outras telas (ex.: Semi-Acabado) informam o próprio contexto sem alterar a policy HABILITAR_ESCRITA_SAP.
+    private readonly string _tela;
 
-    public HabilitacaoEscritaSapServico()
-        : this(RuntimeSapWriteCapability.Instancia, usuarioAutorizado: null, auditarDuravelAsync: null, auditarBestEffortAsync: null)
+    public HabilitacaoEscritaSapServico(string tela = TelaPadrao)
+        : this(RuntimeSapWriteCapability.Instancia, usuarioAutorizado: null, auditarDuravelAsync: null, auditarBestEffortAsync: null, tela: tela)
     {
     }
 
@@ -31,18 +34,20 @@ public sealed class HabilitacaoEscritaSapServico
         IRuntimeSapWriteCapabilityService capability,
         Func<bool>? usuarioAutorizado,
         Func<string, string, string, CancellationToken, Task>? auditarDuravelAsync,
-        Func<string, string, string, CancellationToken, Task>? auditarBestEffortAsync)
+        Func<string, string, string, CancellationToken, Task>? auditarBestEffortAsync,
+        string tela = TelaPadrao)
     {
         _capability = capability ?? RuntimeSapWriteCapability.Instancia;
         _usuarioAutorizado = usuarioAutorizado ?? PossuiPermissaoHabilitar;
+        _tela = string.IsNullOrWhiteSpace(tela) ? TelaPadrao : tela;
 
         Lazy<AuditoriaServico> auditoria = new(CriarAuditoriaServico);
         _auditarDuravelAsync = auditarDuravelAsync
             ?? ((acao, resultado, mensagem, ct) =>
-                auditoria.Value.RegistrarAutorizacaoEscritaSapDuravelAsync(acao, resultado, mensagem, Tela, ct));
+                auditoria.Value.RegistrarAutorizacaoEscritaSapDuravelAsync(acao, resultado, mensagem, _tela, ct));
         _auditarBestEffortAsync = auditarBestEffortAsync
             ?? ((acao, resultado, mensagem, ct) =>
-                auditoria.Value.RegistrarEventoOperacionalAsync(acao, resultado, mensagem, Tela, ct));
+                auditoria.Value.RegistrarEventoOperacionalAsync(acao, resultado, mensagem, _tela, ct));
     }
 
     public SnapshotCapabilitySap Estado => _capability.ObterEstado();
