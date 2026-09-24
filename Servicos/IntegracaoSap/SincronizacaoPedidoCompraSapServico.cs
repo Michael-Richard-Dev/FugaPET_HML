@@ -69,6 +69,9 @@ public sealed class SincronizacaoPedidoCompraSapServico : IPedidoCompraSapServic
         Guid correlationId = Guid.NewGuid();
         Stopwatch cronometro = Stopwatch.StartNew();
 
+        // GATE 105G: mantém a mensagem SEGURA de configuração ausente (contrato existente, sem segredo).
+        // A classificação CONFIGURACAO_INVALIDA para o cache miss é derivada no controller de forma
+        // ESTRUTURAL (SapConfigurado == false), sem parsing desta mensagem.
         if (!_configuracaoSap.Configurado)
         {
             ResultadoOperacao falha =
@@ -94,6 +97,8 @@ public sealed class SincronizacaoPedidoCompraSapServico : IPedidoCompraSapServic
             PedidoCompraSap? pedido = await _clienteSap.Value.ConsultarPedidoAsync(
                 numeroPedido,
                 cancellationToken);
+            // GATE 105G: 404 é resultado CONHECIDO e sobe classificado (NAO_ENCONTRADO/404). Antes era
+            // degradado para "Pedido nao liberado para entrada." — um 404 disfarçado de veredito de negócio.
             if (pedido is null)
             {
                 await RegistrarLogAsync(
@@ -104,7 +109,11 @@ public sealed class SincronizacaoPedidoCompraSapServico : IPedidoCompraSapServic
                     "NAO_ENCONTRADO",
                     404,
                     "Pedido nao encontrado no SAP.");
-                return ResultadoOperacao.Falha(MensagemPedidoNaoLiberado);
+                throw new ConsultaSapException(
+                    CenarioFalhaConsultaSap.NaoEncontrado,
+                    404,
+                    "Pedido de compra nao encontrado no SAP.",
+                    correlationId.ToString());
             }
 
             if (pedido.Itens.Count == 0)
@@ -165,29 +174,23 @@ public sealed class SincronizacaoPedidoCompraSapServico : IPedidoCompraSapServic
                 "Consulta cancelada.");
             throw;
         }
-        // GATE 105D: a consulta agora devolve falha TIPADA. O timeout continua produzindo a mesma mensagem
-        // amigável; os demais cenários usam o texto de aplicação do próprio cenário (sem inventar causa).
+        // GATE 105G: falha TÉCNICA de consulta NÃO é degradada para ResultadoOperacao textual. Registra o
+        // diagnóstico sanitizado e PROPAGA a exceção tipada, preservando Cenario/HttpStatus/CorrelationId
+        // até o controller (que decide a apresentação). Sem parsing de mensagem em nenhuma camada.
         catch (ConsultaSapException falha)
         {
-            bool ehTimeout = falha.Cenario == CenarioFalhaConsultaSap.Timeout;
-            ResultadoOperacao erroTipado = ResultadoOperacao.Falha(
-                ehTimeout
-                    ? "A consulta do pedido no SAP excedeu o tempo limite."
-                    : MensagensFalhaConsultaSap.Descrever(falha.Cenario, numeroPedido).Mensagem);
             await RegistrarLogAsync(
                 "CONSULTA_PEDIDO",
                 numeroPedido,
                 correlationId,
                 cronometro,
-                ehTimeout ? "TIMEOUT" : "ERRO",
+                falha.Cenario == CenarioFalhaConsultaSap.Timeout ? "TIMEOUT" : "ERRO",
                 falha.HttpStatus,
                 falha.MensagemTecnicaSanitizada ?? $"Falha na consulta do pedido ({falha.Cenario}).");
-            return erroTipado;
+            throw;
         }
-        catch (TaskCanceledException)
+        catch (TaskCanceledException ex)
         {
-            ResultadoOperacao timeout =
-                ResultadoOperacao.Falha("A consulta do pedido no SAP excedeu o tempo limite.");
             await RegistrarLogAsync(
                 "CONSULTA_PEDIDO",
                 numeroPedido,
@@ -195,8 +198,13 @@ public sealed class SincronizacaoPedidoCompraSapServico : IPedidoCompraSapServic
                 cronometro,
                 "TIMEOUT",
                 null,
-                timeout.Mensagem);
-            return timeout;
+                "A consulta do pedido no SAP excedeu o tempo limite.");
+            throw new ConsultaSapException(
+                CenarioFalhaConsultaSap.Timeout,
+                httpStatus: null,
+                "A consulta do pedido no SAP excedeu o tempo limite.",
+                correlationId.ToString(),
+                ex);
         }
         catch
         {

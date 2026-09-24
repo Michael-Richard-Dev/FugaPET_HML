@@ -940,14 +940,51 @@ public sealed class EntradaProdutoController
         // 2. CACHE MISS / pedido ausente: fallback de GET ESPECIFICO no SAP e nova leitura do cache.
         if (pedido is null)
         {
-            ResultadoOperacao sincronizacao =
-                await Sap.SincronizarPedidoAsync(numeroPedido, cancellationToken);
+            // GATE 105G: o cache miss usa o MESMO contrato técnico da validação fresca. Uma falha
+            // classificada (401/403/404/timeout/rede/TLS/5xx/resposta inválida/config) chega tipada e
+            // preserva o cenário até a UI — nunca mais a mensagem genérica "SAP indisponível no momento".
+            ResultadoOperacao sincronizacao;
+            try
+            {
+                sincronizacao = await Sap.SincronizarPedidoAsync(numeroPedido, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw; // cancelamento do operador: sem modal técnico falso.
+            }
+            catch (ConsultaSapException falha)
+            {
+                return MontarFalhaConsultaSap(
+                    pedido, numeroPedido, falha.Cenario, falha.HttpStatus, falha.CorrelationId);
+            }
+            catch (IntegracaoSapBloqueadaException)
+            {
+                return MontarFalhaConsultaSap(
+                    pedido, numeroPedido, CenarioFalhaConsultaSap.ConfiguracaoInvalida, null, null);
+            }
+
             if (!sincronizacao.Sucesso)
             {
+                // Integração sem configuração válida (ex.: arquivo malformado) é detectada de forma
+                // ESTRUTURAL (SapConfigurado), nunca por texto da mensagem. Modo simulado é exceção.
+                if (!Sap.SapConfigurado && !Sap.EhSimulado)
+                {
+                    return MontarFalhaConsultaSap(
+                        pedido, numeroPedido, CenarioFalhaConsultaSap.ConfiguracaoInvalida, null, null);
+                }
+
+                // Falha NÃO técnica (sem itens / fora do escopo / validação operacional): a consulta
+                // ocorreu, então preserva a mensagem funcional REAL — sem inventar cenário HTTP.
                 return new ResultadoConsultaPedido
                 {
                     Sucesso = false,
-                    Mensagem = "Pedido não encontrado no cache local e SAP indisponível no momento."
+                    Mensagem = sincronizacao.Mensagem,
+                    TituloFalha = "Consulta de pedido",
+                    NumeroPedido = (numeroPedido ?? string.Empty).Trim(),
+                    ItensAutorizados = [],
+                    ItensOcultados = 0,
+                    ConsultaTecnicaOk = true,
+                    CenarioFalhaSap = CenarioFalhaConsultaSap.Nenhum
                 };
             }
 
