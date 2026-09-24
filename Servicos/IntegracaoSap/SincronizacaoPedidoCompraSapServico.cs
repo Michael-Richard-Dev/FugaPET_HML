@@ -165,6 +165,25 @@ public sealed class SincronizacaoPedidoCompraSapServico : IPedidoCompraSapServic
                 "Consulta cancelada.");
             throw;
         }
+        // GATE 105D: a consulta agora devolve falha TIPADA. O timeout continua produzindo a mesma mensagem
+        // amigável; os demais cenários usam o texto de aplicação do próprio cenário (sem inventar causa).
+        catch (ConsultaSapException falha)
+        {
+            bool ehTimeout = falha.Cenario == CenarioFalhaConsultaSap.Timeout;
+            ResultadoOperacao erroTipado = ResultadoOperacao.Falha(
+                ehTimeout
+                    ? "A consulta do pedido no SAP excedeu o tempo limite."
+                    : MensagensFalhaConsultaSap.Descrever(falha.Cenario, numeroPedido).Mensagem);
+            await RegistrarLogAsync(
+                "CONSULTA_PEDIDO",
+                numeroPedido,
+                correlationId,
+                cronometro,
+                ehTimeout ? "TIMEOUT" : "ERRO",
+                falha.HttpStatus,
+                falha.MensagemTecnicaSanitizada ?? $"Falha na consulta do pedido ({falha.Cenario}).");
+            return erroTipado;
+        }
         catch (TaskCanceledException)
         {
             ResultadoOperacao timeout =
@@ -372,32 +391,56 @@ public sealed class SincronizacaoPedidoCompraSapServico : IPedidoCompraSapServic
 
     /// <summary>
     /// Tarefa Entrada 23.1: cabeçalho FRESCO do pedido no SAP (GET direto, com status de aprovação/liberação).
-    /// Não usa cache. Não configurado / não encontrado / erro → null (o validador bloqueia por segurança).
+    /// Não usa cache.
+    /// GATE 105D — nova semântica de null: null significa EXCLUSIVAMENTE "não encontrado" (404). Qualquer
+    /// falha TÉCNICA (config inválida, 401/403/5xx, rede, TLS, timeout, resposta inválida) sobe como
+    /// <see cref="ConsultaSapException"/> com o cenário classificado; o swallow genérico que devolvia null
+    /// (e virava "pedido não liberado") foi REMOVIDO. Cancelamento do chamador é propagado.
     /// </summary>
     public async Task<PedidoCompraSap?> ObterCabecalhoSapParaValidacaoAsync(
         string numeroPedido,
         CancellationToken cancellationToken = default)
     {
-        if (!_configuracaoSap.Configurado || string.IsNullOrWhiteSpace(numeroPedido))
+        if (string.IsNullOrWhiteSpace(numeroPedido))
         {
+            // Sem número não há o que consultar: é ausência de recurso, não falha técnica.
             return null;
+        }
+
+        if (!_configuracaoSap.Configurado)
+        {
+            throw new ConsultaSapException(
+                CenarioFalhaConsultaSap.ConfiguracaoInvalida,
+                httpStatus: null,
+                "Integracao SAP nao configurada para consultar o pedido de compra.");
         }
 
         try
         {
             return await _clienteSap.Value.ConsultarPedidoAsync(numeroPedido, cancellationToken);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Trace.TraceWarning(
-                $"[Entrada][ValidacaoPedidoCompra] Falha ao consultar cabecalho do pedido {numeroPedido}: {ex.GetType().Name}.");
-            return null;
+            ConsultaSapException tipada = ClassificadorFalhaConsultaSap.Tipar(ex);
+            RegistrarDiagnosticoFalhaConsulta(numeroPedido, tipada);
+            throw tipada;
         }
     }
+
+    // GATE 105D: diagnóstico SANITIZADO da falha técnica (sem ex.ToString(), sem corpo bruto, sem segredo).
+    private static void RegistrarDiagnosticoFalhaConsulta(string numeroPedido, ConsultaSapException falha)
+        => System.Diagnostics.Trace.TraceWarning(
+            "[Entrada][ValidacaoPedidoCompra] "
+            + "OPERACAO=VALIDAR_LIBERACAO_PEDIDO; "
+            + $"PEDIDO={numeroPedido}; "
+            + $"CENARIO={falha.Cenario}; "
+            + $"HTTP_STATUS={(falha.HttpStatus is int status ? status.ToString() : "-")}; "
+            + $"CORRELATION_ID={falha.CorrelationId ?? "-"}; "
+            + $"TIPO_FALHA={falha.MensagemTecnicaSanitizada ?? "-"}");
 
     /// <summary>Fornecedor vinculado ao pedido no cache local, para preencher a tela de Entrada.</summary>
     public Task<string> ObterFornecedorPorPedidoAsync(string numeroPedido, CancellationToken cancellationToken = default)

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Security;
 using System.Text;
+using FugaPET_HML.Modelo.IntegracaoSap;
 using FugaPET_HML.Servicos.IntegracaoSap;
 
 namespace FugaPET_HML.Tests.IntegracaoSap;
@@ -333,8 +334,12 @@ public sealed class PedidoCompraSapHttpSegurancaTests
         };
         PedidoCompraSapApiClient cliente = new(CriarConfiguracao(), http);
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+        // GATE 105D: timeout SEM cancelamento do chamador é classificado como TIMEOUT (falha tipada),
+        // e não mais como um OperationCanceledException indistinguível de cancelamento do operador.
+        ConsultaSapException erro = await Assert.ThrowsAsync<ConsultaSapException>(
             () => cliente.ConsultarPedidoAsync("4500000010"));
+
+        Assert.Equal(CenarioFalhaConsultaSap.Timeout, erro.Cenario);
     }
 
     [Fact]

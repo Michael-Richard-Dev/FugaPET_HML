@@ -4285,9 +4285,13 @@ public partial class ProcessoEntradaProdutoForm : Form
                 statusLabel.Text = resultado.Mensagem;
                 if (PodeAtualizarTela())
                 {
+                    // GATE 105D: falha de CONSULTA (técnica ou não encontrado) usa o título de APLICAÇÃO do
+                    // cenário — nunca "Pedido de Compra não liberado". A tela não conhece HTTP/exceções.
                     MessageBox.Show(
                         resultado.Mensagem,
-                        "Consulta de pedido",
+                        string.IsNullOrWhiteSpace(resultado.TituloFalha)
+                            ? "Consulta de pedido"
+                            : resultado.TituloFalha,
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Warning);
                 }
@@ -4311,14 +4315,23 @@ public partial class ProcessoEntradaProdutoForm : Form
             {
                 _numeroPedidoCarregado = string.Empty;
                 LimparDadosPedidoSelecionado();
-                string mensagemBloqueio = MontarMensagemPedidoNaoLiberado(resultado);
+                // GATE 105D: status INDETERMINADO tem título/mensagem próprios (não afirma "não liberado").
+                // Só um status funcional REAL (03/04/08/liberação não concluída) usa o texto de não liberado.
+                bool statusIndeterminado =
+                    resultado.CenarioFalhaSap == CenarioFalhaConsultaSap.StatusNegocioDesconhecido;
+                string mensagemBloqueio = statusIndeterminado
+                    ? resultado.Mensagem
+                    : MontarMensagemPedidoNaoLiberado(resultado);
+                string tituloBloqueio = statusIndeterminado && !string.IsNullOrWhiteSpace(resultado.TituloFalha)
+                    ? resultado.TituloFalha
+                    : "Pedido de Compra não liberado";
                 statusLabel.Text = resultado.MotivoBloqueioLiberacao;
                 AtualizarDisponibilidadeInicioLeitura();
                 if (PodeAtualizarTela())
                 {
                     MessageBox.Show(
                         mensagemBloqueio,
-                        "Pedido de Compra não liberado",
+                        tituloBloqueio,
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Warning);
                 }

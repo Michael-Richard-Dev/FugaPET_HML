@@ -968,17 +968,51 @@ public sealed class EntradaProdutoController
 
         // Tarefa Entrada 23.1: valida APROVACAO/LIBERACAO no SAP (cabecalho FRESCO, sem confiar no cache
         // que nao guarda o status). Pedido nao liberado NAO carrega itens operacionais (Ajuste 6).
-        PedidoCompraSap? cabecalhoSap =
-            await Sap.ObterCabecalhoSapParaValidacaoAsync(numeroPedido, cancellationToken);
+        // GATE 105D: a consulta técnica é avaliada ANTES do status de negócio. Falha técnica NUNCA vira
+        // "pedido não liberado" — o validador só roda com CONSULTA_TECNICA_OK e pedido SAP válido.
+        PedidoCompraSap? cabecalhoSap;
+        try
+        {
+            cabecalhoSap = await Sap.ObterCabecalhoSapParaValidacaoAsync(numeroPedido, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw; // cancelamento do operador: sem modal técnico falso.
+        }
+        catch (ConsultaSapException falha)
+        {
+            return MontarFalhaConsultaSap(pedido, numeroPedido, falha.Cenario, falha.HttpStatus, falha.CorrelationId);
+        }
+        catch (IntegracaoSapBloqueadaException)
+        {
+            return MontarFalhaConsultaSap(
+                pedido, numeroPedido, CenarioFalhaConsultaSap.ConfiguracaoInvalida, null, null);
+        }
+
         cancellationToken.ThrowIfCancellationRequested();
+
+        // null aqui significa EXCLUSIVAMENTE "não encontrado" (404) — não mais "algum erro técnico".
+        if (cabecalhoSap is null)
+        {
+            return MontarFalhaConsultaSap(
+                pedido, numeroPedido, CenarioFalhaConsultaSap.NaoEncontrado, 404, null);
+        }
+
         ResultadoValidacaoPedidoCompra validacao = ValidadorLiberacaoPedidoCompra.Validar(cabecalhoSap);
 
         if (!validacao.Liberado)
         {
+            // GATE 105D: status indeterminado (vazio/não mapeado) tem cenário e texto próprios; os demais
+            // permanecem como bloqueio FUNCIONAL real (03/04/08/liberação não concluída).
+            (string tituloBloqueio, string mensagemBloqueio) = validacao.StatusDesconhecido
+                ? MensagensFalhaConsultaSap.Descrever(
+                    CenarioFalhaConsultaSap.StatusNegocioDesconhecido, pedido.NumeroPedido)
+                : (string.Empty, validacao.MotivoBloqueio);
+
             return new ResultadoConsultaPedido
             {
                 Sucesso = true,
-                Mensagem = validacao.MotivoBloqueio,
+                Mensagem = mensagemBloqueio,
                 NumeroPedido = pedido.NumeroPedido,
                 Fornecedor = pedido.Fornecedor,
                 DataPedido = pedido.DataPedido,
@@ -986,10 +1020,16 @@ public sealed class EntradaProdutoController
                 ItensAutorizados = [], // Ajuste 6: nada operacional para pedido nao liberado
                 ItensOcultados = 0,
                 PedidoLiberado = false,
-                MotivoBloqueioLiberacao = validacao.MotivoBloqueio,
+                MotivoBloqueioLiberacao = mensagemBloqueio,
                 StatusProcessamento = validacao.CodigoStatus,
                 DescricaoStatusProcessamento = validacao.DescricaoStatus,
-                LiberacaoNaoConcluida = validacao.LiberacaoNaoConcluida
+                LiberacaoNaoConcluida = validacao.LiberacaoNaoConcluida,
+                // Consulta técnica OK: este é um bloqueio FUNCIONAL, não uma falha de integração.
+                ConsultaTecnicaOk = true,
+                CenarioFalhaSap = validacao.StatusDesconhecido
+                    ? CenarioFalhaConsultaSap.StatusNegocioDesconhecido
+                    : CenarioFalhaConsultaSap.Nenhum,
+                TituloFalha = tituloBloqueio
             };
         }
 
@@ -1036,6 +1076,45 @@ public sealed class EntradaProdutoController
             PedidoTemItensDoModo = true,
             StatusProcessamento = validacao.CodigoStatus,
             DescricaoStatusProcessamento = validacao.DescricaoStatus
+        };
+    }
+
+    /// <summary>
+    /// GATE 105D: resultado de FALHA DE CONSULTA (técnica) ou de NÃO ENCONTRADO. Nunca marca o pedido como
+    /// "não liberado": PedidoLiberado permanece true e MotivoBloqueioLiberacao vazio, para que a UI não
+    /// apresente causa de negócio. O validador de liberação NÃO roda neste caminho.
+    /// </summary>
+    /// <remarks>internal static para teste direto (InternalsVisibleTo), sem instanciar o controller/DB.</remarks>
+    internal static ResultadoConsultaPedido MontarFalhaConsultaSap(
+        PedidoCompraSapAgregado? pedido,
+        string numeroPedido,
+        CenarioFalhaConsultaSap cenario,
+        int? httpStatus,
+        string? correlationId)
+    {
+        string numero = string.IsNullOrWhiteSpace(pedido?.NumeroPedido)
+            ? (numeroPedido ?? string.Empty).Trim()
+            : pedido!.NumeroPedido;
+        (string titulo, string mensagem) = MensagensFalhaConsultaSap.Descrever(cenario, numero);
+
+        return new ResultadoConsultaPedido
+        {
+            // Sucesso=false: a tela trata como consulta não concluída (sem abrir operação).
+            Sucesso = false,
+            Mensagem = mensagem,
+            TituloFalha = titulo,
+            NumeroPedido = numero,
+            ItensAutorizados = [],
+            ItensOcultados = 0,
+            ConsultaTecnicaOk = false,
+            CenarioFalhaSap = cenario,
+            HttpStatusFalha = httpStatus,
+            CorrelationId = correlationId ?? string.Empty,
+            // Não afirmar nada sobre o status de negócio: ele não foi avaliado.
+            PedidoLiberado = true,
+            MotivoBloqueioLiberacao = string.Empty,
+            StatusProcessamento = string.Empty,
+            DescricaoStatusProcessamento = string.Empty
         };
     }
 
@@ -1206,4 +1285,27 @@ public sealed class ResultadoConsultaPedido
     // que não passam pela classificação; o fluxo real sempre o define. MotivoBloqueioModo = alerta por modo.
     public bool PedidoTemItensDoModo { get; init; } = true;
     public string MotivoBloqueioModo { get; init; } = string.Empty;
+
+    // GATE 105D: diagnóstico da CONSULTA SAP, separado do status de NEGÓCIO. Permite à UI distinguir
+    // SUCESSO × NAO_ENCONTRADO × FALHA_TECNICA × BLOQUEIO_FUNCIONAL sem conhecer HTTP.
+    /// <summary>Cenário classificado da consulta (Nenhum quando a consulta técnica foi bem-sucedida).</summary>
+    public CenarioFalhaConsultaSap CenarioFalhaSap { get; init; } = CenarioFalhaConsultaSap.Nenhum;
+
+    /// <summary>
+    /// Consulta SAP concluída tecnicamente. Default true para não afetar chamadas que não passam pela
+    /// validação; o fluxo real sempre o define. Só com true o validador de liberação pode ter rodado.
+    /// </summary>
+    public bool ConsultaTecnicaOk { get; init; } = true;
+
+    /// <summary>Título de aplicação para o cenário (vazio quando não há falha a apresentar).</summary>
+    public string TituloFalha { get; init; } = string.Empty;
+
+    /// <summary>Status HTTP da falha, quando houve resposta (apenas diagnóstico; a UI não o interpreta).</summary>
+    public int? HttpStatusFalha { get; init; }
+
+    /// <summary>Correlação para rastrear a falha no diagnóstico técnico.</summary>
+    public string CorrelationId { get; init; } = string.Empty;
+
+    /// <summary>Falha TÉCNICA da consulta (nunca deve ser apresentada como status de negócio).</summary>
+    public bool FalhaTecnicaSap => !ConsultaTecnicaOk;
 }
