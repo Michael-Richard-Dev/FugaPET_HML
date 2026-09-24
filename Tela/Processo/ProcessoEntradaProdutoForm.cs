@@ -1981,6 +1981,10 @@ public partial class ProcessoEntradaProdutoForm : Form
     private const string MensagemAguardarLeituraBalanca =
         "Aguarde a conclusão da leitura da balança antes de parar a operação.";
 
+    // GATE 106A: Parar sem NENHUMA leitura válida na operação = cancelamento da tentativa em memória.
+    internal const string MensagemPesagemEncerradaSemLeituras =
+        "Pesagem encerrada sem leituras. Nenhum lançamento foi gerado.";
+
     // §6/§12: nenhuma nova pesagem/lote enquanto persistindo ou aguardando o retry da gravação local.
     private bool PesagemBloqueadaNoFluxoLotes => _finalizandoPesagem || _lotesFinalizadosAguardandoPersistencia;
 
@@ -2064,6 +2068,18 @@ public partial class ProcessoEntradaProdutoForm : Form
         AtualizarControlesFluxoLotes(); // §3: reflete "persistência em andamento" imediatamente.
         try
         {
+            // GATE 106A: ZERO pesagens válidas em TODA a operação (não apenas no lote selecionado) e nenhum
+            // peso visual inconsistente ⇒ o Parar é CANCELAMENTO da tentativa em memória, não finalização.
+            // Encerra ANTES de qualquer montagem de árvore, persistência local, lançamento ou SAP.
+            // Retry pendente nunca entra aqui (a árvore já finalizada possui pesagens válidas).
+            if (!_lotesFinalizadosAguardandoPersistencia
+                && OperacaoSemQualquerPesagemValida()
+                && !ExistePesoVisualSemLeituraRastreavel())
+            {
+                CancelarOperacaoSemLeiturasEmMemoria();
+                return;
+            }
+
             // §5: reentrante — na primeira passada valida e finaliza; no retry reconhece a árvore já finalizada.
             if (!GarantirLotesProntosParaPersistencia())
             {
@@ -2150,6 +2166,42 @@ public partial class ProcessoEntradaProdutoForm : Form
             : $"{motivoSeguro} {MensagemRetryPersistenciaLotes}";
 
         AtualizarEstadoVisualLocal(EstadoVisualLocalEntrada.Pendente, detalhe);
+    }
+
+    /// <summary>
+    /// GATE 106A: true quando a operação corrente NÃO possui NENHUMA pesagem válida — somando TODOS os itens
+    /// e TODOS os lotes (ativos e já finalizados em memória). O escopo é GLOBAL de propósito: uma leitura
+    /// válida em qualquer outro item/lote impede o cancelamento e preserva o fluxo normal de validação.
+    /// internal para teste direto (InternalsVisibleTo).
+    /// </summary>
+    internal bool OperacaoSemQualquerPesagemValida()
+    {
+        EstadoOperacaoEntradaProdutoLotes estado = _controller.ObterEstadoOperacaoComLotes();
+
+        return estado.Itens
+            .SelectMany(item => item.Lotes)
+            .Sum(lote => lote.QuantidadePesagensValidas) <= 0;
+    }
+
+    /// <summary>
+    /// GATE 106A: cancela a tentativa de pesagem SOMENTE em memória. Descarta a operação/lotes temporários
+    /// (não há pesagem válida nem lançamento persistido, logo nada de persistido é cancelado), encerra a
+    /// leitura e devolve a tela ao estado "leitura não iniciada" — mantendo pedido e itens carregados para
+    /// uma nova tentativa. NÃO cria peso 0, NÃO monta árvore, NÃO persiste, NÃO gera código de lançamento e
+    /// NÃO toca SAP. <c>_codigoLancamentoPersistido</c> não é alterado: nada foi gravado aqui e um lançamento
+    /// legítimo de uma sessão anterior não pode ser descartado.
+    /// </summary>
+    private void CancelarOperacaoSemLeiturasEmMemoria()
+    {
+        _controller.LimparOperacaoComLotes();
+        _isProductionStarted = false;
+        _lotesFinalizadosAguardandoPersistencia = false;
+        UpdateProductionState(false);
+
+        AtualizarEstadoVisualLocal(
+            EstadoVisualLocalEntrada.Pendente,
+            "pesagem encerrada sem leituras");
+        statusLabel.Text = MensagemPesagemEncerradaSemLeituras;
     }
 
     // §5: garante que a árvore esteja pronta para persistir, de forma REENTRANTE.

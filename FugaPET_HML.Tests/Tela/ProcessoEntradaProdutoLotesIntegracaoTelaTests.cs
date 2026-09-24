@@ -781,9 +781,16 @@ public sealed class ProcessoEntradaProdutoLotesIntegracaoTelaTests
 
             AwaitTaskSta(Invocar(form, "ExecutarPersistenciaLotesAsync"));
 
+            // Protecoes preservadas: nenhuma gravacao e nenhum lancamento.
             Assert.Equal(0, chamadas);
             Assert.Null(Campo<long?>(form, "_codigoLancamentoPersistido"));
-            Assert.True(Campo<bool>(form, "_isProductionStarted"));
+
+            // GATE 106A: sem NENHUMA leitura valida, Parar passou a CANCELAR a tentativa em memoria em vez
+            // de manter a leitura ativa exigindo pesagem. O contrato anterior (_isProductionStarted == true)
+            // foi deliberadamente substituido.
+            Assert.False(Campo<bool>(form, "_isProductionStarted"));
+            Assert.False(Campo<EntradaProdutoController>(form, "_controller")
+                .ObterEstadoOperacaoComLotes().OperacaoIniciada);
         });
     }
 
