@@ -924,7 +924,10 @@ public sealed class ProdutoAcabadoController
                     Reserva = componente.Reserva.Trim(),
                     ItemReserva = componente.ItemReserva.Trim(),
                     Lote = componente.Lote.Trim(),
-                    TipoMovimento = componente.TipoMovimento.Trim()
+                    TipoMovimento = componente.TipoMovimento.Trim(),
+                    // GATE 107N: a metadata decisória deixa de ser DESCARTADA aqui e segue íntegra
+                    // (tri-state preservado) até a origem do pipeline. Nenhuma normalização/default.
+                    MetadataAlocacao261 = componente.MetadataAlocacao261
                 })
                 .ToArray()
         };

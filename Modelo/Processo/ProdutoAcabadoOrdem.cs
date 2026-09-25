@@ -31,4 +31,11 @@ public sealed record ProdutoAcabadoComponenteOrdem
     public string ItemReserva { get; init; } = string.Empty;
     public string Lote { get; init; } = string.Empty;
     public string TipoMovimento { get; init; } = string.Empty;
+
+    /// <summary>
+    /// GATE 107N: metadata SAP TRI-STATE do componente, propagada sem perda até a origem do pipeline para
+    /// uso EXCLUSIVO da decisão do futuro allocator 261. null nos campos = DESCONHECIDO (nunca false/0).
+    /// Nenhum cálculo/rateio é feito aqui: este modelo apenas TRANSPORTA.
+    /// </summary>
+    public FugaPET_HML.Modelo.IntegracaoSap.MetadataAlocacao261Sap MetadataAlocacao261 { get; init; } = new();
 }

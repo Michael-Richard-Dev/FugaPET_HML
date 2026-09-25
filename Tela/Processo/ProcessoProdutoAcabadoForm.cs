@@ -1018,7 +1018,10 @@ public partial class ProcessoProdutoAcabadoForm : Form
                 Unidade = componente.Unidade,
                 Reservation = componente.Reserva,
                 ReservationItem = componente.ItemReserva,
-                Batch = componente.Lote
+                Batch = componente.Lote,
+                // GATE 107N: fecha a cadeia — a metadata decisória tri-state chega à origem do pipeline
+                // sem perda. Quantidade permanece INALTERADA neste gate (nenhum rateio/allocator aqui).
+                MetadataAlocacao261 = componente.MetadataAlocacao261
             })
             .ToArray();
     }
