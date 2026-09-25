@@ -414,7 +414,9 @@ public sealed class ProductionOrderSapApiClient
             TipoSplitLote = LerTexto(c, "BatchSplitType"),
             Operacao = LerTexto(c, "ManufacturingOrderOperation"),
             OrderOperationInternalId = LerPrimeiroTexto(c, "OrderOperationInternalID", "OrderOperationInternalId", "ManufacturingOrderOperationInternalID"),
-            SequenciaOperacao = LerTexto(c, "ManufacturingOrderSequence")
+            SequenciaOperacao = LerTexto(c, "ManufacturingOrderSequence"),
+            // GATE 107N: metadata decisória tri-state (não substitui os campos acima).
+            MetadataAlocacao261 = MapearMetadataAlocacao261(c)
         };
 
     private static OperacaoOrdemProducaoSap MapearOperacao(JsonElement o)
@@ -570,7 +572,9 @@ public sealed class ProductionOrderSapApiClient
             TipoSplitLote = LerXmlTexto(p, "BatchSplitType"),
             Operacao = LerXmlTexto(p, "ManufacturingOrderOperation"),
             OrderOperationInternalId = LerXmlPrimeiroTexto(p, "OrderOperationInternalID", "OrderOperationInternalId", "ManufacturingOrderOperationInternalID"),
-            SequenciaOperacao = LerXmlTexto(p, "ManufacturingOrderSequence")
+            SequenciaOperacao = LerXmlTexto(p, "ManufacturingOrderSequence"),
+            // GATE 107N: metadata decisória tri-state (não substitui os campos acima).
+            MetadataAlocacao261 = MapearMetadataAlocacao261Xml(p)
         };
 
     private static OperacaoOrdemProducaoSap MapearOperacaoXml(XElement p)
@@ -713,6 +717,140 @@ public sealed class ProductionOrderSapApiClient
                || string.Equals(texto, "true", StringComparison.OrdinalIgnoreCase)
                || texto == "1";
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // GATE 107N — leitores TRI-STATE (fail-closed) para a metadata decisória do allocator 261.
+    // Diferem dos leitores acima justamente por NUNCA colapsarem ausência/nulo/inválido em false/0:
+    // devolvem null = DESCONHECIDO, preservando a incerteza até a decisão.
+    // ---------------------------------------------------------------------------------------------
+
+    private static bool? LerFlagTri(JsonElement elemento, string propriedade)
+    {
+        if (!elemento.TryGetProperty(propriedade, out JsonElement valor))
+        {
+            return null; // ausente ⇒ DESCONHECIDO
+        }
+
+        return valor.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Number when valor.TryGetInt32(out int n) => n != 0,
+            JsonValueKind.String => InterpretarFlagTri(valor.GetString()),
+            _ => null // null JSON / tipo inesperado ⇒ DESCONHECIDO
+        };
+    }
+
+    /// <summary>
+    /// Flag SAP em texto: "X"/"true"/"1" ⇒ true; ""/"false"/"0"/" " ⇒ false (ausência de marca é uma
+    /// resposta EXPLÍCITA do SAP); qualquer outro conteúdo ⇒ null (DESCONHECIDO, nunca false por descarte).
+    /// </summary>
+    private static bool? InterpretarFlagTri(string? valor)
+    {
+        if (valor is null)
+        {
+            return null;
+        }
+
+        string texto = valor.Trim();
+        if (string.Equals(texto, "X", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(texto, "true", StringComparison.OrdinalIgnoreCase)
+            || texto == "1")
+        {
+            return true;
+        }
+
+        if (texto.Length == 0
+            || string.Equals(texto, "false", StringComparison.OrdinalIgnoreCase)
+            || texto == "0")
+        {
+            return false;
+        }
+
+        return null;
+    }
+
+    private static decimal? LerDecimalTri(JsonElement elemento, string propriedade)
+    {
+        if (!elemento.TryGetProperty(propriedade, out JsonElement valor))
+        {
+            return null; // ausente ⇒ DESCONHECIDO
+        }
+
+        return valor.ValueKind switch
+        {
+            JsonValueKind.Number when valor.TryGetDecimal(out decimal n) => n,
+            JsonValueKind.String when decimal.TryParse(
+                valor.GetString(),
+                NumberStyles.Number,
+                CultureInfo.InvariantCulture,
+                out decimal s) => s,
+            _ => null // null JSON / string não numérica ⇒ DESCONHECIDO
+        };
+    }
+
+    private static bool? LerXmlFlagTri(XElement props, string propriedade)
+    {
+        XElement? elemento = props.Element(DadosOData + propriedade);
+        return elemento is null ? null : InterpretarFlagTri(elemento.Value);
+    }
+
+    private static decimal? LerXmlDecimalTri(XElement props, string propriedade)
+    {
+        XElement? elemento = props.Element(DadosOData + propriedade);
+        if (elemento is null)
+        {
+            return null; // ausente ⇒ DESCONHECIDO
+        }
+
+        return decimal.TryParse(
+            elemento.Value?.Trim(),
+            NumberStyles.Number,
+            CultureInfo.InvariantCulture,
+            out decimal valor)
+            ? valor
+            : null; // vazio / não numérico ⇒ DESCONHECIDO
+    }
+
+    /// <summary>GATE 107N: metadata tri-state do componente (JSON).</summary>
+    private static MetadataAlocacao261Sap MapearMetadataAlocacao261(JsonElement c)
+        => new()
+        {
+            QuantidadeFixa = LerFlagTri(c, "QuantityIsFixed"),
+            SucataLiquida = LerFlagTri(c, "IsNetScrap"),
+            SucataComponentePercentual = LerDecimalTri(c, "ComponentScrapInPercent"),
+            SucataOperacaoPercentual = LerDecimalTri(c, "OperationScrapInPercent"),
+            QuantidadeOriginalComponente = LerDecimalTri(c, "MaterialCompOriginalQuantity"),
+            ReservaFinalizada = LerFlagTri(c, "ReservationIsFinallyIssued"),
+            Backflush = LerFlagTri(c, "MatlCompIsMarkedForBackflush"),
+            MaterialGranel = LerFlagTri(c, "IsBulkMaterialComponent"),
+            QuantidadeRetirada = LerDecimalTri(c, "WithdrawnQuantity"),
+            QuantidadeDisponivelConfirmada = LerDecimalTri(c, "ConfirmedAvailableQuantity"),
+            ItemBOM = LerTexto(c, "BOMItem"),
+            CategoriaItemBOM = LerTexto(c, "BOMItemCategory"),
+            TipoSplitLote = LerTexto(c, "BatchSplitType"),
+            UnidadeBaseSap = LerTexto(c, "BaseUnit")
+        };
+
+    /// <summary>GATE 107N: metadata tri-state do componente (XML/Atom).</summary>
+    private static MetadataAlocacao261Sap MapearMetadataAlocacao261Xml(XElement p)
+        => new()
+        {
+            QuantidadeFixa = LerXmlFlagTri(p, "QuantityIsFixed"),
+            SucataLiquida = LerXmlFlagTri(p, "IsNetScrap"),
+            SucataComponentePercentual = LerXmlDecimalTri(p, "ComponentScrapInPercent"),
+            SucataOperacaoPercentual = LerXmlDecimalTri(p, "OperationScrapInPercent"),
+            QuantidadeOriginalComponente = LerXmlDecimalTri(p, "MaterialCompOriginalQuantity"),
+            ReservaFinalizada = LerXmlFlagTri(p, "ReservationIsFinallyIssued"),
+            Backflush = LerXmlFlagTri(p, "MatlCompIsMarkedForBackflush"),
+            MaterialGranel = LerXmlFlagTri(p, "IsBulkMaterialComponent"),
+            QuantidadeRetirada = LerXmlDecimalTri(p, "WithdrawnQuantity"),
+            QuantidadeDisponivelConfirmada = LerXmlDecimalTri(p, "ConfirmedAvailableQuantity"),
+            ItemBOM = LerXmlTexto(p, "BOMItem"),
+            CategoriaItemBOM = LerXmlTexto(p, "BOMItemCategory"),
+            TipoSplitLote = LerXmlTexto(p, "BatchSplitType"),
+            UnidadeBaseSap = LerXmlTexto(p, "BaseUnit")
+        };
 
     private static decimal LerDecimal(JsonElement elemento, string propriedade)
     {

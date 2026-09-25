@@ -16,6 +16,14 @@ public sealed record ProdutoAcabadoComponenteOrigem
     public string Reservation { get; init; } = string.Empty;
     public string ReservationItem { get; init; } = string.Empty;
     public string Batch { get; init; } = string.Empty;
+
+    /// <summary>
+    /// GATE 107N: metadata SAP TRI-STATE do componente, disponível para a decisão do FUTURO allocator 261.
+    /// null nos campos = DESCONHECIDO (nunca false/0) ⇒ o allocator deve bloquear fail-closed.
+    /// NÃO integra o payload: <c>ProdutoAcabadoMovimento261ItemCommand</c> segue contrato de payload.
+    /// Nenhuma fórmula/rateio é aplicada neste gate — este campo apenas CHEGA até aqui.
+    /// </summary>
+    public FugaPET_HML.Modelo.IntegracaoSap.MetadataAlocacao261Sap MetadataAlocacao261 { get; init; } = new();
 }
 
 /// <summary>

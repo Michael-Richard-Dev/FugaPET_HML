@@ -60,6 +60,13 @@ public sealed record ComponenteOrdemProducaoSap
     public string Operacao { get; init; } = string.Empty;            // ManufacturingOrderOperation
     public string SequenciaOperacao { get; init; } = string.Empty;   // ManufacturingOrderSequence
     public string OrderOperationInternalId { get; init; } = string.Empty; // OrderOperationInternalID
+
+    /// <summary>
+    /// GATE 107N: metadata TRI-STATE para a decisão do futuro allocator 261 (Produto Acabado). ADITIVO:
+    /// nenhuma propriedade acima foi alterada, de modo que Consumo/Apontamentos seguem com a semântica atual.
+    /// Aqui, null = DESCONHECIDO (nunca false/0) — a incerteza é preservada até a decisão.
+    /// </summary>
+    public MetadataAlocacao261Sap MetadataAlocacao261 { get; init; } = new();
 }
 
 /// <summary>Operacao da OP (to_ProductionOrderOperation / A_ProductionOrderOperation_2).</summary>
