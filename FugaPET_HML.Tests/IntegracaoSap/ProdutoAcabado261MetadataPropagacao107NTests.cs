@@ -111,7 +111,7 @@ public sealed class ProdutoAcabado261MetadataPropagacao107NTests
     }
     """;
 
-    /// <summary>JSON com flags FALSE explícito (resposta real do SAP: sem marca).</summary>
+    /// <summary>JSON com flags FALSE EXPLÍCITO (booleano JSON, "false", "0").</summary>
     private const string JsonFalseExplicito = """
     {
       "d": {
@@ -121,11 +121,36 @@ public sealed class ProdutoAcabado261MetadataPropagacao107NTests
             {
               "Material": "1000186",
               "BaseUnit": "KG",
-              "QuantityIsFixed": "",
+              "QuantityIsFixed": false,
               "IsNetScrap": false,
               "ReservationIsFinallyIssued": "false",
               "MatlCompIsMarkedForBackflush": "0",
-              "IsBulkMaterialComponent": ""
+              "IsBulkMaterialComponent": "FALSE"
+            }
+          ]
+        }
+      }
+    }
+    """;
+
+    /// <summary>
+    /// GATE 107N-R1: string VAZIA e WHITESPACE ⇒ DESCONHECIDO (antes eram tratados como FALSE).
+    /// Ausência de conteúdo é ausência de informação, não negação.
+    /// </summary>
+    private const string JsonVazioEWhitespace = """
+    {
+      "d": {
+        "ManufacturingOrder": "1000173",
+        "to_ProductionOrderComponent": {
+          "results": [
+            {
+              "Material": "1000186",
+              "BaseUnit": "KG",
+              "QuantityIsFixed": "",
+              "IsNetScrap": "   ",
+              "ReservationIsFinallyIssued": "",
+              "MatlCompIsMarkedForBackflush": "\t",
+              "IsBulkMaterialComponent": " "
             }
           ]
         }
@@ -161,6 +186,30 @@ public sealed class ProdutoAcabado261MetadataPropagacao107NTests
             <d:ComponentScrapInPercent>2.50</d:ComponentScrapInPercent>
             <d:OperationScrapInPercent>1.25</d:OperationScrapInPercent>
             <d:MaterialCompOriginalQuantity>48.000</d:MaterialCompOriginalQuantity>
+          </m:properties></content></entry>
+        </feed></m:inline>
+      </link>
+    </entry>
+    """;
+
+    /// <summary>XML com FALSE explícito ("false"/"0") e com VAZIO/WHITESPACE (⇒ DESCONHECIDO em 107N-R1).</summary>
+    private const string XmlFalseVazioEWhitespace = """
+    <entry xmlns="http://www.w3.org/2005/Atom"
+           xmlns:m="http://schemas.microsoft.com/ado/2007/08/dataservices/metadata"
+           xmlns:d="http://schemas.microsoft.com/ado/2007/08/dataservices">
+      <content><m:properties>
+        <d:ManufacturingOrder>1000173</d:ManufacturingOrder>
+      </m:properties></content>
+      <link title="to_ProductionOrderComponent">
+        <m:inline><feed>
+          <entry><content><m:properties>
+            <d:Material>1000186</d:Material>
+            <d:BaseUnit>KG</d:BaseUnit>
+            <d:ReservationIsFinallyIssued>false</d:ReservationIsFinallyIssued>
+            <d:MatlCompIsMarkedForBackflush>0</d:MatlCompIsMarkedForBackflush>
+            <d:QuantityIsFixed></d:QuantityIsFixed>
+            <d:IsNetScrap>   </d:IsNetScrap>
+            <d:IsBulkMaterialComponent> </d:IsBulkMaterialComponent>
           </m:properties></content></entry>
         </feed></m:inline>
       </link>
@@ -221,16 +270,28 @@ public sealed class ProdutoAcabado261MetadataPropagacao107NTests
         Assert.Equal("KG", m.UnidadeBaseSap);
     }
 
-    [Fact] // FALSE explícito do SAP (sem marca) é FALSE — distinto de DESCONHECIDO.
+    [Fact] // FALSE EXPLÍCITO (booleano JSON / "false" / "0") é FALSE — distinto de DESCONHECIDO.
     public void Json_FlagsFalseExplicito_MapeiaFalseNaoNulo()
     {
         MetadataAlocacao261Sap m = MetadataDe(JsonFalseExplicito);
 
-        Assert.False(m.QuantidadeFixa);
-        Assert.False(m.SucataLiquida);
-        Assert.False(m.ReservaFinalizada);
-        Assert.False(m.Backflush);
-        Assert.False(m.MaterialGranel);
+        Assert.False(m.QuantidadeFixa);      // booleano JSON false
+        Assert.False(m.SucataLiquida);       // booleano JSON false
+        Assert.False(m.ReservaFinalizada);   // "false"
+        Assert.False(m.Backflush);           // "0"
+        Assert.False(m.MaterialGranel);      // "FALSE" (case-insensitive)
+    }
+
+    [Fact] // GATE 107N-R1: string vazia e whitespace ⇒ DESCONHECIDO, NUNCA false.
+    public void Json_FlagsVaziaOuWhitespace_PreservamDesconhecido()
+    {
+        MetadataAlocacao261Sap m = MetadataDe(JsonVazioEWhitespace);
+
+        Assert.Null(m.QuantidadeFixa);     // ""
+        Assert.Null(m.SucataLiquida);      // "   "
+        Assert.Null(m.ReservaFinalizada);  // ""
+        Assert.Null(m.Backflush);          // "\t"
+        Assert.Null(m.MaterialGranel);     // " "
     }
 
     [Fact] // AUSENTE ⇒ DESCONHECIDO (jamais false/0).
@@ -289,6 +350,21 @@ public sealed class ProdutoAcabado261MetadataPropagacao107NTests
         Assert.Equal("0010", m.ItemBOM);
         Assert.Equal("L", m.CategoriaItemBOM);
         Assert.Equal("1", m.TipoSplitLote);
+    }
+
+    [Fact] // GATE 107N-R1: XML — "false"/"0" ⇒ FALSE; vazio/whitespace ⇒ DESCONHECIDO.
+    public void Xml_FalseExplicitoVersusVazioOuWhitespace()
+    {
+        MetadataAlocacao261Sap m = MetadataDe(XmlFalseVazioEWhitespace);
+
+        // negação EXPLÍCITA
+        Assert.False(m.ReservaFinalizada);  // "false"
+        Assert.False(m.Backflush);          // "0"
+
+        // ausência de conteúdo ⇒ DESCONHECIDO (nunca false)
+        Assert.Null(m.QuantidadeFixa);      // elemento vazio
+        Assert.Null(m.SucataLiquida);       // "   "
+        Assert.Null(m.MaterialGranel);      // " "
     }
 
     [Fact]

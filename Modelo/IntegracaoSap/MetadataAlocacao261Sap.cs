@@ -4,10 +4,11 @@ namespace FugaPET_HML.Modelo.IntegracaoSap;
 /// GATE 107N: metadata SAP do COMPONENTE destinada EXCLUSIVAMENTE à decisão do futuro allocator 261
 /// (Produto Acabado). Origem: A_ProductionOrderComponent_2.
 ///
-/// CONTRATO TRI-STATE (fail-closed): todo campo decisório é anulável e <c>null</c> significa
-/// <b>DESCONHECIDO</b> — ausente na resposta, nulo, ou não interpretável. NUNCA é convertido para
-/// <c>false</c>/<c>0</c>. O allocator futuro deve BLOQUEAR diante de DESCONHECIDO; este contrato existe
-/// justamente para que a incerteza não seja silenciada por um default.
+/// CONTRATO TRI-STATE (fail-closed, 107N-R1): todo campo decisório é anulável e <c>null</c> significa
+/// <b>DESCONHECIDO</b> — ausente na resposta, nulo, VAZIO/whitespace, ou não interpretável. NUNCA é
+/// convertido para <c>false</c>/<c>0</c>. Somente uma afirmação ("X"/"true"/"1") ou uma negação
+/// ("false"/"0", ou booleano JSON) explícitas produzem TRUE/FALSE. O allocator futuro deve BLOQUEAR
+/// diante de DESCONHECIDO; este contrato existe justamente para que a incerteza não seja silenciada.
 ///
 /// Este tipo é um CARREGADOR de decisão: não entra no payload SAP (o command 261 permanece contrato de
 /// payload) e não altera nenhuma propriedade já consumida por outros fluxos (Consumo/Apontamentos), que

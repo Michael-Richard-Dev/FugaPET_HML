@@ -742,8 +742,13 @@ public sealed class ProductionOrderSapApiClient
     }
 
     /// <summary>
-    /// Flag SAP em texto: "X"/"true"/"1" ⇒ true; ""/"false"/"0"/" " ⇒ false (ausência de marca é uma
-    /// resposta EXPLÍCITA do SAP); qualquer outro conteúdo ⇒ null (DESCONHECIDO, nunca false por descarte).
+    /// Flag SAP em texto, contrato 107N-R1 (fail-closed):
+    ///   "X"/"true"/"1"        ⇒ TRUE  (afirmação explícita)
+    ///   "false"/"0"           ⇒ FALSE (negação explícita)
+    ///   null/""/whitespace    ⇒ null  (DESCONHECIDO)
+    ///   qualquer outro valor  ⇒ null  (DESCONHECIDO)
+    /// String vazia/whitespace NÃO é tratada como negação: ausência de conteúdo é ausência de informação,
+    /// e o allocator deve bloquear em vez de assumir "não marcado".
     /// </summary>
     private static bool? InterpretarFlagTri(string? valor)
     {
@@ -753,6 +758,11 @@ public sealed class ProductionOrderSapApiClient
         }
 
         string texto = valor.Trim();
+        if (texto.Length == 0)
+        {
+            return null; // vazio/whitespace ⇒ DESCONHECIDO (107N-R1)
+        }
+
         if (string.Equals(texto, "X", StringComparison.OrdinalIgnoreCase)
             || string.Equals(texto, "true", StringComparison.OrdinalIgnoreCase)
             || texto == "1")
@@ -760,8 +770,7 @@ public sealed class ProductionOrderSapApiClient
             return true;
         }
 
-        if (texto.Length == 0
-            || string.Equals(texto, "false", StringComparison.OrdinalIgnoreCase)
+        if (string.Equals(texto, "false", StringComparison.OrdinalIgnoreCase)
             || texto == "0")
         {
             return false;
