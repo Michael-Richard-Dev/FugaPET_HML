@@ -735,10 +735,32 @@ public sealed class ProductionOrderSapApiClient
         {
             JsonValueKind.True => true,
             JsonValueKind.False => false,
-            JsonValueKind.Number when valor.TryGetInt32(out int n) => n != 0,
+            // GATE 107N-R2: SOMENTE 0 e 1 são representações booleanas válidas. A regra genérica
+            // "n != 0" foi REMOVIDA: 2, -1, 1.5 e quaisquer outros números são DESCONHECIDO, nunca TRUE.
+            JsonValueKind.Number => InterpretarNumeroFlagTri(valor),
             JsonValueKind.String => InterpretarFlagTri(valor.GetString()),
             _ => null // null JSON / tipo inesperado ⇒ DESCONHECIDO
         };
+    }
+
+    /// <summary>
+    /// GATE 107N-R2: número JSON como flag decisória. Aceita EXCLUSIVAMENTE 0 (FALSE) e 1 (TRUE);
+    /// qualquer outro valor — inteiro fora de {0,1}, negativo, fracionário ou fora da faixa de decimal —
+    /// é DESCONHECIDO. Não há coerção por "diferente de zero".
+    /// </summary>
+    private static bool? InterpretarNumeroFlagTri(JsonElement valor)
+    {
+        if (!valor.TryGetDecimal(out decimal numero))
+        {
+            return null; // fora da faixa/não representável ⇒ DESCONHECIDO
+        }
+
+        if (numero == 0m)
+        {
+            return false;
+        }
+
+        return numero == 1m ? true : null;
     }
 
     /// <summary>

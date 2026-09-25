@@ -282,6 +282,80 @@ public sealed class ProdutoAcabado261MetadataPropagacao107NTests
         Assert.False(m.MaterialGranel);      // "FALSE" (case-insensitive)
     }
 
+    /// <summary>
+    /// GATE 107N-R2: número JSON como flag. Apenas 0/1 são representações booleanas válidas;
+    /// a regra genérica "diferente de zero ⇒ TRUE" foi removida.
+    /// </summary>
+    private static string JsonComNumero(string valorNumerico) => $$"""
+    {
+      "d": {
+        "ManufacturingOrder": "1000173",
+        "to_ProductionOrderComponent": {
+          "results": [
+            {
+              "Material": "1000186",
+              "BaseUnit": "KG",
+              "QuantityIsFixed": {{valorNumerico}},
+              "IsNetScrap": {{valorNumerico}},
+              "ReservationIsFinallyIssued": {{valorNumerico}},
+              "MatlCompIsMarkedForBackflush": {{valorNumerico}},
+              "IsBulkMaterialComponent": {{valorNumerico}}
+            }
+          ]
+        }
+      }
+    }
+    """;
+
+    [Fact] // JSON number 0 ⇒ FALSE (negação explícita).
+    public void Json_Numero0_MapeiaFalse()
+    {
+        MetadataAlocacao261Sap m = MetadataDe(JsonComNumero("0"));
+
+        Assert.False(m.QuantidadeFixa);
+        Assert.False(m.SucataLiquida);
+        Assert.False(m.ReservaFinalizada);
+        Assert.False(m.Backflush);
+        Assert.False(m.MaterialGranel);
+    }
+
+    [Fact] // JSON number 1 ⇒ TRUE (afirmação explícita).
+    public void Json_Numero1_MapeiaTrue()
+    {
+        MetadataAlocacao261Sap m = MetadataDe(JsonComNumero("1"));
+
+        Assert.True(m.QuantidadeFixa);
+        Assert.True(m.SucataLiquida);
+        Assert.True(m.ReservaFinalizada);
+        Assert.True(m.Backflush);
+        Assert.True(m.MaterialGranel);
+    }
+
+    [Theory] // Qualquer número fora de {0,1} ⇒ DESCONHECIDO (nunca TRUE por "!= 0").
+    [InlineData("2")]
+    [InlineData("-1")]
+    [InlineData("7")]
+    [InlineData("1.5")]
+    [InlineData("-0.5")]
+    [InlineData("0.999")]
+    public void Json_NumeroForaDeZeroUm_PreservaDesconhecido(string valorNumerico)
+    {
+        MetadataAlocacao261Sap m = MetadataDe(JsonComNumero(valorNumerico));
+
+        Assert.Null(m.QuantidadeFixa);
+        Assert.Null(m.SucataLiquida);
+        Assert.Null(m.ReservaFinalizada);
+        Assert.Null(m.Backflush);
+        Assert.Null(m.MaterialGranel);
+    }
+
+    [Fact] // 0.0 e 1.0 continuam sendo 0 e 1 (equivalência numérica, não textual).
+    public void Json_NumeroDecimalEquivalenteAZeroOuUm_MantemSemantica()
+    {
+        Assert.False(MetadataDe(JsonComNumero("0.0")).QuantidadeFixa);
+        Assert.True(MetadataDe(JsonComNumero("1.0")).QuantidadeFixa);
+    }
+
     [Fact] // GATE 107N-R1: string vazia e whitespace ⇒ DESCONHECIDO, NUNCA false.
     public void Json_FlagsVaziaOuWhitespace_PreservamDesconhecido()
     {
