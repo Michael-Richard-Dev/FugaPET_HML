@@ -75,6 +75,18 @@ BEGIN
         RAISE EXCEPTION '058 PRECHECK: ck_045_etapa_tentativa_periodo ausente';
     END IF;
 
+    IF NOT EXISTS (
+        SELECT 1
+          FROM pg_trigger t
+          JOIN pg_proc p ON p.oid=t.tgfoid
+         WHERE t.tgrelid='homologacao.hu_caixa_etapa_sap_tentativa'::regclass
+           AND t.tgname='trg_045_etapa_tentativa_append_only'
+           AND NOT t.tgisinternal
+           AND p.proname='fn_pa_045_etapa_tentativa_prepared_claim_guard'
+    ) THEN
+        RAISE EXCEPTION '058 POSTCHECK: trigger tentativa nao usa prepared-claim guard';
+    END IF;
+
     IF has_table_privilege('fugapet_q_app','homologacao.hu_caixa_etapa_sap_item','INSERT')
        OR has_table_privilege('fugapet_q_app','homologacao.hu_caixa_etapa_sap_item','UPDATE')
        OR has_table_privilege('fugapet_q_app','homologacao.hu_caixa_etapa_sap_item','DELETE') THEN
@@ -93,7 +105,8 @@ BEGIN
              'fn_pa_045_261_inserir_itens',
              'fn_pa_045_261_preparar_tentativa',
              'fn_pa_045_261_readback',
-             'fn_pa_045_claim_etapa_preparada'
+             'fn_pa_045_claim_etapa_preparada',
+             'fn_pa_045_etapa_tentativa_prepared_claim_guard'
            )
     ) THEN
         RAISE EXCEPTION '058 PRECHECK: objeto funcional 058 ja existe';
@@ -131,6 +144,71 @@ ALTER TABLE homologacao.hu_caixa_etapa_sap_tentativa
             AND claim_expira_em>claim_obtido_em
         )
     );
+
+-- --------------------------------------------------------------------------
+-- Tentativa 045 permanece historica/imutavel, com UMA transicao focal:
+-- PREPARED (claim trio NULL) -> CLAIMED (claim trio completo).
+-- Nenhuma identidade, numero, request ou ator pode mudar.
+-- --------------------------------------------------------------------------
+CREATE FUNCTION homologacao.fn_pa_045_etapa_tentativa_prepared_claim_guard()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path TO 'pg_catalog','homologacao'
+AS $fn$
+DECLARE
+    v_owner name;
+BEGIN
+    SELECT pg_get_userbyid(c.relowner)
+      INTO v_owner
+      FROM pg_class c
+     WHERE c.oid=TG_RELID;
+
+    IF current_user<>v_owner THEN
+        RAISE EXCEPTION
+          'PA045_DML_DIRETO_TENTATIVA_BLOQUEADO_USE_FUNCOES_CONTROLADAS usuario=%',
+          current_user;
+    END IF;
+
+    IF TG_OP='INSERT' THEN
+        RETURN NEW;
+    END IF;
+
+    IF TG_OP='DELETE' THEN
+        RAISE EXCEPTION 'PA045_TENTATIVA_APPEND_ONLY operacao=DELETE';
+    END IF;
+
+    IF OLD.claim_token IS NULL
+       AND OLD.claim_obtido_em IS NULL
+       AND OLD.claim_expira_em IS NULL
+       AND NEW.claim_token IS NOT NULL
+       AND NEW.claim_obtido_em IS NOT NULL
+       AND NEW.claim_expira_em IS NOT NULL
+       AND NEW.claim_expira_em>NEW.claim_obtido_em
+       AND NEW.codigo_hu_caixa_etapa_sap_tentativa IS NOT DISTINCT FROM OLD.codigo_hu_caixa_etapa_sap_tentativa
+       AND NEW.codigo_hu_caixa_etapa_sap IS NOT DISTINCT FROM OLD.codigo_hu_caixa_etapa_sap
+       AND NEW.numero_tentativa IS NOT DISTINCT FROM OLD.numero_tentativa
+       AND NEW.correlation_id IS NOT DISTINCT FROM OLD.correlation_id
+       AND NEW.request_sanitizado IS NOT DISTINCT FROM OLD.request_sanitizado
+       AND NEW.usuario_operacao IS NOT DISTINCT FROM OLD.usuario_operacao
+       AND NEW.terminal_operacao IS NOT DISTINCT FROM OLD.terminal_operacao
+       AND NEW.criado_em IS NOT DISTINCT FROM OLD.criado_em THEN
+        RETURN NEW;
+    END IF;
+
+    RAISE EXCEPTION
+      'PA045_TENTATIVA_APPEND_ONLY_TRANSICAO_INVALIDA operacao=% tentativa=%',
+      TG_OP,OLD.codigo_hu_caixa_etapa_sap_tentativa;
+END
+$fn$;
+
+DROP TRIGGER trg_045_etapa_tentativa_append_only
+ON homologacao.hu_caixa_etapa_sap_tentativa;
+
+CREATE TRIGGER trg_045_etapa_tentativa_append_only
+BEFORE INSERT OR UPDATE OR DELETE
+ON homologacao.hu_caixa_etapa_sap_tentativa
+FOR EACH ROW
+EXECUTE FUNCTION homologacao.fn_pa_045_etapa_tentativa_prepared_claim_guard();
 
 -- --------------------------------------------------------------------------
 -- 057 hardening:
@@ -1024,11 +1102,15 @@ SET search_path TO 'pg_catalog','homologacao'
 AS $fn$
 DECLARE
     v_terminal varchar(120);
-    v_now timestamptz:=clock_timestamp();
     v homologacao.hu_caixa_etapa_sap%ROWTYPE;
     v_numero integer;
     v_item_count integer;
     v_max_ordinal integer;
+    v_claim_token uuid;
+    v_claim_obtido_em timestamptz;
+    v_claim_expira_em timestamptz;
+    v_attempt_rows integer;
+    v_stage_rows integer;
 BEGIN
     v_terminal:=homologacao.fn_pa_045_validar_ator(p_usuario,p_terminal);
 
@@ -1090,12 +1172,36 @@ BEGIN
           p_tentativa,v_item_count,v_max_ordinal;
     END IF;
 
+    -- Um unico claim e um unico par temporal para ETAPA + TENTATIVA.
+    v_claim_token:=gen_random_uuid();
+    v_claim_obtido_em:=clock_timestamp();
+    v_claim_expira_em:=v_claim_obtido_em+interval '5 minutes';
+
+    UPDATE homologacao.hu_caixa_etapa_sap_tentativa
+       SET claim_token=v_claim_token,
+           claim_obtido_em=v_claim_obtido_em,
+           claim_expira_em=v_claim_expira_em
+     WHERE codigo_hu_caixa_etapa_sap_tentativa=p_tentativa
+       AND codigo_hu_caixa_etapa_sap=v.codigo_hu_caixa_etapa_sap
+       AND numero_tentativa=v_numero
+       AND claim_token IS NULL
+       AND claim_obtido_em IS NULL
+       AND claim_expira_em IS NULL;
+
+    GET DIAGNOSTICS v_attempt_rows=ROW_COUNT;
+
+    IF v_attempt_rows<>1 THEN
+        RAISE EXCEPTION
+          'PA045_261_CLAIM_PREPARADA_ATTEMPT_ROWCOUNT tentativa=% esperado=1 obtido=%',
+          p_tentativa,v_attempt_rows;
+    END IF;
+
     UPDATE homologacao.hu_caixa_etapa_sap
        SET status_etapa='ENVIANDO_SAP',
-           claim_token=gen_random_uuid(),
-           claim_obtido_em=v_now,
-           claim_expira_em=v_now+interval '5 minutes',
-           iniciado_em=v_now,
+           claim_token=v_claim_token,
+           claim_obtido_em=v_claim_obtido_em,
+           claim_expira_em=v_claim_expira_em,
+           iniciado_em=v_claim_obtido_em,
            http_status=NULL,
            response_sanitizado=NULL,
            erro_sanitizado=NULL,
@@ -1104,15 +1210,38 @@ BEGIN
            pode_reprocessar=false,
            usuario_operacao=p_usuario,
            terminal_operacao=v_terminal,
-           atualizado_em=v_now
+           atualizado_em=v_claim_obtido_em
      WHERE codigo_hu_caixa_etapa_sap=v.codigo_hu_caixa_etapa_sap
        AND status_etapa='PRONTA_PARA_ENVIO'
        AND numero_tentativa=v_numero
        AND claim_token IS NULL
+       AND claim_obtido_em IS NULL
+       AND claim_expira_em IS NULL
      RETURNING * INTO v;
 
-    IF NOT FOUND THEN
-        RETURN;
+    GET DIAGNOSTICS v_stage_rows=ROW_COUNT;
+
+    IF v_stage_rows<>1 THEN
+        RAISE EXCEPTION
+          'PA045_261_CLAIM_PREPARADA_STAGE_ROWCOUNT tentativa=% esperado=1 obtido=%',
+          p_tentativa,v_stage_rows;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+          FROM homologacao.hu_caixa_etapa_sap_tentativa t
+         WHERE t.codigo_hu_caixa_etapa_sap_tentativa=p_tentativa
+           AND t.numero_tentativa=v.numero_tentativa
+           AND t.claim_token IS NOT DISTINCT FROM v.claim_token
+           AND t.claim_obtido_em IS NOT DISTINCT FROM v.claim_obtido_em
+           AND t.claim_expira_em IS NOT DISTINCT FROM v.claim_expira_em
+           AND t.claim_token IS NOT NULL
+           AND t.claim_obtido_em IS NOT NULL
+           AND t.claim_expira_em IS NOT NULL
+    ) THEN
+        RAISE EXCEPTION
+          'PA045_261_CLAIM_PREPARADA_PERSISTENCIA_DIVERGENTE tentativa=%',
+          p_tentativa;
     END IF;
 
     RETURN NEXT v;

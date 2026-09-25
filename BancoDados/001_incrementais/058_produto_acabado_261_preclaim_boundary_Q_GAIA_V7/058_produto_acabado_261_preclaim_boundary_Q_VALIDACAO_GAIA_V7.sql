@@ -42,6 +42,29 @@ BEGIN
         RAISE EXCEPTION '058 VALIDACAO: claim-state constraint divergente';
     END IF;
 
+    IF NOT EXISTS (
+        SELECT 1
+          FROM pg_trigger t
+          JOIN pg_proc p ON p.oid=t.tgfoid
+         WHERE t.tgrelid='homologacao.hu_caixa_etapa_sap_tentativa'::regclass
+           AND t.tgname='trg_045_etapa_tentativa_append_only'
+           AND NOT t.tgisinternal
+           AND p.proname='fn_pa_045_etapa_tentativa_prepared_claim_guard'
+    ) THEN
+        RAISE EXCEPTION '058 VALIDACAO: trigger tentativa nao usa prepared-claim guard';
+    END IF;
+
+    SELECT pg_get_functiondef(
+        'homologacao.fn_pa_045_etapa_tentativa_prepared_claim_guard()'::regprocedure
+    ) INTO v_def;
+
+    IF v_def NOT LIKE '%OLD.claim_token IS NULL%'
+       OR v_def NOT LIKE '%NEW.claim_token IS NOT NULL%'
+       OR v_def NOT LIKE '%NEW.numero_tentativa IS NOT DISTINCT FROM OLD.numero_tentativa%'
+       OR v_def NOT LIKE '%TRANSICAO_INVALIDA%' THEN
+        RAISE EXCEPTION '058 VALIDACAO: attempt prepared->claimed guard divergente';
+    END IF;
+
     SELECT count(*) INTO v_count
       FROM pg_proc p
       JOIN pg_namespace n ON n.oid=p.pronamespace
@@ -91,9 +114,19 @@ BEGIN
     ) INTO v_def;
 
     IF v_def NOT LIKE '%status_etapa=''ENVIANDO_SAP''%'
-       OR v_def NOT LIKE '%numero_tentativa=v_numero%'
-       OR v_def LIKE '%numero_tentativa=numero_tentativa+1%' THEN
-        RAISE EXCEPTION '058 VALIDACAO: prepared claim nao preserva mesma tentativa';
+       OR v_def NOT LIKE '%UPDATE homologacao.hu_caixa_etapa_sap_tentativa%'
+       OR v_def NOT LIKE '%claim_token=v_claim_token%'
+       OR v_def NOT LIKE '%claim_obtido_em=v_claim_obtido_em%'
+       OR v_def NOT LIKE '%claim_expira_em=v_claim_expira_em%'
+       OR v_def NOT LIKE '%GET DIAGNOSTICS v_attempt_rows=ROW_COUNT%'
+       OR v_def NOT LIKE '%GET DIAGNOSTICS v_stage_rows=ROW_COUNT%'
+       OR v_def NOT LIKE '%v_attempt_rows<>1%'
+       OR v_def NOT LIKE '%v_stage_rows<>1%'
+       OR regexp_count(v_def,'gen_random_uuid\(\)')<>1
+       OR regexp_count(v_def,'clock_timestamp\(\)')<>1
+       OR v_def LIKE '%numero_tentativa=numero_tentativa+1%'
+       OR v_def LIKE '%INSERT INTO homologacao.hu_caixa_etapa_sap_tentativa%' THEN
+        RAISE EXCEPTION '058 VALIDACAO: prepared claim atomico etapa+tentativa divergente';
     END IF;
 
     SELECT pg_get_functiondef(
@@ -170,6 +203,52 @@ BEGIN
        OR v_def NOT LIKE '%numero_tentativa=numero_tentativa+1%' THEN
         RAISE EXCEPTION '058 VALIDACAO: backward-compatible claim guard ausente';
     END IF;
+
+    -- Estado impossível após claim focal: etapa ENVIANDO sem tentativa corrente CLAIMED.
+    IF EXISTS (
+        SELECT 1
+          FROM homologacao.hu_caixa_etapa_sap e
+         WHERE e.etapa_sap='261'
+           AND e.status_etapa='ENVIANDO_SAP'
+           AND NOT EXISTS (
+               SELECT 1
+                 FROM homologacao.hu_caixa_etapa_sap_tentativa t
+                WHERE t.codigo_hu_caixa_etapa_sap=e.codigo_hu_caixa_etapa_sap
+                  AND t.numero_tentativa=e.numero_tentativa
+                  AND t.claim_token IS NOT NULL
+                  AND t.claim_obtido_em IS NOT NULL
+                  AND t.claim_expira_em IS NOT NULL
+           )
+    ) THEN
+        RAISE EXCEPTION '058 VALIDACAO: ENVIANDO_SAP com tentativa autoritativa unclaimed/hibrida';
+    END IF;
+
+    -- Sem CLAIM_REASSUMIDO, o claim inicial da etapa e da tentativa deve ser identico.
+    -- Reassuncao 045 historica troca o claim da etapa e registra evento proprio,
+    -- portanto e excluida deliberadamente deste teste de igualdade inicial.
+    IF EXISTS (
+        SELECT 1
+          FROM homologacao.hu_caixa_etapa_sap e
+          JOIN homologacao.hu_caixa_etapa_sap_tentativa t
+            ON t.codigo_hu_caixa_etapa_sap=e.codigo_hu_caixa_etapa_sap
+           AND t.numero_tentativa=e.numero_tentativa
+         WHERE e.etapa_sap='261'
+           AND e.status_etapa='ENVIANDO_SAP'
+           AND NOT EXISTS (
+               SELECT 1
+                 FROM homologacao.hu_caixa_etapa_sap_evento ev
+                WHERE ev.codigo_hu_caixa_etapa_sap_tentativa=
+                      t.codigo_hu_caixa_etapa_sap_tentativa
+                  AND ev.tipo_evento='CLAIM_REASSUMIDO'
+           )
+           AND (
+               e.claim_token IS DISTINCT FROM t.claim_token
+               OR e.claim_obtido_em IS DISTINCT FROM t.claim_obtido_em
+               OR e.claim_expira_em IS DISTINCT FROM t.claim_expira_em
+           )
+    ) THEN
+        RAISE EXCEPTION '058 VALIDACAO: claim inicial etapa/tentativa divergente';
+    END IF;
 END
 $validation$;
 
@@ -212,6 +291,9 @@ SELECT * FROM homologacao.fn_pa_045_261_total_alocado(
 
 SELECT 'MIGRATION_058_VALIDATION_STATUS=PASS';
 SELECT 'PREPARED_ATTEMPT_RESTART_SUPPORT=SIM';
+SELECT 'PREPARED_TO_CLAIMED_ATTEMPT_ROW=SIM';
+SELECT 'CLAIM_STAGE_ATTEMPT_EQUALITY_VALIDATED=SIM';
+SELECT 'CLAIM_ROWCOUNT_ASSERTS=SIM';
 SELECT 'LATE_INSERT_DB_PROTECTION_FINAL=ACL+OWNER_GUARD+PRONTA_PRECLAIM_ONLY';
 SELECT 'RUNTIME_DIRECT_LEDGER_DML=PROIBIDO';
 SELECT 'BACKWARD_COMPATIBLE=SIM';

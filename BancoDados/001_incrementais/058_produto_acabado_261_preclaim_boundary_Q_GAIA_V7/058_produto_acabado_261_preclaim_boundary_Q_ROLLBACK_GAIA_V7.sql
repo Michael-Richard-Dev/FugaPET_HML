@@ -44,6 +44,18 @@ BEGIN
 END
 $precheck$;
 
+-- Restaura o trigger de tentativa exatamente ao guard append-only 045 anterior.
+DROP TRIGGER trg_045_etapa_tentativa_append_only
+ON homologacao.hu_caixa_etapa_sap_tentativa;
+
+CREATE TRIGGER trg_045_etapa_tentativa_append_only
+BEFORE INSERT OR UPDATE OR DELETE
+ON homologacao.hu_caixa_etapa_sap_tentativa
+FOR EACH ROW
+EXECUTE FUNCTION homologacao.fn_pa_045_historico_append_only();
+
+DROP FUNCTION homologacao.fn_pa_045_etapa_tentativa_prepared_claim_guard();
+
 REVOKE EXECUTE ON FUNCTION homologacao.fn_pa_045_261_contexto_op(text) FROM fugapet_q_app;
 REVOKE EXECUTE ON FUNCTION homologacao.fn_pa_045_261_hard_stops(text,bigint) FROM fugapet_q_app;
 REVOKE EXECUTE ON FUNCTION homologacao.fn_pa_045_261_total_alocado(text) FROM fugapet_q_app;
