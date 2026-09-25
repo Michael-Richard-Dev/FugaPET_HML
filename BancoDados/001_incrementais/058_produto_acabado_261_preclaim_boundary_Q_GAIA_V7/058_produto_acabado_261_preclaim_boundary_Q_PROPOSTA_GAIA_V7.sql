@@ -75,16 +75,43 @@ BEGIN
         RAISE EXCEPTION '058 PRECHECK: ck_045_etapa_tentativa_periodo ausente';
     END IF;
 
+    -- Baseline 057: trigger historico 045 ainda deve apontar para o
+    -- append-only original. O prepared-claim guard 058 ainda NAO pode existir.
     IF NOT EXISTS (
         SELECT 1
           FROM pg_trigger t
           JOIN pg_proc p ON p.oid=t.tgfoid
+          JOIN pg_namespace n ON n.oid=p.pronamespace
          WHERE t.tgrelid='homologacao.hu_caixa_etapa_sap_tentativa'::regclass
            AND t.tgname='trg_045_etapa_tentativa_append_only'
            AND NOT t.tgisinternal
+           AND n.nspname='homologacao'
+           AND p.proname='fn_pa_045_historico_append_only'
+    ) THEN
+        RAISE EXCEPTION
+          '058 PRECHECK: baseline trigger tentativa nao aponta para fn_pa_045_historico_append_only';
+    END IF;
+
+    IF to_regprocedure(
+        'homologacao.fn_pa_045_etapa_tentativa_prepared_claim_guard()'
+    ) IS NOT NULL THEN
+        RAISE EXCEPTION
+          '058 PRECHECK: prepared-claim guard 058 ja existe antes da migration';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+          FROM pg_trigger t
+          JOIN pg_proc p ON p.oid=t.tgfoid
+          JOIN pg_namespace n ON n.oid=p.pronamespace
+         WHERE t.tgrelid='homologacao.hu_caixa_etapa_sap_tentativa'::regclass
+           AND t.tgname='trg_045_etapa_tentativa_append_only'
+           AND NOT t.tgisinternal
+           AND n.nspname='homologacao'
            AND p.proname='fn_pa_045_etapa_tentativa_prepared_claim_guard'
     ) THEN
-        RAISE EXCEPTION '058 POSTCHECK: trigger tentativa nao usa prepared-claim guard';
+        RAISE EXCEPTION
+          '058 POSTCHECK: trigger tentativa nao aponta para prepared-claim guard 058';
     END IF;
 
     IF has_table_privilege('fugapet_q_app','homologacao.hu_caixa_etapa_sap_item','INSERT')
@@ -1378,6 +1405,21 @@ BEGIN
        AND is_nullable='YES';
     IF v_count<>3 THEN
         RAISE EXCEPTION '058 POSTCHECK: trio claim nullable count=%',v_count;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+          FROM pg_trigger t
+          JOIN pg_proc p ON p.oid=t.tgfoid
+          JOIN pg_namespace n ON n.oid=p.pronamespace
+         WHERE t.tgrelid='homologacao.hu_caixa_etapa_sap_tentativa'::regclass
+           AND t.tgname='trg_045_etapa_tentativa_append_only'
+           AND NOT t.tgisinternal
+           AND n.nspname='homologacao'
+           AND p.proname='fn_pa_045_etapa_tentativa_prepared_claim_guard'
+    ) THEN
+        RAISE EXCEPTION
+          '058 POSTCHECK: trigger tentativa nao aponta para prepared-claim guard 058';
     END IF;
 
     IF has_table_privilege('fugapet_q_app','homologacao.hu_caixa_etapa_sap_item','INSERT')

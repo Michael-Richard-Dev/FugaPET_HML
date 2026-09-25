@@ -204,6 +204,56 @@ BEGIN
         RAISE EXCEPTION '058 VALIDACAO: backward-compatible claim guard ausente';
     END IF;
 
+    -- Contrato material 045 de reassuncao:
+    -- stage recebe novo claim_token/obtido/expira;
+    -- evento CLAIM_REASSUMIDO persiste a tentativa + claim_token_efetivo;
+    -- evento NAO persiste claim_obtido_em/claim_expira_em.
+    SELECT pg_get_functiondef(
+        'homologacao.fn_pa_045_reassumir_claim_etapa(bigint,character varying,bigint,text)'::regprocedure
+    ) INTO v_def;
+
+    IF v_def NOT LIKE '%status_etapa=''ENVIANDO_SAP''%'
+       OR v_def NOT LIKE '%claim_token=gen_random_uuid()%'
+       OR v_def NOT LIKE '%claim_obtido_em=v_now%'
+       OR v_def NOT LIKE '%claim_expira_em=v_now+interval ''5 minutes''%'
+       OR v_def NOT LIKE '%tipo_evento%'
+       OR v_def NOT LIKE '%CLAIM_REASSUMIDO%'
+       OR v_def NOT LIKE '%claim_token_efetivo%'
+       OR v_def NOT LIKE '%v.claim_token%' THEN
+        RAISE EXCEPTION
+          '058 VALIDACAO: contrato material fn_pa_045_reassumir_claim_etapa divergiu';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+          FROM information_schema.columns
+         WHERE table_schema='homologacao'
+           AND table_name='hu_caixa_etapa_sap_evento'
+           AND column_name IN ('claim_obtido_em','claim_expira_em')
+    ) THEN
+        RAISE EXCEPTION
+          '058 VALIDACAO: contrato evento reassuncao mudou; timestamps de claim passaram a existir e exigem reauditoria';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+          FROM information_schema.columns
+         WHERE table_schema='homologacao'
+           AND table_name='hu_caixa_etapa_sap_evento'
+           AND column_name='claim_token_efetivo'
+           AND data_type='uuid'
+    ) OR NOT EXISTS (
+        SELECT 1
+          FROM information_schema.columns
+         WHERE table_schema='homologacao'
+           AND table_name='hu_caixa_etapa_sap_evento'
+           AND column_name='ocorrido_em'
+           AND data_type='timestamp with time zone'
+    ) THEN
+        RAISE EXCEPTION
+          '058 VALIDACAO: colunas materiais de correlacao CLAIM_REASSUMIDO ausentes/divergentes';
+    END IF;
+
     -- Estado impossível após claim focal: etapa ENVIANDO sem tentativa corrente CLAIMED.
     IF EXISTS (
         SELECT 1
@@ -223,24 +273,31 @@ BEGIN
         RAISE EXCEPTION '058 VALIDACAO: ENVIANDO_SAP com tentativa autoritativa unclaimed/hibrida';
     END IF;
 
-    -- Sem CLAIM_REASSUMIDO, o claim inicial da etapa e da tentativa deve ser identico.
-    -- Reassuncao 045 historica troca o claim da etapa e registra evento proprio,
-    -- portanto e excluida deliberadamente deste teste de igualdade inicial.
+    -- INITIAL CLAIM: sem reassuncao, igualdade etapa/tentativa continua exata.
     IF EXISTS (
         SELECT 1
           FROM homologacao.hu_caixa_etapa_sap e
           JOIN homologacao.hu_caixa_etapa_sap_tentativa t
             ON t.codigo_hu_caixa_etapa_sap=e.codigo_hu_caixa_etapa_sap
            AND t.numero_tentativa=e.numero_tentativa
+          LEFT JOIN LATERAL (
+              SELECT
+                  ev.claim_token_efetivo,
+                  ev.ocorrido_em,
+                  ev.codigo_hu_caixa_etapa_sap_evento
+                FROM homologacao.hu_caixa_etapa_sap_evento ev
+               WHERE ev.codigo_hu_caixa_etapa_sap_tentativa=
+                     t.codigo_hu_caixa_etapa_sap_tentativa
+                 AND ev.tipo_evento='CLAIM_REASSUMIDO'
+                 AND ev.resultado='CLAIM_REASSUMIDO'
+               ORDER BY
+                  ev.ocorrido_em DESC,
+                  ev.codigo_hu_caixa_etapa_sap_evento DESC
+               LIMIT 1
+          ) rr ON true
          WHERE e.etapa_sap='261'
            AND e.status_etapa='ENVIANDO_SAP'
-           AND NOT EXISTS (
-               SELECT 1
-                 FROM homologacao.hu_caixa_etapa_sap_evento ev
-                WHERE ev.codigo_hu_caixa_etapa_sap_tentativa=
-                      t.codigo_hu_caixa_etapa_sap_tentativa
-                  AND ev.tipo_evento='CLAIM_REASSUMIDO'
-           )
+           AND rr.codigo_hu_caixa_etapa_sap_evento IS NULL
            AND (
                e.claim_token IS DISTINCT FROM t.claim_token
                OR e.claim_obtido_em IS DISTINCT FROM t.claim_obtido_em
@@ -248,6 +305,48 @@ BEGIN
            )
     ) THEN
         RAISE EXCEPTION '058 VALIDACAO: claim inicial etapa/tentativa divergente';
+    END IF;
+
+    -- REASSUMPTION: evento historico por si so NAO isenta mismatch.
+    -- A autoridade e o CLAIM_REASSUMIDO mais recente da MESMA tentativa,
+    -- e seu claim_token_efetivo deve ser exatamente o claim corrente da etapa.
+    -- O evento 045 nao persiste obtained/expiry; esses timestamps sao validados
+    -- pela propria politica de TTL da etapa (T2=T1+5min), sem correlacao inventada.
+    IF EXISTS (
+        SELECT 1
+          FROM homologacao.hu_caixa_etapa_sap e
+          JOIN homologacao.hu_caixa_etapa_sap_tentativa t
+            ON t.codigo_hu_caixa_etapa_sap=e.codigo_hu_caixa_etapa_sap
+           AND t.numero_tentativa=e.numero_tentativa
+          JOIN LATERAL (
+              SELECT
+                  ev.claim_token_efetivo,
+                  ev.ocorrido_em,
+                  ev.codigo_hu_caixa_etapa_sap_evento
+                FROM homologacao.hu_caixa_etapa_sap_evento ev
+               WHERE ev.codigo_hu_caixa_etapa_sap_tentativa=
+                     t.codigo_hu_caixa_etapa_sap_tentativa
+                 AND ev.tipo_evento='CLAIM_REASSUMIDO'
+                 AND ev.resultado='CLAIM_REASSUMIDO'
+               ORDER BY
+                  ev.ocorrido_em DESC,
+                  ev.codigo_hu_caixa_etapa_sap_evento DESC
+               LIMIT 1
+          ) rr ON true
+         WHERE e.etapa_sap='261'
+           AND e.status_etapa='ENVIANDO_SAP'
+           AND (
+               rr.claim_token_efetivo IS DISTINCT FROM e.claim_token
+               OR e.claim_token IS NULL
+               OR e.claim_obtido_em IS NULL
+               OR e.claim_expira_em IS NULL
+               OR e.claim_expira_em IS DISTINCT FROM
+                  (e.claim_obtido_em + interval '5 minutes')
+               OR rr.ocorrido_em < t.claim_expira_em
+           )
+    ) THEN
+        RAISE EXCEPTION
+          '058 VALIDACAO: reassuncao corrente nao correlaciona token/TTL com etapa';
     END IF;
 END
 $validation$;
@@ -294,6 +393,13 @@ SELECT 'PREPARED_ATTEMPT_RESTART_SUPPORT=SIM';
 SELECT 'PREPARED_TO_CLAIMED_ATTEMPT_ROW=SIM';
 SELECT 'CLAIM_STAGE_ATTEMPT_EQUALITY_VALIDATED=SIM';
 SELECT 'CLAIM_ROWCOUNT_ASSERTS=SIM';
+SELECT 'PRECHECK_TARGET_CONFUSION=NAO';
+SELECT 'INITIAL_CLAIM_MISMATCH_DETECTED=SIM';
+SELECT 'HISTORICAL_REASSUMPTION_EVENT_ALONE_EXEMPTS_MISMATCH=NAO';
+SELECT 'REASSUMPTION_CORRELATION=MATERIALMENTE_COMPROVADA_POR_LATEST_EVENT+CURRENT_STAGE_TOKEN';
+SELECT 'REASSUMPTION_EVENT_HAS_CLAIM_TOKEN=SIM';
+SELECT 'REASSUMPTION_EVENT_HAS_OBTAINED_AT=NAO';
+SELECT 'REASSUMPTION_EVENT_HAS_EXPIRES_AT=NAO';
 SELECT 'LATE_INSERT_DB_PROTECTION_FINAL=ACL+OWNER_GUARD+PRONTA_PRECLAIM_ONLY';
 SELECT 'RUNTIME_DIRECT_LEDGER_DML=PROIBIDO';
 SELECT 'BACKWARD_COMPATIBLE=SIM';
