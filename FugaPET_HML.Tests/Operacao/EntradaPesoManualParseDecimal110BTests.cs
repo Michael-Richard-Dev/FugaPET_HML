@@ -56,11 +56,12 @@ public sealed class EntradaPesoManualParseDecimal110BTests
     {
         Assert.Equal(4155.461m, Normalizar("4155,461"));
         Assert.Equal(4155.461m, Normalizar("4155.461"));
-        Assert.Equal(4155.461m, Normalizar("4.155,461"));
-        Assert.Equal(4155.461m, Normalizar("4,155.461"));
 
-        // A forma agrupada sem decimal é ambígua e por isso BLOQUEIA (nunca vira 4155461).
+        // GATE 110B-R2: as formas com separador de milhar BLOQUEIAM — nenhuma delas vira 4155461.
+        Bloquear("4.155,461");
+        Bloquear("4,155.461");
         Bloquear("4.155.461");
+        Bloquear("4,155,461");
     }
 
     // ==================================================================
@@ -90,44 +91,43 @@ public sealed class EntradaPesoManualParseDecimal110BTests
     }
 
     // ==================================================================
-    // GATE 110B-R1 §1/§3 — separador único ambíguo por agrupamento ⇒ BLOCK
+    // GATE 110B-R2 §2/§3 — separador ÚNICO é sempre DECIMAL (sem milhar)
     // ==================================================================
 
-    [Theory] // Forma que também é inteiro agrupado legítimo ⇒ BLOQUEIA (não escolher por conta própria).
-    [InlineData("4.155")]
-    [InlineData("4,155")]
-    [InlineData("12.345")]
-    [InlineData("12,345")]
-    [InlineData("999.999")]
-    [InlineData("999,999")]
-    [InlineData("1.000")]
-    [InlineData("1,000")]
-    public void SeparadorUnicoComTresDigitos_AmbiguoPorMilhar_Bloqueia(string entrada)
-    {
-        string erro = Bloquear(entrada);
-
-        Assert.Contains("ambíguo", erro, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("separador de milhar", erro, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Theory] // NÃO é ambíguo: o grupo inicial tem 4+ dígitos, logo não é agrupamento válido de milhar.
-    [InlineData("4155.461", "4155.461")]
-    [InlineData("4155,461", "4155.461")]
-    [InlineData("12345.678", "12345.678")]
-    [InlineData("99999,999", "99999.999")]
-    public void SeparadorUnicoComGrupoInicialDeQuatroDigitos_EhDecimal(string entrada, string esperado)
+    [Theory] // O caso que o R1 bloqueava indevidamente: peso legítimo de 4,155 KG.
+    [InlineData("4,155", "4.155")]
+    [InlineData("4.155", "4.155")]
+    [InlineData("12,345", "12.345")]
+    [InlineData("12.345", "12.345")]
+    [InlineData("999,999", "999.999")]
+    [InlineData("999.999", "999.999")]
+    [InlineData("1,000", "1")]
+    [InlineData("1.000", "1")]
+    public void SeparadorUnico_EhSempreDecimal(string entrada, string esperado)
     {
         Assert.True(
             ProcessoEntradaProdutoForm.TryNormalizeWeight(entrada, out string normalizado, out string? erro), erro);
 
-        Assert.Equal(esperado, normalizado);
+        Assert.Equal(
+            decimal.Parse(esperado, CultureInfo.InvariantCulture),
+            decimal.Parse(normalizado, CultureInfo.InvariantCulture));
     }
 
-    [Theory] // NÃO é ambíguo: menos de 3 casas decimais não tem leitura como agrupamento.
+    [Fact] // 4,155 KG é um valor pequeno e legítimo — nunca deve ser lido como 4155 KG.
+    public void QuatroVirgulaCentoCinquentaCinco_EhQuatroKgEFracao()
+    {
+        Assert.Equal(4.155m, Normalizar("4,155"));
+        Assert.Equal(4.155m, Normalizar("4.155"));
+        Assert.NotEqual(4155m, Normalizar("4,155"));
+    }
+
+    [Theory] // Menos de 3 casas e zero à esquerda seguem decimais (contrato uniforme).
     [InlineData("4.15", "4.15")]
     [InlineData("4,1", "4.1")]
     [InlineData("12.5", "12.5")]
-    public void SeparadorUnicoComMenosDeTresDigitos_EhDecimal(string entrada, string esperado)
+    [InlineData("0,001", "0.001")]
+    [InlineData("0.001", "0.001")]
+    public void SeparadorUnicoComQualquerPrecisaoAte3_EhDecimal(string entrada, string esperado)
     {
         Assert.True(
             ProcessoEntradaProdutoForm.TryNormalizeWeight(entrada, out string normalizado, out string? erro), erro);
@@ -135,63 +135,54 @@ public sealed class EntradaPesoManualParseDecimal110BTests
         Assert.Equal(esperado, normalizado);
     }
 
-    [Theory] // Zero à esquerda não é agrupamento legítimo de milhar ⇒ permanece decimal.
-    [InlineData("0,001", "0.001")]
-    [InlineData("0.001", "0.001")]
-    [InlineData("0,500", "0.5")]
-    public void PrimeiroGrupoComZeroAEsquerda_NaoEhAmbiguo(string entrada, string esperado)
-    {
-        Assert.True(
-            ProcessoEntradaProdutoForm.TryNormalizeWeight(entrada, out string normalizado, out string? erro), erro);
+    // ==================================================================
+    // GATE 110B-R2 §4 — separador de milhar NÃO é suportado ⇒ BLOCK
+    // ==================================================================
 
-        Assert.Equal(decimal.Parse(esperado, CultureInfo.InvariantCulture), Normalizar(entrada));
-        Assert.False(string.IsNullOrEmpty(normalizado));
+    [Theory] // Mais de um separador, ou ',' e '.' juntos: só poderia ser milhar ⇒ BLOQUEIA.
+    [InlineData("4.155,461")]
+    [InlineData("4,155.461")]
+    [InlineData("4.155.461")]
+    [InlineData("4,155,461")]
+    [InlineData("1.000,5")]
+    [InlineData("1,000.5")]
+    [InlineData("1.234.567,89")]
+    [InlineData("1,234,567.89")]
+    [InlineData("4,155,461.5")]
+    public void SeparadorDeMilhar_Bloqueia(string entrada)
+    {
+        string erro = Bloquear(entrada);
+
+        Assert.Contains("separador de milhar", erro, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("apenas um separador decimal", erro, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact] // Desambiguação explícita: com agrupamento declarado, o valor é aceito.
-    public void FormaExplicitaComAgrupamento_ResolveAAmbiguidade()
+    [Fact] // §6: a mensagem de "valor ambíguo" foi removida do contrato.
+    public void MensagemDeValorAmbiguo_NaoExisteMais()
     {
-        Bloquear("4.155");
-        Assert.Equal(4155m, Normalizar("4155"));
-        Assert.Equal(4155.461m, Normalizar("4.155,461"));
+        foreach (string entrada in new[] { "4.155,461", "4,155.461", "4.155.461", "1.000,5" })
+        {
+            Assert.DoesNotContain("ambíg", Bloquear(entrada), StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     // ==================================================================
     // §4 AMBIGUIDADE
     // ==================================================================
 
-    [Theory] // Dois tipos de separador: o de última ocorrência é o decimal; o outro precisa ser agrupamento válido.
-    [InlineData("4.155,461", "4155.461")]
-    [InlineData("4,155.461", "4155.461")]
-    [InlineData("1.234.567,89", "1234567.89")]
-    [InlineData("1,234,567.89", "1234567.89")]
-    [InlineData("12.345,6", "12345.6")]
-    public void AgrupamentoInequivoco_EhAceito(string entrada, string esperado)
-    {
-        Assert.True(
-            ProcessoEntradaProdutoForm.TryNormalizeWeight(entrada, out string normalizado, out string? erro), erro);
-
-        Assert.Equal(esperado, normalizado);
-    }
-
-    [Theory] // Agrupamento inválido ou combinação impossível ⇒ BLOCK (nunca "adivinhar").
-    [InlineData("4.15,461")]     // grupo de 2 no agrupamento
-    [InlineData("4.1555,461")]   // grupo de 4 no agrupamento
-    [InlineData("4.155.461")]    // mesmo separador repetido, sem decimal
-    [InlineData("4,155,461")]
-    [InlineData("4.155,461,2")]  // decimal repetido
+    [Theory] // Combinações inválidas de separador ⇒ BLOCK (nenhum separador é removido).
+    [InlineData("4.15,461")]
+    [InlineData("4.1555,461")]
+    [InlineData("12.345,6")]
+    [InlineData("4.155,461,2")]
     [InlineData("4,5.6,7")]
     [InlineData(",461")]         // sem parte inteira
     [InlineData("4155,")]        // sem parte decimal
     [InlineData("4155.")]
     [InlineData(",")]
     [InlineData(".")]
-    public void SeparadoresAmbiguosOuInvalidos_Bloqueiam(string entrada)
+    public void SeparadoresInvalidos_Bloqueiam(string entrada)
         => Bloquear(entrada);
-
-    [Fact] // "4,155,461.5" é agrupamento VÁLIDO com decimal — confirma que a regra não é excessiva.
-    public void AgrupamentoMultiploComDecimal_EhAceito()
-        => Assert.Equal(4155461.5m, Normalizar("4,155,461.5"));
 
     // ==================================================================
     // §5 NEGATIVO / ZERO
@@ -236,7 +227,7 @@ public sealed class EntradaPesoManualParseDecimal110BTests
     [InlineData("4155,4610")]
     [InlineData("4155,4615")]
     [InlineData("0,0001")]
-    [InlineData("1.234,5678")]
+    [InlineData("4155.4610")]
     public void MaisDeTresCasasDecimais_Bloqueia(string entrada)
     {
         string erro = Bloquear(entrada);

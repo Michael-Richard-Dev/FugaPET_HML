@@ -4081,15 +4081,15 @@ public partial class ProcessoEntradaProdutoForm : Form
     /// REMOVIDOS e exigia inteiro, então "4155,461" (4.155,461 KG) virava "4155461" ⇒ 4.155.461 KG,
     /// um erro de fator 1000 aceito silenciosamente. Essa semântica está PROIBIDA.
     ///
-    /// AGORA o separador é INTERPRETADO, nunca descartado:
+    /// AGORA o separador é INTERPRETADO, nunca descartado. Contrato FINAL (110B-R2), sem qualquer
+    /// reconhecimento de separador de milhar — o prompt instrui a não usá-lo:
     ///   • apenas dígitos, ',' e '.' são aceitos — qualquer outro caractere (inclusive '-' e '+') ⇒ BLOCK,
     ///     portanto peso negativo é rejeitado em vez de virar positivo;
-    ///   • dois tipos de separador: o de ÚLTIMA ocorrência é o DECIMAL e o outro precisa ser agrupamento
-    ///     VÁLIDO (1 a 3 dígitos, depois grupos de exatamente 3) — "4.155,461" e "4,155.461" ⇒ 4155.461;
-    ///     agrupamento inválido (ex.: "4.15,461") ⇒ BLOCK;
-    ///   • um único separador, ocorrendo UMA vez ⇒ é DECIMAL ("4155,4" ⇒ 4155.4; "4155.461" ⇒ 4155.461);
-    ///   • o MESMO separador repetido ⇒ BLOCK: é exatamente a forma ambígua/agrupada que originou o
-    ///     incidente ("4.155.461"), e adivinhar aqui é inaceitável (fail-closed);
+    ///   • só dígitos ⇒ inteiro em KG ("4155" ⇒ 4155);
+    ///   • EXATAMENTE um separador, ',' ou '.' ⇒ ele é o DECIMAL ("4155,461" e "4155.461" ⇒ 4155.461;
+    ///     "4,155" e "4.155" ⇒ 4.155; "0,001" ⇒ 0.001);
+    ///   • mais de um separador, ou ',' e '.' juntos ⇒ BLOCK, pois só poderia ser milhar
+    ///     ("4.155,461", "4,155.461", "4.155.461", "1.000,5");
     ///   • mais de 3 casas decimais ⇒ BLOCK, sem arredondar em silêncio (alinhado a numeric(14,3));
     ///   • zero e valores não positivos ⇒ BLOCK.
     /// </summary>
@@ -4116,13 +4116,14 @@ public partial class ProcessoEntradaProdutoForm : Form
         }
 
         if (!TrySepararParteInteiraEDecimal(
-                texto, out string parteInteira, out string parteDecimal, out bool ambiguoPorMilhar))
+                texto, out string parteInteira, out string parteDecimal, out bool separadorMultiploOuMisto))
         {
-            // GATE 110B-R1 (§3): entrada ambígua NÃO recebe como orientação uma segunda string também
-            // ambígua; a instrução é direta — digite sem separador de milhar.
-            errorMessage = ambiguoPorMilhar
-                ? $"Valor ambíguo. Digite sem separador de milhar. {FormatoPesoManualEsperado}"
-                : $"Peso com separadores inválidos. {FormatoPesoManualEsperado}";
+            // GATE 110B-R2 (§6): a mensagem de "valor ambíguo" foi REMOVIDA — com o contrato final não há
+            // mais interpretação de milhar. Vários separadores (ou ',' e '.' juntos) só podem ser milhar.
+            errorMessage = separadorMultiploOuMisto
+                ? "Não use separador de milhar. Informe apenas um separador decimal. "
+                    + FormatoPesoManualEsperado
+                : $"Peso com separador inválido. {FormatoPesoManualEsperado}";
             return false;
         }
 
@@ -4161,111 +4162,47 @@ public partial class ProcessoEntradaProdutoForm : Form
     }
 
     /// <summary>
-    /// GATE 110B (§4): separa parte inteira e decimal SEM adivinhar. Devolve false quando a combinação de
-    /// separadores não é deterministicamente interpretável (o chamador então BLOQUEIA).
+    /// GATE 110B-R2 (§2): separa parte inteira e decimal pelo contrato FINAL do campo, que NÃO reconhece
+    /// separador de milhar — o prompt instrui explicitamente a não usá-lo. Portanto:
+    ///   • só dígitos ⇒ inteiro em KG;
+    ///   • EXATAMENTE um separador no total (',' ou '.') ⇒ esse separador é o DECIMAL;
+    ///   • mais de um separador, ou ',' e '.' juntos ⇒ false (o chamador BLOQUEIA).
+    /// Nenhum separador é removido e nenhuma heurística de agrupamento é aplicada: a tentativa de
+    /// interpretar milhar (R1) foi REVOGADA porque bloqueava pesos legítimos como 4,155 KG.
+    /// <paramref name="separadorMultiploOuMisto"/> distingue esse caso para a mensagem ao operador.
     /// </summary>
     private static bool TrySepararParteInteiraEDecimal(
         string texto,
         out string parteInteira,
         out string parteDecimal,
-        out bool ambiguoPorMilhar)
+        out bool separadorMultiploOuMisto)
     {
         parteInteira = string.Empty;
         parteDecimal = string.Empty;
-        ambiguoPorMilhar = false;
+        separadorMultiploOuMisto = false;
 
-        int virgulas = texto.Count(caractere => caractere == ',');
-        int pontos = texto.Count(caractere => caractere == '.');
-
-        if (virgulas == 0 && pontos == 0)
+        int separadores = texto.Count(caractere => caractere is ',' or '.');
+        if (separadores == 0)
         {
             parteInteira = texto;
             return parteInteira.Length > 0;
         }
 
-        char decimalSeparador;
-        char? agrupamentoSeparador;
-        if (virgulas > 0 && pontos > 0)
+        if (separadores > 1)
         {
-            // Dois tipos presentes: o de ÚLTIMA ocorrência decide o decimal; o outro só vale como agrupamento.
-            decimalSeparador = texto.LastIndexOf(',') > texto.LastIndexOf('.') ? ',' : '.';
-            agrupamentoSeparador = decimalSeparador == ',' ? '.' : ',';
-
-            // O decimal precisa ocorrer UMA única vez e depois de todo agrupamento.
-            if (texto.Count(caractere => caractere == decimalSeparador) != 1
-                || texto.LastIndexOf(agrupamentoSeparador.Value) > texto.IndexOf(decimalSeparador))
-            {
-                return false;
-            }
-        }
-        else
-        {
-            char presente = virgulas > 0 ? ',' : '.';
-            // O MESMO separador repetido é ambíguo (agrupamento sem decimal) ⇒ bloqueia (fail-closed).
-            if (texto.Count(caractere => caractere == presente) != 1)
-            {
-                return false;
-            }
-
-            decimalSeparador = presente;
-            agrupamentoSeparador = null;
+            separadorMultiploOuMisto = true;
+            return false;
         }
 
-        int corte = texto.IndexOf(decimalSeparador);
-        string inteiro = texto[..corte];
+        int corte = texto.IndexOfAny([',', '.']);
+        parteInteira = texto[..corte];
         parteDecimal = texto[(corte + 1)..];
 
-        if (parteDecimal.Length == 0 || !parteDecimal.All(char.IsAsciiDigit))
-        {
-            return false;
-        }
-
-        // GATE 110B-R1 (§1/§3): separador ÚNICO com EXATAMENTE 3 dígitos à direita, cuja esquerda também é
-        // um grupo de milhar LEGÍTIMO, é genuinamente ambíguo ("4.155" = 4,155 KG ou 4155 KG) ⇒ BLOQUEIA em
-        // vez de escolher por conta própria. "4155.461" NÃO é ambíguo: o grupo inicial tem 4 dígitos, logo
-        // não é agrupamento válido. Um primeiro grupo com zero à esquerda ("0,001") não é agrupamento
-        // legítimo de milhar, portanto permanece decimal.
-        if (agrupamentoSeparador is null
-            && parteDecimal.Length == 3
-            && EhGrupoInicialDeMilharLegitimo(inteiro))
-        {
-            ambiguoPorMilhar = true;
-            return false;
-        }
-
-        if (agrupamentoSeparador is char agrupamento)
-        {
-            // Agrupamento válido: 1 a 3 dígitos seguidos de grupos de EXATAMENTE 3.
-            string[] grupos = inteiro.Split(agrupamento);
-            if (grupos.Length < 2
-                || grupos[0].Length is < 1 or > 3
-                || grupos.Skip(1).Any(grupo => grupo.Length != 3)
-                || grupos.Any(grupo => !grupo.All(char.IsAsciiDigit)))
-            {
-                return false;
-            }
-
-            inteiro = string.Concat(grupos);
-        }
-
-        if (inteiro.Length == 0 || !inteiro.All(char.IsAsciiDigit))
-        {
-            return false;
-        }
-
-        parteInteira = inteiro;
-        return true;
+        return parteInteira.Length > 0
+            && parteDecimal.Length > 0
+            && parteInteira.All(char.IsAsciiDigit)
+            && parteDecimal.All(char.IsAsciiDigit);
     }
-
-    /// <summary>
-    /// GATE 110B-R1: true quando o texto poderia ser o PRIMEIRO grupo de um inteiro com separador de
-    /// milhar (1 a 3 dígitos, sem zero à esquerda). É o que torna "4.155"/"12,345"/"999.999" ambíguos e
-    /// mantém "0,001" e "4155.461" inequívocos.
-    /// </summary>
-    private static bool EhGrupoInicialDeMilharLegitimo(string inteiro)
-        => inteiro.Length is >= 1 and <= 3
-            && inteiro.All(char.IsAsciiDigit)
-            && inteiro[0] != '0';
 
     private static string GetCellValue(DataGridViewRow row, string columnName)
     {
