@@ -573,28 +573,32 @@ public sealed class EntradaProdutoController
         // numero_item ORIGINAL do banco (ex.: "10"), nao a forma SAP de 5 digitos ("00010").
         bool sucesso = resultadoSap.Sucesso;
 
-        // 2xx SEM MaterialDocument/MaterialDocumentYear (etapa PARSE_RESPOSTA): o SAP provavelmente
-        // CRIOU o documento, mas sem rastreabilidade confirmavel. NAO marcar ERRO_SAP (liberaria
-        // reenvio/duplicacao): mantem o lancamento reservado (ENVIADO_SAP) e sinaliza divergencia
-        // critica — operador nao deve reenviar sem suporte.
-        if (!sucesso
-            && string.Equals(resultadoSap.Etapa, MaterialDocumentSapApiClient.EtapaParse, StringComparison.Ordinal)
-            && resultadoSap.StatusHttp is >= 200 and < 300)
+        // GATE 108C-R1 (§3): resultado do writer CLASSIFICADO antes de montar resultados/atualizar status.
+        // A regra generica `Sucesso=false => ERRO_SAP` e insegura para falhas POSTERIORES AO ENVIO: o POST pode ter
+        // sido entregue e o documento criado. Um unico caminho fail-closed atende todos os indeterminados
+        // (inclui o 2xx-sem-documento que ja existia): mantem o lancamento reservado em ENVIADO_SAP,
+        // NAO chama _atualizarStatusAposEnvioSap (logo nao grava ERRO_SAP no lancamento nem no item),
+        // arma reconciliacao e nao autoriza reenvio cego. Como ENVIADO_SAP esta fora do IN de
+        // elegibilidade (108C §3), a exclusao local permanece BLOQUEADA.
+        if (EhResultadoIndeterminadoAposPost(resultadoSap))
         {
             await Sap.RegistrarFalhaStatusLocalAposSapAsync(
                 codigoLancamento, resultadoSap.MensagemSanitizada, CancellationToken.None);
-            // 2xx sem documento = indeterminado: capability -> RECONCILIACAO_REQUERIDA (sem rearm/retry).
+            // Indeterminado: capability -> RECONCILIACAO_REQUERIDA (sem rearm/retry).
             _capability.MarcarReconciliacao();
             Sap.RegistrarDiagnostico(
-                $"CRITICO envio SAP lancamento {codigoLancamento}: SAP respondeu 2xx sem "
-                + "MaterialDocument/MaterialDocumentYear. O documento pode ter sido criado. NAO reenviar sem suporte.");
+                $"CRITICO envio SAP lancamento {codigoLancamento}: resultado INDETERMINADO apos o POST "
+                + $"(etapa {resultadoSap.Etapa}, status {resultadoSap.StatusHttp?.ToString() ?? "sem resposta HTTP"}). "
+                + "O documento pode ter sido criado. Lancamento mantido em ENVIADO_SAP. "
+                + "NAO reenviar e NAO excluir sem suporte/reconciliacao.");
             return new ResultadoEnvioSapEntrada
             {
                 Cenario = CenarioEnvioSapEntrada.FalhaPersistenciaLocal,
                 Total = itens.Count,
                 StatusLocalAtualizado = false,
                 MensagemCritica = resultadoSap.MensagemSanitizada,
-                Mensagem = "SAP HML: FALHA CRÍTICA — resposta sem documento de material. Não reenviar sem suporte."
+                Mensagem = "SAP HML: FALHA CRÍTICA — resultado indeterminado do SAP. "
+                    + "Não reenviar nem excluir sem suporte."
             };
         }
 
@@ -673,6 +677,54 @@ public sealed class EntradaProdutoController
             Mensagem = sucesso
                 ? $"SAP HML: ENVIADO — documento material {resultadoSap.MaterialDocument}/{resultadoSap.MaterialDocumentYear}"
                 : mensagemFalhaSap
+        };
+    }
+
+    /// <summary>
+    /// GATE 108C-R1 (§3/§7): classifica o resultado do writer 101 como INDETERMINADO (o POST pode ter sido
+    /// entregue e o documento criado) ou como REJEICAO DETERMINISTICA (nada foi criado ⇒ ERRO_SAP permitido).
+    /// Puro, sem I/O, ancorado nos campos reais de <see cref="ResultadoMaterialDocumentSap"/> e nas etapas
+    /// reais do <see cref="MaterialDocumentSapApiClient"/>. Nao cria estado novo de banco.
+    ///
+    /// Defeito coberto (Hermes 108D): o client captura HttpRequestException/timeout/IOException do POST em
+    /// <c>FalhaRede(EtapaPost, ex)</c> e devolve Sucesso=false com StatusHttp=null — ou seja, essas falhas
+    /// NUNCA chegam ao catch de excecao do fluxo e caiam na regra generica que gravava ERRO_SAP.
+    /// </summary>
+    internal static bool EhResultadoIndeterminadoAposPost(ResultadoMaterialDocumentSap resultado)
+    {
+        ArgumentNullException.ThrowIfNull(resultado);
+
+        if (resultado.Sucesso)
+        {
+            return false;
+        }
+
+        // (D) 2xx sem MaterialDocument/MaterialDocumentYear: o SAP provavelmente CRIOU o documento, mas sem
+        // rastreabilidade confirmavel. Regra preexistente, preservada neste mesmo caminho.
+        if (string.Equals(resultado.Etapa, MaterialDocumentSapApiClient.EtapaParse, StringComparison.Ordinal)
+            && resultado.StatusHttp is >= 200 and < 300)
+        {
+            return true;
+        }
+
+        // (§6) Somente a etapa POST caracteriza requisicao materialmente enviada. Falhas comprovadamente ANTERIORES
+        // (CSRF_FETCH, VALIDACAO_URL, MONTAGEM_REQUISICAO, AUTH_HEADER, CLIENTE_CONSTRUCAO) nao postaram
+        // nada: nao sao indeterminadas por efeito SAP e mantem o tratamento seguro existente.
+        if (!string.Equals(resultado.Etapa, MaterialDocumentSapApiClient.EtapaPost, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return resultado.StatusHttp switch
+        {
+            // (A) sem resposta HTTP (rede/TLS/timeout): a requisicao pode ter chegado ao SAP.
+            null => true,
+            // (B) 408 Request Timeout: o SAP pode ter processado apos o timeout.
+            408 => true,
+            // (E) 4xx determinístico (exceto 408): recusa comprovada, nenhum documento criado.
+            >= 400 and < 500 => false,
+            // (C) >= 500 e qualquer outro status nao provado como recusa: fail-closed ⇒ indeterminado.
+            _ => true
         };
     }
 
