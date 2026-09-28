@@ -89,11 +89,71 @@ public sealed class EntradaPesoManualParseDecimal110BTests
             Normalizar(entrada));
     }
 
-    [Fact] // Um único separador é SEMPRE decimal — comportamento determinístico e documentado (§4).
-    public void SeparadorUnico_EhSempreDecimal()
+    // ==================================================================
+    // GATE 110B-R1 §1/§3 — separador único ambíguo por agrupamento ⇒ BLOCK
+    // ==================================================================
+
+    [Theory] // Forma que também é inteiro agrupado legítimo ⇒ BLOQUEIA (não escolher por conta própria).
+    [InlineData("4.155")]
+    [InlineData("4,155")]
+    [InlineData("12.345")]
+    [InlineData("12,345")]
+    [InlineData("999.999")]
+    [InlineData("999,999")]
+    [InlineData("1.000")]
+    [InlineData("1,000")]
+    public void SeparadorUnicoComTresDigitos_AmbiguoPorMilhar_Bloqueia(string entrada)
     {
-        Assert.Equal(4.155m, Normalizar("4.155"));
-        Assert.Equal(4.155m, Normalizar("4,155"));
+        string erro = Bloquear(entrada);
+
+        Assert.Contains("ambíguo", erro, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("separador de milhar", erro, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory] // NÃO é ambíguo: o grupo inicial tem 4+ dígitos, logo não é agrupamento válido de milhar.
+    [InlineData("4155.461", "4155.461")]
+    [InlineData("4155,461", "4155.461")]
+    [InlineData("12345.678", "12345.678")]
+    [InlineData("99999,999", "99999.999")]
+    public void SeparadorUnicoComGrupoInicialDeQuatroDigitos_EhDecimal(string entrada, string esperado)
+    {
+        Assert.True(
+            ProcessoEntradaProdutoForm.TryNormalizeWeight(entrada, out string normalizado, out string? erro), erro);
+
+        Assert.Equal(esperado, normalizado);
+    }
+
+    [Theory] // NÃO é ambíguo: menos de 3 casas decimais não tem leitura como agrupamento.
+    [InlineData("4.15", "4.15")]
+    [InlineData("4,1", "4.1")]
+    [InlineData("12.5", "12.5")]
+    public void SeparadorUnicoComMenosDeTresDigitos_EhDecimal(string entrada, string esperado)
+    {
+        Assert.True(
+            ProcessoEntradaProdutoForm.TryNormalizeWeight(entrada, out string normalizado, out string? erro), erro);
+
+        Assert.Equal(esperado, normalizado);
+    }
+
+    [Theory] // Zero à esquerda não é agrupamento legítimo de milhar ⇒ permanece decimal.
+    [InlineData("0,001", "0.001")]
+    [InlineData("0.001", "0.001")]
+    [InlineData("0,500", "0.5")]
+    public void PrimeiroGrupoComZeroAEsquerda_NaoEhAmbiguo(string entrada, string esperado)
+    {
+        Assert.True(
+            ProcessoEntradaProdutoForm.TryNormalizeWeight(entrada, out string normalizado, out string? erro), erro);
+
+        Assert.Equal(decimal.Parse(esperado, CultureInfo.InvariantCulture), Normalizar(entrada));
+        Assert.False(string.IsNullOrEmpty(normalizado));
+    }
+
+    [Fact] // Desambiguação explícita: com agrupamento declarado, o valor é aceito.
+    public void FormaExplicitaComAgrupamento_ResolveAAmbiguidade()
+    {
+        Bloquear("4.155");
+        Assert.Equal(4155m, Normalizar("4155"));
+        Assert.Equal(4155.461m, Normalizar("4.155,461"));
     }
 
     // ==================================================================
@@ -227,6 +287,8 @@ public sealed class EntradaPesoManualParseDecimal110BTests
         Assert.Contains("KG", formato, StringComparison.Ordinal);
         Assert.Contains("3 casas decimais", formato, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("4155,461", formato, StringComparison.Ordinal);
+        // GATE 110B-R1 (§4): o operador precisa ser instruído a NÃO usar separador de milhar.
+        Assert.Contains("separador de milhar", formato, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory] // Toda mensagem de erro orienta o operador com o formato esperado (sem jargão técnico).

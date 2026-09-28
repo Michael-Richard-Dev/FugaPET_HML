@@ -4066,7 +4066,7 @@ public partial class ProcessoEntradaProdutoForm : Form
 
     /// <summary>Formato aceito no campo de peso manual, exibido ao operador (prompt e mensagens de erro).</summary>
     internal const string FormatoPesoManualEsperado =
-        "Informe o peso em KG, com até 3 casas decimais (exemplo: 4155,461).";
+        "Informe o peso em KG, com até 3 casas decimais. Não use separador de milhar. Exemplo: 4155,461.";
 
     // GATE 110B (§6): numeric(14,3) do banco ⇒ no máximo 11 dígitos inteiros. Guarda de PRECISÃO
     // (evita estouro na persistência), NÃO um teto operacional de peso — limites de negócio são Camada 2/3.
@@ -4115,9 +4115,14 @@ public partial class ProcessoEntradaProdutoForm : Form
             return false;
         }
 
-        if (!TrySepararParteInteiraEDecimal(texto, out string parteInteira, out string parteDecimal))
+        if (!TrySepararParteInteiraEDecimal(
+                texto, out string parteInteira, out string parteDecimal, out bool ambiguoPorMilhar))
         {
-            errorMessage = $"Peso com separadores ambíguos. {FormatoPesoManualEsperado}";
+            // GATE 110B-R1 (§3): entrada ambígua NÃO recebe como orientação uma segunda string também
+            // ambígua; a instrução é direta — digite sem separador de milhar.
+            errorMessage = ambiguoPorMilhar
+                ? $"Valor ambíguo. Digite sem separador de milhar. {FormatoPesoManualEsperado}"
+                : $"Peso com separadores inválidos. {FormatoPesoManualEsperado}";
             return false;
         }
 
@@ -4162,10 +4167,12 @@ public partial class ProcessoEntradaProdutoForm : Form
     private static bool TrySepararParteInteiraEDecimal(
         string texto,
         out string parteInteira,
-        out string parteDecimal)
+        out string parteDecimal,
+        out bool ambiguoPorMilhar)
     {
         parteInteira = string.Empty;
         parteDecimal = string.Empty;
+        ambiguoPorMilhar = false;
 
         int virgulas = texto.Count(caractere => caractere == ',');
         int pontos = texto.Count(caractere => caractere == '.');
@@ -4213,6 +4220,19 @@ public partial class ProcessoEntradaProdutoForm : Form
             return false;
         }
 
+        // GATE 110B-R1 (§1/§3): separador ÚNICO com EXATAMENTE 3 dígitos à direita, cuja esquerda também é
+        // um grupo de milhar LEGÍTIMO, é genuinamente ambíguo ("4.155" = 4,155 KG ou 4155 KG) ⇒ BLOQUEIA em
+        // vez de escolher por conta própria. "4155.461" NÃO é ambíguo: o grupo inicial tem 4 dígitos, logo
+        // não é agrupamento válido. Um primeiro grupo com zero à esquerda ("0,001") não é agrupamento
+        // legítimo de milhar, portanto permanece decimal.
+        if (agrupamentoSeparador is null
+            && parteDecimal.Length == 3
+            && EhGrupoInicialDeMilharLegitimo(inteiro))
+        {
+            ambiguoPorMilhar = true;
+            return false;
+        }
+
         if (agrupamentoSeparador is char agrupamento)
         {
             // Agrupamento válido: 1 a 3 dígitos seguidos de grupos de EXATAMENTE 3.
@@ -4236,6 +4256,16 @@ public partial class ProcessoEntradaProdutoForm : Form
         parteInteira = inteiro;
         return true;
     }
+
+    /// <summary>
+    /// GATE 110B-R1: true quando o texto poderia ser o PRIMEIRO grupo de um inteiro com separador de
+    /// milhar (1 a 3 dígitos, sem zero à esquerda). É o que torna "4.155"/"12,345"/"999.999" ambíguos e
+    /// mantém "0,001" e "4155.461" inequívocos.
+    /// </summary>
+    private static bool EhGrupoInicialDeMilharLegitimo(string inteiro)
+        => inteiro.Length is >= 1 and <= 3
+            && inteiro.All(char.IsAsciiDigit)
+            && inteiro[0] != '0';
 
     private static string GetCellValue(DataGridViewRow row, string columnName)
     {
