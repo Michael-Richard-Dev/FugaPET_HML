@@ -171,8 +171,15 @@ public sealed class ExclusaoPesagemRepositorio : RepositorioBase, IExclusaoPesag
     private static async Task<EstadoLancamento> BloquearLancamentoAsync(
         NpgsqlConnection c, NpgsqlTransaction t, long codigoLancamento, CancellationToken ct)
     {
+        // GATE 108C (§3): ERRO_SAP = rejeição SAP DETERMINÍSTICA, na qual nenhum documento foi criado
+        // (AtualizarStatusAposEnvioSapAsync grava a rastreabilidade SOMENTE no sucesso). O envio já trata
+        // ERRO_SAP como reenviável (reserva FINALIZADO_LOCAL/ERRO_SAP → ENVIADO_SAP), portanto a exclusão
+        // local passa a aceitá-lo. As TRÊS provas negativas de documento continuam OBRIGATÓRIAS e são o que
+        // separa a rejeição determinística do indeterminado/confirmado:
+        //   • CONFIRMADO_SAP  ⇒ documento + exercício + enviado_sap_em preenchidos ⇒ reprovado;
+        //   • indeterminado   ⇒ permanece ENVIADO_SAP (fora do IN) ⇒ reprovado.
         const string sql = """
-            SELECT (status_lancamento = 'FINALIZADO_LOCAL'
+            SELECT (status_lancamento IN ('FINALIZADO_LOCAL', 'ERRO_SAP')
                     AND situacao_entrada_produto_lancamento = true
                     AND documento_material_sap IS NULL
                     AND exercicio_documento_material_sap IS NULL
@@ -190,8 +197,12 @@ public sealed class ExclusaoPesagemRepositorio : RepositorioBase, IExclusaoPesag
     private static async Task<bool> BloquearItemElegivelAsync(
         NpgsqlConnection c, NpgsqlTransaction t, long codigoItem, CancellationToken ct)
     {
+        // GATE 108C (§6, alinhamento PROVADO — não estético): AtualizarStatusAposEnvioSapAsync grava
+        // status_item = 'ERRO_SAP' na rejeição determinística (`resultado.Sucesso ? CONFIRMADO_SAP : ERRO_SAP`)
+        // e NÃO escreve documento_material_item nesse caminho. Sem este alinhamento o lançamento liberaria,
+        // mas o item continuaria bloqueando. A prova negativa de documento permanece OBRIGATÓRIA.
         const string sql = """
-            SELECT (status_item = 'FINALIZADO_LOCAL'
+            SELECT (status_item IN ('FINALIZADO_LOCAL', 'ERRO_SAP')
                     AND situacao_entrada_produto_item = true
                     AND documento_material_item IS NULL) AS elegivel
               FROM entrada_produto_item

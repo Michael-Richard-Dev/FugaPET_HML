@@ -540,16 +540,33 @@ public sealed class EntradaProdutoController
         catch (Exception ex)
         {
             string mensagemTecnicaSanitizada = MaterialDocumentSapApiClient.SanitizarExcecaoTecnica(ex);
-            string mensagemFalhaTecnica = "SAP HML: FALHA — documento de material não criado. "
-                + mensagemTecnicaSanitizada;
             Sap.RegistrarDiagnostico(
                 $"Envio SAP: falha tecnica ao criar documento de material (lancamento {codigoLancamento}). "
                 + mensagemTecnicaSanitizada);
-            resultadoSap = ResultadoMaterialDocumentSap.Falha(null, mensagemFalhaTecnica);
 
-            // TIMEOUT/indeterminado (exceção de transporte, sem StatusHttp conclusivo): o POST pode ter
-            // chegado ao SAP. Capability permanece CONSUMIDA -> RECONCILIACAO_REQUERIDA. Sem auto-retry/rearm.
+            // GATE 108C (§4 / achado B2): TIMEOUT ou exceção de transporte é INDETERMINADO — o POST pode ter
+            // chegado ao SAP e criado o documento. Antes, o fluxo seguia com sucesso=false e gravava ERRO_SAP,
+            // o que (com a exclusão pós-rejeição do §3) tornaria excluível uma pesagem possivelmente já
+            // documentada no SAP. Agora alinha-se aos OUTROS caminhos indeterminados deste mesmo fluxo:
+            // mantém o lançamento RESERVADO em ENVIADO_SAP (não chama AtualizarStatusAposEnvioSap, logo não
+            // grava ERRO_SAP), mantém a reconciliação armada e NÃO autoriza reenvio cego. Como ENVIADO_SAP
+            // está fora do IN de elegibilidade, a exclusão local permanece BLOQUEADA — fail-closed.
+            await Sap.RegistrarFalhaStatusLocalAposSapAsync(
+                codigoLancamento, mensagemTecnicaSanitizada, CancellationToken.None);
             _capability.MarcarReconciliacao();
+            Sap.RegistrarDiagnostico(
+                $"CRITICO envio SAP lancamento {codigoLancamento}: resultado de transporte INDETERMINADO "
+                + "(timeout/exceção sem status HTTP conclusivo). O documento pode ter sido criado. "
+                + "Lancamento mantido em ENVIADO_SAP. NAO reenviar e NAO excluir sem suporte/reconciliacao.");
+            return new ResultadoEnvioSapEntrada
+            {
+                Cenario = CenarioEnvioSapEntrada.FalhaPersistenciaLocal,
+                Total = itens.Count,
+                StatusLocalAtualizado = false,
+                MensagemCritica = mensagemTecnicaSanitizada,
+                Mensagem = "SAP HML: FALHA CRÍTICA — resultado indeterminado do SAP. "
+                    + "Não reenviar nem excluir sem suporte."
+            };
         }
 
         // O documento e atomico: ou cria com todos os itens, ou nenhum. O status local usa o
