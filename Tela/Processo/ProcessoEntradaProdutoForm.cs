@@ -2703,10 +2703,18 @@ public partial class ProcessoEntradaProdutoForm : Form
         }
     }
 
-    private static bool TryParsePesoKg(string texto, out decimal peso)
+    internal static bool TryParsePesoKg(string texto, out decimal peso)
     {
         peso = 0m;
         if (string.IsNullOrWhiteSpace(texto))
+        {
+            return false;
+        }
+
+        // GATE 110B (§5): o filtro abaixo descarta o sinal, então um peso NEGATIVO virava POSITIVO
+        // (ex.: "-10" ⇒ 10). Agora a presença de '-' REJEITA a leitura (fail-closed) em vez de mudar
+        // o seu significado. Vale para o peso digitado e para a leitura de balança.
+        if (texto.Contains('-', StringComparison.Ordinal))
         {
             return false;
         }
@@ -4008,7 +4016,11 @@ public partial class ProcessoEntradaProdutoForm : Form
 
         Label messageLabel = new()
         {
-            Text = "Informe o peso utilizado para a linha selecionada.",
+            // GATE 110B (§7): o rótulo passa a declarar a UNIDADE e o formato aceito. Antes não dizia nem
+            // a unidade nem que havia formato, e o operador não tinha como perceber a perda do decimal.
+            Text = "Informe o peso utilizado para a linha selecionada."
+                + Environment.NewLine
+                + FormatoPesoManualEsperado,
             Dock = DockStyle.Top,
             Height = 62,
             Font = new Font("Cascadia Code", 10F, FontStyle.Bold),
@@ -4052,25 +4064,176 @@ public partial class ProcessoEntradaProdutoForm : Form
             : null;
     }
 
-    private static bool TryNormalizeWeight(string input, out string normalizedWeight, out string? errorMessage)
+    /// <summary>Formato aceito no campo de peso manual, exibido ao operador (prompt e mensagens de erro).</summary>
+    internal const string FormatoPesoManualEsperado =
+        "Informe o peso em KG, com até 3 casas decimais (exemplo: 4155,461).";
+
+    // GATE 110B (§6): numeric(14,3) do banco ⇒ no máximo 11 dígitos inteiros. Guarda de PRECISÃO
+    // (evita estouro na persistência), NÃO um teto operacional de peso — limites de negócio são Camada 2/3.
+    private const int MaximoDigitosInteirosPesoManual = 11;
+    private const int MaximoCasasDecimaisPesoManual = 3;
+
+    /// <summary>
+    /// GATE 110B (§3/§4/§5/§6): normaliza o peso MANUAL digitado (sempre em KG) para a forma invariante
+    /// "inteiro[.decimais]" que o fluxo existente consome sem perda de escala.
+    ///
+    /// ANTES (causa material do incidente do pedido 4500000216): o texto tinha TODOS os separadores
+    /// REMOVIDOS e exigia inteiro, então "4155,461" (4.155,461 KG) virava "4155461" ⇒ 4.155.461 KG,
+    /// um erro de fator 1000 aceito silenciosamente. Essa semântica está PROIBIDA.
+    ///
+    /// AGORA o separador é INTERPRETADO, nunca descartado:
+    ///   • apenas dígitos, ',' e '.' são aceitos — qualquer outro caractere (inclusive '-' e '+') ⇒ BLOCK,
+    ///     portanto peso negativo é rejeitado em vez de virar positivo;
+    ///   • dois tipos de separador: o de ÚLTIMA ocorrência é o DECIMAL e o outro precisa ser agrupamento
+    ///     VÁLIDO (1 a 3 dígitos, depois grupos de exatamente 3) — "4.155,461" e "4,155.461" ⇒ 4155.461;
+    ///     agrupamento inválido (ex.: "4.15,461") ⇒ BLOCK;
+    ///   • um único separador, ocorrendo UMA vez ⇒ é DECIMAL ("4155,4" ⇒ 4155.4; "4155.461" ⇒ 4155.461);
+    ///   • o MESMO separador repetido ⇒ BLOCK: é exatamente a forma ambígua/agrupada que originou o
+    ///     incidente ("4.155.461"), e adivinhar aqui é inaceitável (fail-closed);
+    ///   • mais de 3 casas decimais ⇒ BLOCK, sem arredondar em silêncio (alinhado a numeric(14,3));
+    ///   • zero e valores não positivos ⇒ BLOCK.
+    /// </summary>
+    internal static bool TryNormalizeWeight(string input, out string normalizedWeight, out string? errorMessage)
     {
         normalizedWeight = string.Empty;
         errorMessage = null;
 
-        string cleaned = input.Trim().Replace(",", string.Empty).Replace(".", string.Empty);
-        if (string.IsNullOrWhiteSpace(cleaned))
+        string texto = (input ?? string.Empty).Trim();
+        if (texto.Length == 0)
         {
-            errorMessage = "Informe um peso valido.";
+            errorMessage = $"Informe o peso. {FormatoPesoManualEsperado}";
             return false;
         }
 
-        if (!int.TryParse(cleaned, out int weight) || weight < 0)
+        // Nada é removido: qualquer caractere fora de dígito/','/'.' invalida a entrada. Isso rejeita o
+        // sinal negativo em vez de descartá-lo (§5) e rejeita texto, espaços internos e unidades digitadas.
+        if (texto.Any(caractere => !char.IsAsciiDigit(caractere) && caractere is not (',' or '.')))
         {
-            errorMessage = "O peso precisa ser um numero inteiro maior ou igual a zero.";
+            errorMessage = texto.Contains('-', StringComparison.Ordinal)
+                ? $"Peso negativo não é permitido. {FormatoPesoManualEsperado}"
+                : $"Peso inválido: use apenas números e o separador decimal. {FormatoPesoManualEsperado}";
             return false;
         }
 
-        normalizedWeight = weight.ToString();
+        if (!TrySepararParteInteiraEDecimal(texto, out string parteInteira, out string parteDecimal))
+        {
+            errorMessage = $"Peso com separadores ambíguos. {FormatoPesoManualEsperado}";
+            return false;
+        }
+
+        if (parteDecimal.Length > MaximoCasasDecimaisPesoManual)
+        {
+            errorMessage = $"O peso aceita no máximo {MaximoCasasDecimaisPesoManual} casas decimais. "
+                + FormatoPesoManualEsperado;
+            return false;
+        }
+
+        if (parteInteira.Length > MaximoDigitosInteirosPesoManual)
+        {
+            errorMessage = $"Peso fora da precisão suportada. {FormatoPesoManualEsperado}";
+            return false;
+        }
+
+        string invariante = parteDecimal.Length == 0 ? parteInteira : $"{parteInteira}.{parteDecimal}";
+        if (!decimal.TryParse(
+                invariante,
+                System.Globalization.NumberStyles.AllowDecimalPoint,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out decimal peso))
+        {
+            errorMessage = $"Peso inválido. {FormatoPesoManualEsperado}";
+            return false;
+        }
+
+        if (peso <= 0m)
+        {
+            errorMessage = $"O peso precisa ser maior que zero. {FormatoPesoManualEsperado}";
+            return false;
+        }
+
+        normalizedWeight = invariante;
+        return true;
+    }
+
+    /// <summary>
+    /// GATE 110B (§4): separa parte inteira e decimal SEM adivinhar. Devolve false quando a combinação de
+    /// separadores não é deterministicamente interpretável (o chamador então BLOQUEIA).
+    /// </summary>
+    private static bool TrySepararParteInteiraEDecimal(
+        string texto,
+        out string parteInteira,
+        out string parteDecimal)
+    {
+        parteInteira = string.Empty;
+        parteDecimal = string.Empty;
+
+        int virgulas = texto.Count(caractere => caractere == ',');
+        int pontos = texto.Count(caractere => caractere == '.');
+
+        if (virgulas == 0 && pontos == 0)
+        {
+            parteInteira = texto;
+            return parteInteira.Length > 0;
+        }
+
+        char decimalSeparador;
+        char? agrupamentoSeparador;
+        if (virgulas > 0 && pontos > 0)
+        {
+            // Dois tipos presentes: o de ÚLTIMA ocorrência decide o decimal; o outro só vale como agrupamento.
+            decimalSeparador = texto.LastIndexOf(',') > texto.LastIndexOf('.') ? ',' : '.';
+            agrupamentoSeparador = decimalSeparador == ',' ? '.' : ',';
+
+            // O decimal precisa ocorrer UMA única vez e depois de todo agrupamento.
+            if (texto.Count(caractere => caractere == decimalSeparador) != 1
+                || texto.LastIndexOf(agrupamentoSeparador.Value) > texto.IndexOf(decimalSeparador))
+            {
+                return false;
+            }
+        }
+        else
+        {
+            char presente = virgulas > 0 ? ',' : '.';
+            // O MESMO separador repetido é ambíguo (agrupamento sem decimal) ⇒ bloqueia (fail-closed).
+            if (texto.Count(caractere => caractere == presente) != 1)
+            {
+                return false;
+            }
+
+            decimalSeparador = presente;
+            agrupamentoSeparador = null;
+        }
+
+        int corte = texto.IndexOf(decimalSeparador);
+        string inteiro = texto[..corte];
+        parteDecimal = texto[(corte + 1)..];
+
+        if (parteDecimal.Length == 0 || !parteDecimal.All(char.IsAsciiDigit))
+        {
+            return false;
+        }
+
+        if (agrupamentoSeparador is char agrupamento)
+        {
+            // Agrupamento válido: 1 a 3 dígitos seguidos de grupos de EXATAMENTE 3.
+            string[] grupos = inteiro.Split(agrupamento);
+            if (grupos.Length < 2
+                || grupos[0].Length is < 1 or > 3
+                || grupos.Skip(1).Any(grupo => grupo.Length != 3)
+                || grupos.Any(grupo => !grupo.All(char.IsAsciiDigit)))
+            {
+                return false;
+            }
+
+            inteiro = string.Concat(grupos);
+        }
+
+        if (inteiro.Length == 0 || !inteiro.All(char.IsAsciiDigit))
+        {
+            return false;
+        }
+
+        parteInteira = inteiro;
         return true;
     }
 
