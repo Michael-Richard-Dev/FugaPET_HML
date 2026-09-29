@@ -67,13 +67,22 @@ public static class ValidadorAmbienteQ
             return ResultadoValidacaoAmbienteQ.Bloqueado("Ambiente Q bloqueado: sap-client Q dedicado ausente ou invalido.");
         }
 
-        if (configuracao.EscritaHabilitada
-            || configuracao.HuWriteHabilitado
-            || configuracao.ProdutoAcabadoMaterialDocumentWriteHabilitado
-            || configuracao.PalletWriteHabilitado
-            || configuracao.ProdutoAcabadoPipelineHabilitado)
+        // GATE 112D — SAFE_HU_ONLY_STARTUP.
+        // Todos os gates de escrita PERIGOSOS continuam obrigatoriamente false no startup. A ÚNICA exceção é
+        // hu_write_habilitado, e apenas ISOLADA: ele autoriza exclusivamente POST /HandlingUnit no gateway de
+        // HU (ProdutoAcabadoHandlingUnitSapGateway.EscritaHuPermitida recusa qualquer outro método/endpoint) e
+        // NÃO habilita escrita SAP genérica, 101, 261, INT012 de palete nem o pipeline 261→101→HU.
+        // Como qualquer um dos gates abaixo em true BLOQUEIA o startup, alcançar o retorno Ok() com
+        // hu_write_habilitado=true prova que ele está isolado — o cenário HU-only é o único admitido.
+        // Reforço de contrato existente: a própria composição do gateway de HU exige escrita_habilitada=false
+        // (FabricaProdutoAcabadoHandlingUnitSapServico §13), então HU+genérica é incompatível nas duas camadas.
+        string[] gatesPerigososLigados = ObterGatesPerigososLigados(configuracao);
+        if (gatesPerigososLigados.Length > 0)
         {
-            return ResultadoValidacaoAmbienteQ.Bloqueado("Ambiente Q bloqueado: write gates devem iniciar false.");
+            return ResultadoValidacaoAmbienteQ.Bloqueado(
+                "Ambiente Q bloqueado: write gates devem iniciar false — ligado(s): "
+                + string.Join(", ", gatesPerigososLigados)
+                + ". Somente hu_write_habilitado pode iniciar true, e apenas isolado (HU-only).");
         }
 
         return ResultadoValidacaoAmbienteQ.Ok();
@@ -133,6 +142,39 @@ public static class ValidadorAmbienteQ
         Func<CancellationToken, Task<ResultadoProbeBancoQ>> executarProbeReadOnly,
         CancellationToken cancellationToken = default)
         => executarProbeReadOnly(cancellationToken);
+
+    /// <summary>
+    /// GATE 112D: gates de escrita que NUNCA podem iniciar true, com o nome da chave para diagnóstico.
+    /// <c>hu_write_habilitado</c> está DELIBERADAMENTE fora desta lista (SAFE_HU_ONLY_STARTUP): é o único
+    /// gate de escrita que pode iniciar true, e só se todos os desta lista estiverem false.
+    /// </summary>
+    internal static string[] ObterGatesPerigososLigados(ConfiguracaoSap configuracao)
+    {
+        ArgumentNullException.ThrowIfNull(configuracao);
+
+        List<string> ligados = [];
+        if (configuracao.EscritaHabilitada)
+        {
+            ligados.Add("escrita_habilitada (escrita SAP genérica)");
+        }
+
+        if (configuracao.ProdutoAcabadoMaterialDocumentWriteHabilitado)
+        {
+            ligados.Add("pa_material_document_write_habilitado (101 de Produto Acabado)");
+        }
+
+        if (configuracao.PalletWriteHabilitado)
+        {
+            ligados.Add("pallet_write_habilitado (INT012 de palete)");
+        }
+
+        if (configuracao.ProdutoAcabadoPipelineHabilitado)
+        {
+            ligados.Add("pa_pipeline_habilitado (pipeline 261→101→HU)");
+        }
+
+        return [.. ligados];
+    }
 
     private static IEnumerable<string> ObterUrlsSap(ConfiguracaoSap configuracao)
     {
