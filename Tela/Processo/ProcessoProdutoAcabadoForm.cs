@@ -744,11 +744,15 @@ public partial class ProcessoProdutoAcabadoForm : Form
 
         // GATE 113J (§6): o binding 045 é PERSISTENTE e IRREVERSÍVEL. Uma caixa COM etapas 045 nunca pode ser
         // despachada como HU direta — nem após restart/erro/timeout/recovery com o runtime em modo HU_ONLY
-        // (gate do pipeline desligado). Consulta independente do gate; indeterminado ⇒ bloqueia (fail-closed).
-        if (await _controller.PossuiVinculoPipeline045Async(codigo))
+        // (gate do pipeline desligado). A consulta é independente do gate.
+        // GATE 113M (B2): o indeterminado tem mensagem PRÓPRIA — não afirmamos que a caixa "possui vínculo"
+        // quando apenas não foi possível consultar. Ambos bloqueiam; ZERO etapas consultadas liberam (113G).
+        EstadoVinculo045 vinculo045 = await _controller.ConsultarVinculoPipeline045Async(codigo);
+        if (ProdutoAcabadoController.BloqueiaHuDireta(vinculo045))
         {
-            statusLabel.Text = MensagemCaixaVinculadaAoPipeline045;
-            MessageBox.Show(MensagemCaixaVinculadaAoPipeline045, "Produto Acabado", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            string bloqueio045 = MensagemBloqueioVinculo045(vinculo045);
+            statusLabel.Text = bloqueio045;
+            MessageBox.Show(bloqueio045, "Produto Acabado", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
@@ -1021,10 +1025,24 @@ public partial class ProcessoProdutoAcabadoForm : Form
     /// Bloqueia CONFIRMADA_SAP, CANCELADA, ERRO_SAP, INDETERMINADO_TIMEOUT, BLOQUEADA, EM_PESAGEM,
     /// FINALIZADA_LOCAL, PREVIEW_HU_GERADO, ENVIANDO_SAP e qualquer estado futuro (allowlist, não denylist).
     /// </summary>
-    /// <summary>GATE 113J (§6): mensagem única do bloqueio de HU direta em caixa vinculada ao 045.</summary>
+    /// <summary>GATE 113J (§6): bloqueio de HU direta em caixa COMPROVADAMENTE vinculada ao 045.</summary>
     internal const string MensagemCaixaVinculadaAoPipeline045 =
         "Esta caixa possui vínculo 045 (pipeline 261→101→HU) e NÃO pode ser enviada como HU direta. "
         + "Use o fluxo/recovery 045. Nenhum POST executado.";
+
+    /// <summary>
+    /// GATE 113M (B2): bloqueio quando NÃO foi possível consultar o vínculo 045. Mensagem distinta, para não
+    /// afirmar um vínculo que não foi comprovado — o bloqueio é por impossibilidade de prova, não por vínculo.
+    /// </summary>
+    internal const string MensagemVinculo045NaoComprovavel =
+        "Não foi possível comprovar a ausência de vínculo 045; envio HU bloqueado por segurança. "
+        + "Nenhum POST executado.";
+
+    /// <summary>GATE 113M (B2): mensagem correta por estado do vínculo. Pura e testável.</summary>
+    internal static string MensagemBloqueioVinculo045(EstadoVinculo045 estado)
+        => estado == EstadoVinculo045.ConsultaIndisponivel
+            ? MensagemVinculo045NaoComprovavel
+            : MensagemCaixaVinculadaAoPipeline045;
 
     internal static bool CaixaElegivelParaPipeline(ProdutoAcabadoCaixa? caixa)
         => caixa?.CodigoProdutoAcabadoCaixa is long

@@ -27,7 +27,10 @@ public sealed class PaPipelineEarlyBinding113JTests
     {
         public List<string> Log { get; } = [];
         public bool FinalizarLocalOk { get; set; } = true;
-        public StatusIntegracaoCaixa Status { get; set; } = StatusIntegracaoCaixa.AguardandoAutorizacaoSap;
+        // GATE 113M (B1): o fake passa a refletir o CONTRATO REAL — finalizar_local bem-sucedido PERSISTE
+        // FINALIZADA_LOCAL, e a releitura devolve esse estado. Antes ficava fixo em AGUARDANDO, o que
+        // mascarava a ausência da prova de estado persistido.
+        public StatusIntegracaoCaixa Status { get; set; } = StatusIntegracaoCaixa.EmPesagem;
 
         private ProdutoAcabadoCaixa Snapshot(long codigo = 77) => new()
         {
@@ -55,11 +58,15 @@ public sealed class PaPipelineEarlyBinding113JTests
         public Task<long> RegistrarPesagemAsync(RegistroPesagemHuCaixa p, CancellationToken ct = default)
         { Log.Add("registrar_pesagem"); return Task.FromResult(1L); }
         public Task<bool> FinalizarLocalAsync(long c, long u, string t, CancellationToken ct = default)
-        { Log.Add("finalizar_local"); return Task.FromResult(FinalizarLocalOk); }
+        {
+            Log.Add("finalizar_local");
+            if (FinalizarLocalOk) { Status = StatusIntegracaoCaixa.FinalizadaLocal; }
+            return Task.FromResult(FinalizarLocalOk);
+        }
         public Task<bool> SalvarPreviewAsync(long c, string req, string end, CancellationToken ct = default)
-        { Log.Add("salvar_preview"); return Task.FromResult(true); }
+        { Log.Add("salvar_preview"); Status = StatusIntegracaoCaixa.PreviewHuGerado; return Task.FromResult(true); }
         public Task<bool> AguardarAutorizacaoAsync(long c, CancellationToken ct = default)
-        { Log.Add("aguardar_autorizacao"); return Task.FromResult(true); }
+        { Log.Add("aguardar_autorizacao"); Status = StatusIntegracaoCaixa.AguardandoAutorizacaoSap; return Task.FromResult(true); }
         public Task<bool> AutorizarEnvioAsync(long c, long u, string t, CancellationToken ct = default) => Task.FromResult(true);
         public Task<ProdutoAcabadoCaixa?> ClaimEnvioAsync(long c, long u, string t, CancellationToken ct = default)
         { Log.Add("claim_envio"); return Task.FromResult<ProdutoAcabadoCaixa?>(null); }
@@ -320,21 +327,21 @@ public sealed class PaPipelineEarlyBinding113JTests
         int fim = form.IndexOf("private async Task SolicitarEnvioCaixaPipelineAsync", inicio, StringComparison.Ordinal);
         string huOnly = form[inicio..(fim > inicio ? fim : form.Length)];
 
-        Assert.Contains("PossuiVinculoPipeline045Async", huOnly, StringComparison.Ordinal);
-        Assert.Contains("MensagemCaixaVinculadaAoPipeline045", huOnly, StringComparison.Ordinal);
+        // GATE 113M (B2): o guard passou do bool para o tri-estado; o bloqueio segue existindo.
+        Assert.Contains("ConsultarVinculoPipeline045Async", huOnly, StringComparison.Ordinal);
+        Assert.Contains("BloqueiaHuDireta(vinculo045)", huOnly, StringComparison.Ordinal);
 
         // A consulta NÃO depende do gate do pipeline (contrário de VerificarBloqueioPipeline045Async).
         string controller = FonteController();
-        int posMetodo = controller.IndexOf("public async Task<bool> PossuiVinculoPipeline045Async", StringComparison.Ordinal);
+        int posMetodo = controller.IndexOf(
+            "public async Task<EstadoVinculo045> ConsultarVinculoPipeline045Async", StringComparison.Ordinal);
         Assert.True(posMetodo > 0);
-        int fimMetodo = controller.IndexOf(
-            "public async Task<ResultadoBloqueioPipeline045> VerificarBloqueioPipeline045Async",
-            posMetodo,
-            StringComparison.Ordinal);
+        int fimMetodo = controller.IndexOf("internal static bool BloqueiaHuDireta", posMetodo, StringComparison.Ordinal);
         Assert.True(fimMetodo > posMetodo, "delimitador do método não encontrado");
         string corpo = controller[posMetodo..fimMetodo];
         Assert.DoesNotContain("PipelinePaGateHabilitado", corpo, StringComparison.Ordinal);
-        Assert.Contains("return true;", corpo, StringComparison.Ordinal); // fail-closed no catch
+        // fail-closed: indeterminado NUNCA vira "sem vínculo"
+        Assert.Contains("return EstadoVinculo045.ConsultaIndisponivel;", corpo, StringComparison.Ordinal);
     }
 
     [Fact] // J) zero 045 + histórico PREVIEW/AGUARDANDO ⇒ nada de 045 retroativo.

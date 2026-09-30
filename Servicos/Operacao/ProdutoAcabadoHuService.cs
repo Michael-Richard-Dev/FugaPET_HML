@@ -25,6 +25,37 @@ public sealed class ProdutoAcabadoHuService : IProdutoAcabadoHuBridgeServico
     public const string MensagemBindingPipeline045NaoEstabelecido =
         "Fluxo 045 não pôde ser estabelecido para esta caixa; nenhum POST SAP executado.";
 
+    /// <summary>
+    /// GATE 113M (B1): bloqueio quando o estado PERSISTIDO da caixa não comprova FINALIZADA_LOCAL antes do
+    /// early binding. Deliberadamente NÃO menciona reconciliação SAP: nada foi enviado ao SAP aqui.
+    /// </summary>
+    public const string MensagemFinalizacaoLocalNaoComprovada =
+        "Finalização local não pôde ser comprovada no estado persistido; fluxo 045 não iniciado.";
+
+    /// <summary>
+    /// GATE 113M (B1): prova explícita, sobre o snapshot FRESCO, de que a caixa está persistida em
+    /// FINALIZADA_LOCAL e é a MESMA caixa (código confere). Pura e testável; ausente ⇒ false (fail-closed).
+    /// </summary>
+    internal static bool FinalizacaoLocalComprovada(ProdutoAcabadoCaixa? snapshot, long codigoEsperado)
+        => snapshot is not null
+            && snapshot.CodigoProdutoAcabadoCaixa == codigoEsperado
+            && snapshot.StatusIntegracao == StatusIntegracaoCaixa.FinalizadaLocal;
+
+    /// <summary>Releitura que nunca propaga exceção (usada apenas para enriquecer o retorno de bloqueio).</summary>
+    private async Task<ProdutoAcabadoCaixa?> ObterSnapshotSeguroAsync(long codigo, CancellationToken ct)
+    {
+        try
+        {
+            return await _repositorio.ObterPorCodigoAsync(codigo, ct);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                $"[ProdutoAcabado] 113M: releitura auxiliar da caixa {codigo} falhou ({ex.GetType().Name}).");
+            return null;
+        }
+    }
+
     public ProdutoAcabadoHuService(
         IProdutoAcabadoRepositorio repositorio,
         IProdutoAcabadoHandlingUnitSapServico gateway,
@@ -92,18 +123,43 @@ public sealed class ProdutoAcabadoHuService : IProdutoAcabadoHuBridgeServico
                 await _repositorio.ObterPorCodigoAsync(codigo, cancellationToken) ?? persistida);
         }
 
-        // GATE 113J (§2/§3): EARLY BINDING do fluxo 045 — DEPOIS de FinalizarLocalAsync comprovado (a caixa
-        // está em FINALIZADA_LOCAL, um dos DOIS estados que fn_pa_045_iniciar_fluxo aceita) e ANTES de
+        // GATE 113J (§2/§3): EARLY BINDING do fluxo 045 — DEPOIS de FinalizarLocalAsync e ANTES de
         // SalvarPreviewAsync (que move para PREVIEW_HU_GERADO e inicia o lifecycle HU, fechando a janela).
         // Antes do 113J o binding só era tentado no botão ENVIAR, quando a caixa já estava em
-        // AGUANDO_AUTORIZACAO_SAP — estado recusado pela função — tornando o pipeline inalcançável (113I).
-        // O resultado é VERIFICADO: sem binding comprovado, NÃO seguimos para preview/aguardar/SAP/HU.
-        if (_estabelecerBindingPipeline045 is not null
-            && !await _estabelecerBindingPipeline045(codigo, usuario, terminal, cancellationToken))
+        // AGUARDANDO_AUTORIZACAO_SAP — estado recusado pela função — tornando o pipeline inalcançável (113I).
+        //
+        // GATE 113M (B1): o bool de FinalizarLocalAsync NÃO é prova do estado PERSISTIDO. Antes do binding,
+        // relemos a caixa do repositório e comprovamos EXPLICITAMENTE código + FINALIZADA_LOCAL — a janela
+        // que fn_pa_045_iniciar_fluxo aceita. Snapshot ausente, leitura com falha, código divergente ou
+        // status diferente ⇒ FAIL-CLOSED sem binding, sem preview, sem aguardar, sem SAP.
+        if (_estabelecerBindingPipeline045 is not null)
         {
-            return ResultadoFinalizacaoHu.Bloqueado(
-                MensagemBindingPipeline045NaoEstabelecido,
-                await _repositorio.ObterPorCodigoAsync(codigo, cancellationToken) ?? persistida);
+            ProdutoAcabadoCaixa? snapshotFinalizado;
+            try
+            {
+                snapshotFinalizado = await _repositorio.ObterPorCodigoAsync(codigo, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceWarning(
+                    $"[ProdutoAcabado] 113M: releitura da caixa {codigo} apos finalizar_local falhou "
+                    + $"({ex.GetType().Name}); binding 045 NAO executado (fail-closed).");
+                return ResultadoFinalizacaoHu.Bloqueado(MensagemFinalizacaoLocalNaoComprovada, persistida);
+            }
+
+            if (!FinalizacaoLocalComprovada(snapshotFinalizado, codigo))
+            {
+                return ResultadoFinalizacaoHu.Bloqueado(
+                    MensagemFinalizacaoLocalNaoComprovada, snapshotFinalizado ?? persistida);
+            }
+
+            // O resultado do binding é VERIFICADO: sem binding comprovado, não seguimos para preview/aguardar.
+            if (!await _estabelecerBindingPipeline045(codigo, usuario, terminal, cancellationToken))
+            {
+                return ResultadoFinalizacaoHu.Bloqueado(
+                    MensagemBindingPipeline045NaoEstabelecido,
+                    await ObterSnapshotSeguroAsync(codigo, cancellationToken) ?? snapshotFinalizado);
+            }
         }
 
         if (!await _repositorio.SalvarPreviewAsync(codigo, request.JsonSanitizado, request.Endpoint, cancellationToken))

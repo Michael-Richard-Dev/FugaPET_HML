@@ -144,32 +144,47 @@ public sealed class ProdutoAcabadoController
     }
 
     /// <summary>
-    /// GATE 113J (§6): true quando a caixa POSSUI vínculo 045 (uma ou mais etapas). Diferente de
-    /// <see cref="VerificarBloqueioPipeline045Async"/>, NÃO depende do gate do pipeline: o binding 045 é
-    /// persistente e IRREVERSÍVEL, então uma caixa com etapas 045 nunca pode voltar a ser tratada como
-    /// HU-only, inclusive após restart/erro/timeout com o runtime em modo HU_ONLY.
-    /// Indeterminado (falha de consulta) ⇒ true (fail-closed: bloqueia em vez de permitir HU direta).
+    /// GATE 113J (§6) + 113M (B2): estado do vínculo 045 da caixa. NÃO depende do gate do pipeline — o
+    /// binding 045 é persistente e IRREVERSÍVEL, então uma caixa com etapas 045 nunca volta a ser tratada
+    /// como HU-only, inclusive após restart/erro/timeout com o runtime em modo HU_ONLY.
+    ///
+    /// 113M (B2): a AUSÊNCIA de consulta deixou de ser confundida com AUSÊNCIA DE VÍNCULO. Operações 045
+    /// nulas, sem persistência definitiva, ou exceção de leitura ⇒ <see cref="EstadoVinculo045.ConsultaIndisponivel"/>,
+    /// que BLOQUEIA a HU direta (fail-closed) — antes retornava false e liberava o envio.
+    /// ZERO etapas materialmente consultadas continuam significando HU-only legítimo (113G).
     /// </summary>
-    public async Task<bool> PossuiVinculoPipeline045Async(long codigoCaixa, CancellationToken cancellationToken = default)
+    public async Task<EstadoVinculo045> ConsultarVinculoPipeline045Async(
+        long codigoCaixa, CancellationToken cancellationToken = default)
     {
         if (_pipeline045Operacoes is null || !_pipeline045Operacoes.SuportaPersistenciaDefinitiva)
         {
-            return false;
+            System.Diagnostics.Trace.TraceWarning(
+                $"[ProdutoAcabado] 113M: consulta do vinculo 045 da caixa {codigoCaixa} INDISPONIVEL "
+                + "(operacoes 045 ausentes ou sem persistencia definitiva); HU direta bloqueada.");
+            return EstadoVinculo045.ConsultaIndisponivel;
         }
 
         try
         {
-            IReadOnlyList<Linha045> etapas = await _pipeline045Operacoes.LerEstadoEtapasAsync(codigoCaixa, cancellationToken);
-            return etapas.Count > 0;
+            IReadOnlyList<Linha045> etapas =
+                await _pipeline045Operacoes.LerEstadoEtapasAsync(codigoCaixa, cancellationToken);
+            return etapas.Count > 0 ? EstadoVinculo045.ComVinculo : EstadoVinculo045.SemVinculo;
         }
         catch (Exception ex)
         {
             System.Diagnostics.Trace.TraceWarning(
-                $"[ProdutoAcabado] 113J: consulta do vinculo 045 da caixa {codigoCaixa} falhou "
-                + $"({ex.GetType().Name}); tratando como VINCULADA (fail-closed).");
-            return true;
+                $"[ProdutoAcabado] 113M: consulta do vinculo 045 da caixa {codigoCaixa} falhou "
+                + $"({ex.GetType().Name}); tratando como CONSULTA_INDISPONIVEL (fail-closed).");
+            return EstadoVinculo045.ConsultaIndisponivel;
         }
     }
+
+    /// <summary>
+    /// GATE 113M (B2): true quando o envio HU DIRETO deve ser bloqueado. Bloqueia COM_VINCULO (pertence ao
+    /// pipeline) e CONSULTA_INDISPONIVEL (não se pode comprovar a ausência de vínculo). Puro e testável.
+    /// </summary>
+    internal static bool BloqueiaHuDireta(EstadoVinculo045 estado)
+        => estado is EstadoVinculo045.ComVinculo or EstadoVinculo045.ConsultaIndisponivel;
 
     public async Task<ResultadoBloqueioPipeline045> VerificarBloqueioPipeline045Async(long codigoCaixa, CancellationToken cancellationToken = default)
     {
