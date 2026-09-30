@@ -894,6 +894,19 @@ public partial class ProcessoProdutoAcabadoForm : Form
             return;
         }
 
+        // GATE 113E (§3/§4): o caminho do pipeline não validava o ESTADO da caixa (o HU-only sempre validou).
+        // Sem esta guarda, acionar o botão com uma caixa já CONFIRMADA_SAP (ex.: CX-1000210-0006/0007, criadas
+        // em HU-only) postaria 261 e 101 NOVOS antes de a idempotência da etapa HU ser sequer consultada —
+        // a ordem é estrita 261→101→HU. A proteção passa a ser do C#, ANTES de iniciar fluxo 045/claim/POST,
+        // sem depender da recusa do banco.
+        if (!CaixaElegivelParaPipeline(caixa))
+        {
+            string bloqueio = MensagemCaixaInelegivelParaPipeline(caixa);
+            statusLabel.Text = bloqueio;
+            MessageBox.Show(bloqueio, "Produto Acabado", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
         ResultadoBloqueioPipeline045 bloqueioPersistido = await _controller.VerificarBloqueioPipeline045Async(codigo);
         if (bloqueioPersistido.Bloqueado)
         {
@@ -922,11 +935,17 @@ public partial class ProcessoProdutoAcabadoForm : Form
 
         _envioCaixaSapEmAndamento = true;
         AtualizarEstadoEnvioCaixaSap();
+        // GATE 113E (§5): paridade de etiqueta com o HU-only. A impressão só pode ocorrer DEPOIS do bloco
+        // finally, que recarrega o snapshot persistido (autoridade), e SOMENTE com o pipeline integralmente
+        // confirmado. Estas duas variáveis carregam essa decisão para fora do try.
+        bool pipelineConcluido = false;
+        ProdutoAcabadoCaixa? caixaConfirmadaPipeline = null;
         try
         {
             ResultadoPipelineProdutoAcabado resultado = await _controller.EnviarCaixaPipelineAsync(origem, usuario, terminal);
             AtualizarEstadosPipeline(resultado);
             ExibirResultadoOperacionalPipeline(resultado);
+            pipelineConcluido = PipelineConcluidoIntegralmente(resultado);
         }
         catch (Exception ex)
         {
@@ -947,6 +966,7 @@ public partial class ProcessoProdutoAcabadoForm : Form
                 {
                     SubstituirCaixaNoCache(snapshot);
                     _codigoCaixaEnvioIndeterminado = null;
+                    caixaConfirmadaPipeline = snapshot;
                     await AtualizarBloqueioPipeline045PersistidoAsync(codigo);
                 }
                 else
@@ -965,7 +985,46 @@ public partial class ProcessoProdutoAcabadoForm : Form
             AtualizarBotoesOperacao();
             AtualizarSaldoPendente();
         }
+
+        // GATE 113E (§5): etiqueta com a MESMA função do HU-only (ImprimirEtiquetaCaixaAsync), efeito
+        // INDEPENDENTE e isolado — falha de impressão não desfaz SAP, não reenvia etapa e não altera a
+        // confirmação (o método trata a própria exceção). Exige pipeline concluído (261+101 confirmados e HU
+        // ConfirmadaSap) E o snapshot PERSISTIDO comprovando CONFIRMADA_SAP: sem essa dupla prova, não imprime.
+        if (pipelineConcluido
+            && caixaConfirmadaPipeline is { StatusIntegracao: StatusIntegracaoCaixa.ConfirmadaSap })
+        {
+            await ImprimirEtiquetaCaixaAsync(caixaConfirmadaPipeline);
+        }
     }
+
+    /// <summary>
+    /// GATE 113E (§5): true SOMENTE quando o pipeline concluiu integralmente — sucesso declarado E etapa
+    /// final Concluido (que o orquestrador só emite com 261 confirmado, 101 confirmado e HU ConfirmadaSap).
+    /// Puro e testável: é o gatilho da etiqueta, nunca uma etapa parcial.
+    /// </summary>
+    internal static bool PipelineConcluidoIntegralmente(ResultadoPipelineProdutoAcabado? resultado)
+        => resultado is { ClaimObtido: true, UltimaEtapa: EtapaPipelineProdutoAcabado.Concluido };
+
+    /// <summary>
+    /// GATE 113E (§3): estados em que uma caixa PODE entrar no pipeline 261→101→HU — exatamente os mesmos
+    /// aceitos pelo caminho HU-only. Puro e testável, sem WinForms.
+    /// Bloqueia CONFIRMADA_SAP, CANCELADA, ERRO_SAP, INDETERMINADO_TIMEOUT, BLOQUEADA, EM_PESAGEM,
+    /// FINALIZADA_LOCAL, PREVIEW_HU_GERADO, ENVIANDO_SAP e qualquer estado futuro (allowlist, não denylist).
+    /// </summary>
+    internal static bool CaixaElegivelParaPipeline(ProdutoAcabadoCaixa? caixa)
+        => caixa?.CodigoProdutoAcabadoCaixa is long
+            && caixa.StatusIntegracao
+                is StatusIntegracaoCaixa.AguardandoAutorizacaoSap
+                or StatusIntegracaoCaixa.ProntaParaEnvio;
+
+    /// <summary>GATE 113E: motivo objetivo da inelegibilidade, nomeando o estado persistido.</summary>
+    internal static string MensagemCaixaInelegivelParaPipeline(ProdutoAcabadoCaixa? caixa)
+        => caixa is null
+            ? "Nenhuma caixa elegível para o pipeline SAP."
+            : $"Caixa {caixa.CodigoCaixaLocal} está em "
+                + $"{MapeadorStatusHuCaixa.ParaTextoBanco(caixa.StatusIntegracao)} e NÃO pode entrar no pipeline "
+                + "261→101→HU. Apenas caixas em AGUARDANDO_AUTORIZACAO_SAP ou PRONTA_PARA_ENVIO são elegíveis. "
+                + "Nenhum POST foi executado.";
 
     /// <summary>
     /// Data operacional real do pipeline PA: usa o carimbo do envio e normaliza para a data UTC,

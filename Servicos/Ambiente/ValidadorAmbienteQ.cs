@@ -67,25 +67,29 @@ public static class ValidadorAmbienteQ
             return ResultadoValidacaoAmbienteQ.Bloqueado("Ambiente Q bloqueado: sap-client Q dedicado ausente ou invalido.");
         }
 
-        // GATE 112D — SAFE_HU_ONLY_STARTUP.
-        // Todos os gates de escrita PERIGOSOS continuam obrigatoriamente false no startup. A ÚNICA exceção é
-        // hu_write_habilitado, e apenas ISOLADA: ele autoriza exclusivamente POST /HandlingUnit no gateway de
-        // HU (ProdutoAcabadoHandlingUnitSapGateway.EscritaHuPermitida recusa qualquer outro método/endpoint) e
-        // NÃO habilita escrita SAP genérica, 101, 261, INT012 de palete nem o pipeline 261→101→HU.
-        // Como qualquer um dos gates abaixo em true BLOQUEIA o startup, alcançar o retorno Ok() com
-        // hu_write_habilitado=true prova que ele está isolado — o cenário HU-only é o único admitido.
-        // Reforço de contrato existente: a própria composição do gateway de HU exige escrita_habilitada=false
-        // (FabricaProdutoAcabadoHandlingUnitSapServico §13), então HU+genérica é incompatível nas duas camadas.
-        string[] gatesPerigososLigados = ObterGatesPerigososLigados(configuracao);
-        if (gatesPerigososLigados.Length > 0)
+        // GATES 112D / 113E — modos de escrita ADMITIDOS no startup do Q, e SOMENTE eles.
+        // Gates SEMPRE proibidos (nenhum modo os admite):
+        //   escrita_habilitada (escrita SAP genérica) e pallet_write_habilitado (INT012 de palete).
+        // Modos seguros:
+        //   SAFE_HU_ONLY_STARTUP (112D) ..... hu_write isolado. Autoriza exclusivamente POST /HandlingUnit
+        //       (EscritaHuPermitida recusa qualquer outro método/endpoint); nada de 261/101/INT012/pipeline.
+        //   SAFE_PA_PIPELINE_STARTUP (113E) . pa_pipeline + pa_material_document + hu_write, os TRÊS juntos,
+        //       porque o pipeline é uma cadeia ESTRITA 261→101→HU: habilitar parte dela é mais perigoso que
+        //       nada — pa_material_document sozinho liberaria os gateways 261/101 fora da orquestração, e
+        //       pipeline sem hu_write postaria 261+101 para travar na terceira etapa.
+        // Qualquer combinação diferente ⇒ BLOCK.
+        string[] gatesProibidosLigados = ObterGatesPerigososLigados(configuracao);
+        if (gatesProibidosLigados.Length > 0)
         {
             return ResultadoValidacaoAmbienteQ.Bloqueado(
                 "Ambiente Q bloqueado: write gates devem iniciar false — ligado(s): "
-                + string.Join(", ", gatesPerigososLigados)
-                + ". Somente hu_write_habilitado pode iniciar true, e apenas isolado (HU-only).");
+                + string.Join(", ", gatesProibidosLigados)
+                + ". Apenas hu_write_habilitado isolado (HU-only) ou o trio "
+                + "pa_pipeline_habilitado + pa_material_document_write_habilitado + hu_write_habilitado "
+                + "(pipeline 261→101→HU) podem iniciar true.");
         }
 
-        return ResultadoValidacaoAmbienteQ.Ok();
+        return ValidarModoEscritaAdmitido(configuracao);
     }
 
     public static ResultadoValidacaoAmbienteQ ValidarBanco(ConfiguracaoBancoPostgreSql configuracao)
@@ -144,9 +148,10 @@ public static class ValidadorAmbienteQ
         => executarProbeReadOnly(cancellationToken);
 
     /// <summary>
-    /// GATE 112D: gates de escrita que NUNCA podem iniciar true, com o nome da chave para diagnóstico.
-    /// <c>hu_write_habilitado</c> está DELIBERADAMENTE fora desta lista (SAFE_HU_ONLY_STARTUP): é o único
-    /// gate de escrita que pode iniciar true, e só se todos os desta lista estiverem false.
+    /// GATES 112D/113E: gates de escrita que NUNCA podem iniciar true em NENHUM modo.
+    /// <c>hu_write_habilitado</c>, <c>pa_pipeline_habilitado</c> e
+    /// <c>pa_material_document_write_habilitado</c> estão DELIBERADAMENTE fora desta lista: eles participam
+    /// dos modos seguros e são validados como COMBINAÇÃO por <see cref="ValidarModoEscritaAdmitido"/>.
     /// </summary>
     internal static string[] ObterGatesPerigososLigados(ConfiguracaoSap configuracao)
     {
@@ -158,22 +163,63 @@ public static class ValidadorAmbienteQ
             ligados.Add("escrita_habilitada (escrita SAP genérica)");
         }
 
-        if (configuracao.ProdutoAcabadoMaterialDocumentWriteHabilitado)
-        {
-            ligados.Add("pa_material_document_write_habilitado (101 de Produto Acabado)");
-        }
-
         if (configuracao.PalletWriteHabilitado)
         {
             ligados.Add("pallet_write_habilitado (INT012 de palete)");
         }
 
-        if (configuracao.ProdutoAcabadoPipelineHabilitado)
+        return [.. ligados];
+    }
+
+    /// <summary>
+    /// GATE 113E: valida a COMBINAÇÃO dos gates que participam dos modos seguros. Pressupõe que os gates
+    /// sempre proibidos já foram reprovados. Só dois modos passam:
+    /// SAFE_HU_ONLY_STARTUP (hu isolado, ou nenhum gate) e
+    /// SAFE_PA_PIPELINE_STARTUP (pa_pipeline + pa_material_document + hu_write, os três juntos).
+    /// Combinação parcial é recusada NOMEANDO o que falta — habilitar meia cadeia 261→101→HU é pior que
+    /// não habilitar.
+    /// </summary>
+    internal static ResultadoValidacaoAmbienteQ ValidarModoEscritaAdmitido(ConfiguracaoSap configuracao)
+    {
+        ArgumentNullException.ThrowIfNull(configuracao);
+
+        bool pipeline = configuracao.ProdutoAcabadoPipelineHabilitado;
+        bool materialDocumentPa = configuracao.ProdutoAcabadoMaterialDocumentWriteHabilitado;
+        bool hu = configuracao.HuWriteHabilitado;
+
+        // Modo 1 (112D): nenhum gate, ou hu_write isolado.
+        if (!pipeline && !materialDocumentPa)
         {
-            ligados.Add("pa_pipeline_habilitado (pipeline 261→101→HU)");
+            return ResultadoValidacaoAmbienteQ.Ok();
         }
 
-        return [.. ligados];
+        // Modo 2 (113E): o trio COMPLETO do pipeline.
+        if (pipeline && materialDocumentPa && hu)
+        {
+            return ResultadoValidacaoAmbienteQ.Ok();
+        }
+
+        List<string> faltantes = [];
+        if (!pipeline)
+        {
+            faltantes.Add("pa_pipeline_habilitado");
+        }
+
+        if (!materialDocumentPa)
+        {
+            faltantes.Add("pa_material_document_write_habilitado");
+        }
+
+        if (!hu)
+        {
+            faltantes.Add("hu_write_habilitado");
+        }
+
+        return ResultadoValidacaoAmbienteQ.Bloqueado(
+            "Ambiente Q bloqueado: combinacao de write gates nao admitida — o pipeline 261→101→HU exige "
+            + "pa_pipeline_habilitado + pa_material_document_write_habilitado + hu_write_habilitado juntos; "
+            + "faltando: " + string.Join(", ", faltantes)
+            + ". Alternativa admitida: hu_write_habilitado isolado (HU-only).");
     }
 
     private static IEnumerable<string> ObterUrlsSap(ConfiguracaoSap configuracao)
