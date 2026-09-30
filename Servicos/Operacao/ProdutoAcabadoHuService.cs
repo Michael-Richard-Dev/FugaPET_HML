@@ -17,15 +17,28 @@ public sealed class ProdutoAcabadoHuService : IProdutoAcabadoHuBridgeServico
     private readonly IProdutoAcabadoHandlingUnitSapServico _gateway;
     private readonly ProdutoAcabadoHandlingUnitCaixaRequestBuilder _requestBuilder;
 
+    // GATE 113J (§2/§3): EARLY BINDING do fluxo 045. Fornecido SOMENTE no modo PIPELINE_045; null ⇒ HU_ONLY
+    // e ZERO linhas 045 (comportamento histórico preservado byte a byte).
+    private readonly Func<long, long, string, CancellationToken, Task<bool>>? _estabelecerBindingPipeline045;
+
+    /// <summary>Mensagem única do bloqueio de binding 045 (contrato de UI e de teste).</summary>
+    public const string MensagemBindingPipeline045NaoEstabelecido =
+        "Fluxo 045 não pôde ser estabelecido para esta caixa; nenhum POST SAP executado.";
+
     public ProdutoAcabadoHuService(
         IProdutoAcabadoRepositorio repositorio,
         IProdutoAcabadoHandlingUnitSapServico gateway,
-        ProdutoAcabadoHandlingUnitCaixaRequestBuilder? requestBuilder = null)
+        ProdutoAcabadoHandlingUnitCaixaRequestBuilder? requestBuilder = null,
+        Func<long, long, string, CancellationToken, Task<bool>>? estabelecerBindingPipeline045 = null)
     {
         _repositorio = repositorio ?? throw new ArgumentNullException(nameof(repositorio));
         _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
         _requestBuilder = requestBuilder ?? new ProdutoAcabadoHandlingUnitCaixaRequestBuilder();
+        _estabelecerBindingPipeline045 = estabelecerBindingPipeline045;
     }
+
+    /// <summary>GATE 113J: true quando este serviço opera no modo PIPELINE_045 (binding fornecido).</summary>
+    public bool ModoPipeline045 => _estabelecerBindingPipeline045 is not null;
 
     public bool EnvioAutorizado => _gateway.EnvioAutorizado;
 
@@ -76,6 +89,20 @@ public sealed class ProdutoAcabadoHuService : IProdutoAcabadoHuBridgeServico
         {
             return ResultadoFinalizacaoHu.Bloqueado(
                 "Não foi possível finalizar a caixa localmente (persistência não comprovada).",
+                await _repositorio.ObterPorCodigoAsync(codigo, cancellationToken) ?? persistida);
+        }
+
+        // GATE 113J (§2/§3): EARLY BINDING do fluxo 045 — DEPOIS de FinalizarLocalAsync comprovado (a caixa
+        // está em FINALIZADA_LOCAL, um dos DOIS estados que fn_pa_045_iniciar_fluxo aceita) e ANTES de
+        // SalvarPreviewAsync (que move para PREVIEW_HU_GERADO e inicia o lifecycle HU, fechando a janela).
+        // Antes do 113J o binding só era tentado no botão ENVIAR, quando a caixa já estava em
+        // AGUANDO_AUTORIZACAO_SAP — estado recusado pela função — tornando o pipeline inalcançável (113I).
+        // O resultado é VERIFICADO: sem binding comprovado, NÃO seguimos para preview/aguardar/SAP/HU.
+        if (_estabelecerBindingPipeline045 is not null
+            && !await _estabelecerBindingPipeline045(codigo, usuario, terminal, cancellationToken))
+        {
+            return ResultadoFinalizacaoHu.Bloqueado(
+                MensagemBindingPipeline045NaoEstabelecido,
                 await _repositorio.ObterPorCodigoAsync(codigo, cancellationToken) ?? persistida);
         }
 

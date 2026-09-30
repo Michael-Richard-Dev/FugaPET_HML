@@ -59,9 +59,6 @@ public sealed class ProdutoAcabadoController
         _paletePayloadBuilder = paletePayloadBuilder ?? new ProdutoAcabadoPaletePayloadBuilder();
         // PersistÃªncia produtiva real quando o banco estÃ¡ habilitado; senÃ£o fail-closed (nÃ£o finge banco).
         // Gateway SAP fail-closed por padrÃ£o (sem POST real). Testes injetam Service/fakes controlados.
-        _huService = huService ?? new ProdutoAcabadoHuService(
-            repositorio ?? FabricaProdutoAcabadoRepositorio.Criar(),
-            huSapServico ?? FabricaProdutoAcabadoHandlingUnitSapServico.Criar());
         _normaEmbalagemSapServico = normaEmbalagemSapServico ?? FabricaProdutoAcabadoNormaEmbalagemSapServico.Criar();
 
         // ConfiguraÃ§Ã£o para o gate do pipeline: injetÃ¡vel nos testes; em runtime lÃª env/arquivo (gate default false).
@@ -72,6 +69,18 @@ public sealed class ProdutoAcabadoController
         IProdutoAcabadoPipelineStore store = pipelineStore
             ?? new ProdutoAcabadoPipelinePostgresStore(FabricaProdutoAcabadoPipeline045Executor.Criar());
         _pipeline045Operacoes = store as IProdutoAcabadoPipeline045Operacoes;
+
+        // GATE 113J (§2/§3): o HuService passa a ser composto DEPOIS da configuraÃ§Ã£o/store, porque no modo
+        // PIPELINE_045 ele recebe o EARLY BINDING do fluxo 045 (executado na finalizaÃ§Ã£o local, com a caixa
+        // em FINALIZADA_LOCAL). No modo HU_ONLY o binding Ã© null e a finalizaÃ§Ã£o cria ZERO linhas 045 â€”
+        // comportamento histÃ³rico preservado. A reordenaÃ§Ã£o Ã© segura: configuraÃ§Ã£o e store nÃ£o dependem
+        // do HuService; sÃ³ a composiÃ§Ã£o do pipeline depende, e ela continua por Ãºltimo.
+        _huService = huService ?? new ProdutoAcabadoHuService(
+            repositorio ?? FabricaProdutoAcabadoRepositorio.Criar(),
+            huSapServico ?? FabricaProdutoAcabadoHandlingUnitSapServico.Criar(),
+            requestBuilder: null,
+            estabelecerBindingPipeline045: MontarBindingPipeline045(_configuracaoSap, _pipeline045Operacoes));
+
         _composicaoPipeline = FabricaProdutoAcabadoIntegracaoSapOrquestrador.Compor(
             _configuracaoSap, _huService, store);
 
@@ -111,6 +120,56 @@ public sealed class ProdutoAcabadoController
 
     /// <summary>REV4-Â§15: gateway INT012 composto no runtime, mas envio real permanece governado por gate prÃ³prio.</summary>
     public bool PaleteInt012EnvioAutorizado => _paleteInt012Gateway.EnvioAutorizado;
+
+    /// <summary>
+    /// GATE 113J (§2/§3): devolve o EARLY BINDING do fluxo 045 SOMENTE no modo PIPELINE_045 — gate ligado E
+    /// operações 045 com persistência definitiva. Fora desse modo devolve null, e a finalização de caixa
+    /// permanece HU_ONLY com ZERO linhas 045. Exposto internamente para teste do critério de composição.
+    /// </summary>
+    internal static Func<long, long, string, CancellationToken, Task<bool>>? MontarBindingPipeline045(
+        ConfiguracaoSap configuracao,
+        IProdutoAcabadoPipeline045Operacoes? operacoes)
+    {
+        ArgumentNullException.ThrowIfNull(configuracao);
+
+        if (!configuracao.ProdutoAcabadoPipelineHabilitado
+            || operacoes is null
+            || !operacoes.SuportaPersistenciaDefinitiva)
+        {
+            return null;
+        }
+
+        return (codigo, usuario, terminal, ct) => operacoes.IniciarFluxoAsync(
+            codigo, usuario, terminal, origem: "EARLY_BINDING_FINALIZADA_LOCAL", ct);
+    }
+
+    /// <summary>
+    /// GATE 113J (§6): true quando a caixa POSSUI vínculo 045 (uma ou mais etapas). Diferente de
+    /// <see cref="VerificarBloqueioPipeline045Async"/>, NÃO depende do gate do pipeline: o binding 045 é
+    /// persistente e IRREVERSÍVEL, então uma caixa com etapas 045 nunca pode voltar a ser tratada como
+    /// HU-only, inclusive após restart/erro/timeout com o runtime em modo HU_ONLY.
+    /// Indeterminado (falha de consulta) ⇒ true (fail-closed: bloqueia em vez de permitir HU direta).
+    /// </summary>
+    public async Task<bool> PossuiVinculoPipeline045Async(long codigoCaixa, CancellationToken cancellationToken = default)
+    {
+        if (_pipeline045Operacoes is null || !_pipeline045Operacoes.SuportaPersistenciaDefinitiva)
+        {
+            return false;
+        }
+
+        try
+        {
+            IReadOnlyList<Linha045> etapas = await _pipeline045Operacoes.LerEstadoEtapasAsync(codigoCaixa, cancellationToken);
+            return etapas.Count > 0;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                $"[ProdutoAcabado] 113J: consulta do vinculo 045 da caixa {codigoCaixa} falhou "
+                + $"({ex.GetType().Name}); tratando como VINCULADA (fail-closed).");
+            return true;
+        }
+    }
 
     public async Task<ResultadoBloqueioPipeline045> VerificarBloqueioPipeline045Async(long codigoCaixa, CancellationToken cancellationToken = default)
     {

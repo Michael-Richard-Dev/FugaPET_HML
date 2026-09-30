@@ -742,6 +742,16 @@ public partial class ProcessoProdutoAcabadoForm : Form
             return;
         }
 
+        // GATE 113J (§6): o binding 045 é PERSISTENTE e IRREVERSÍVEL. Uma caixa COM etapas 045 nunca pode ser
+        // despachada como HU direta — nem após restart/erro/timeout/recovery com o runtime em modo HU_ONLY
+        // (gate do pipeline desligado). Consulta independente do gate; indeterminado ⇒ bloqueia (fail-closed).
+        if (await _controller.PossuiVinculoPipeline045Async(codigo))
+        {
+            statusLabel.Text = MensagemCaixaVinculadaAoPipeline045;
+            MessageBox.Show(MensagemCaixaVinculadaAoPipeline045, "Produto Acabado", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
         // Defesa 3 (Hera): antes de autorizar localmente, do claim e de qualquer POST, revalidar o centro PET.
         // Centro != 3007 ⇒ nada de autorização/claim/POST; estado bloqueado ao operador.
         ResultadoBloqueioPipeline045 bloqueioPersistido = await _controller.VerificarBloqueioPipeline045Async(codigo);
@@ -1011,6 +1021,11 @@ public partial class ProcessoProdutoAcabadoForm : Form
     /// Bloqueia CONFIRMADA_SAP, CANCELADA, ERRO_SAP, INDETERMINADO_TIMEOUT, BLOQUEADA, EM_PESAGEM,
     /// FINALIZADA_LOCAL, PREVIEW_HU_GERADO, ENVIANDO_SAP e qualquer estado futuro (allowlist, não denylist).
     /// </summary>
+    /// <summary>GATE 113J (§6): mensagem única do bloqueio de HU direta em caixa vinculada ao 045.</summary>
+    internal const string MensagemCaixaVinculadaAoPipeline045 =
+        "Esta caixa possui vínculo 045 (pipeline 261→101→HU) e NÃO pode ser enviada como HU direta. "
+        + "Use o fluxo/recovery 045. Nenhum POST executado.";
+
     internal static bool CaixaElegivelParaPipeline(ProdutoAcabadoCaixa? caixa)
         => caixa?.CodigoProdutoAcabadoCaixa is long
             && caixa.StatusIntegracao
