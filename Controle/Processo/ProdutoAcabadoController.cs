@@ -201,8 +201,21 @@ public sealed class ProdutoAcabadoController
         catch (Exception ex)
         {
             return ResultadoBloqueioPipeline045.CriarBloqueio(
-                $"NÃ£o foi possÃ­vel consultar o estado 045 da caixa ({ex.GetType().Name}). NÃ£o tente enviar novamente atÃ© reconciliaÃ§Ã£o.");
+                $"Não foi possível consultar o estado 045 da caixa ({ex.GetType().Name}). Não tente enviar novamente até reconciliação.");
         }
+
+        return AvaliarBloqueioPipeline045(linhas);
+    }
+
+    /// <summary>
+    /// GATE 117G: decisão PRE-POST do pipeline 045. PENDENTE só é liberado quando a linha é materialmente
+    /// virgem. Qualquer evidência de tentativa/claim/HTTP/documento/request/response/erro/reconciliação mantém
+    /// o bloqueio fail-closed. correlation_id NÃO é evidência de execução: o early binding já o materializa
+    /// antes da primeira tentativa.
+    /// </summary>
+    internal static ResultadoBloqueioPipeline045 AvaliarBloqueioPipeline045(IReadOnlyList<Linha045> linhas)
+    {
+        ArgumentNullException.ThrowIfNull(linhas);
 
         Linha045? bloqueante = linhas.FirstOrDefault(LinhaPipeline045BloqueiaEnvio);
         if (bloqueante is null)
@@ -210,10 +223,10 @@ public sealed class ProdutoAcabadoController
             return ResultadoBloqueioPipeline045.Liberado;
         }
 
-        string etapa = PrimeiroTexto(bloqueante, "etapa", "codigo_etapa", "tipo_etapa") ?? "?";
+        string etapa = PrimeiroTexto(bloqueante, "etapa_sap", "etapa", "codigo_etapa", "tipo_etapa") ?? "?";
         string status = PrimeiroTexto(bloqueante, "status_etapa", "status", "status_movimento", "status_pipeline") ?? "?";
         return ResultadoBloqueioPipeline045.CriarBloqueio(
-            $"Envio interrompido em estado que exige reconciliaÃ§Ã£o. Etapa {etapa} estÃ¡ em {status}. NÃ£o tente enviar novamente.");
+            $"Envio interrompido em estado que exige reconciliação. Etapa {etapa} está em {status}. Não tente enviar novamente.");
     }
 
     private static bool LinhaPipeline045BloqueiaEnvio(Linha045 linha)
@@ -221,11 +234,90 @@ public sealed class ProdutoAcabadoController
         string? status = PrimeiroTexto(linha, "status_etapa", "status", "status_movimento", "status_pipeline");
         if (string.IsNullOrWhiteSpace(status))
         {
-            return false;
+            return true; // estado ilegível/incompatível => fail-closed
         }
 
         string normalizado = status.Trim().ToUpperInvariant();
-        return normalizado is not ("CONFIRMADO" or "CONFIRMADO_SAP" or "CONCLUIDO" or "CONCLUÍDO" or "CANCELADO" or "CANCELADA");
+
+        if (normalizado is "CONFIRMADO" or "CONFIRMADO_SAP" or "CONCLUIDO" or "CONCLUÍDO" or "CANCELADO" or "CANCELADA")
+        {
+            return false;
+        }
+
+        if (normalizado == "PENDENTE")
+        {
+            return !LinhaPipeline045PendenteVirgem(linha);
+        }
+
+        // PROCESSANDO / ERRO / INDETERMINADO / TIMEOUT / estado desconhecido:
+        // preserva o comportamento anterior de bloqueio e a proteção contra retry cego.
+        return true;
+    }
+
+    private static bool LinhaPipeline045PendenteVirgem(Linha045 linha)
+    {
+        int tentativa = linha.ObterInt("numero_tentativa") ?? 0;
+        if (tentativa != 0)
+        {
+            return false;
+        }
+
+        if (TemValorPipeline045(
+            linha,
+            "lease_obtido_em",
+            "lease_expira_em",
+            "recovery_lease_obtido_em",
+            "recovery_lease_expira_em",
+            "material_document",
+            "material_document_year",
+            "http_status",
+            "iniciado_em",
+            "confirmado_em",
+            "falhou_em",
+            "indeterminado_em",
+            "request_sanitizado",
+            "response_sanitizado",
+            "erro_sanitizado",
+            "reconciliado_em"))
+        {
+            return false;
+        }
+
+        string? statusReconciliacao = PrimeiroTexto(linha, "status_reconciliacao");
+        if (!string.IsNullOrWhiteSpace(statusReconciliacao)
+            && !string.Equals(statusReconciliacao.Trim(), "NAO_NECESSARIA", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        string? podeReprocessarTexto = PrimeiroTexto(linha, "pode_reprocessar");
+        if (bool.TryParse(podeReprocessarTexto, out bool podeReprocessar) && podeReprocessar)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool TemValorPipeline045(Linha045 linha, params string[] colunas)
+    {
+        foreach (string coluna in colunas)
+        {
+            object? valor = linha.Bruto(coluna);
+            if (valor is null || valor is DBNull)
+            {
+                continue;
+            }
+
+            if (valor is string texto && string.IsNullOrWhiteSpace(texto))
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     private static string? PrimeiroTexto(Linha045 linha, params string[] colunas)
@@ -241,7 +333,6 @@ public sealed class ProdutoAcabadoController
 
         return null;
     }
-
     public async Task<ResultadoPaleteInt012> EnviarPaleteInt012Async(
         ProdutoAcabadoPalete palete,
         CancellationToken cancellationToken = default)
