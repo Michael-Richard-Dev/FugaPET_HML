@@ -239,6 +239,23 @@ public static class ProdutoAcabado261AllocatorCumulativo
             return Resultado261Cumulativo.Bloqueado(MotivoLedgerIndisponivel);
         }
 
+        foreach (Componente261Fresco componente in entrada.Componentes)
+        {
+            string opComponente = componente.NumeroOrdem?.Trim() ?? string.Empty;
+            if (opComponente.Length == 0)
+            {
+                return Resultado261Cumulativo.Bloqueado(
+                    $"{MotivoComponenteOrdemAusente} Componente {componente.Identidade}.");
+            }
+
+            if (!string.Equals(opComponente, opSolicitada, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(opComponente, opItem, StringComparison.OrdinalIgnoreCase))
+            {
+                return Resultado261Cumulativo.Bloqueado(
+                    $"{MotivoComponenteOrdemDivergente} Componente {componente.Identidade}.");
+            }
+        }
+
         IReadOnlyList<Componente261Fresco> elegiveis = entrada.Componentes
             .Where(EhComponente261)
             .ToList();
@@ -258,23 +275,6 @@ public static class ProdutoAcabado261AllocatorCumulativo
             {
                 return Resultado261Cumulativo.Bloqueado(
                     "Componente sem Reservation/ReservationItem: identidade nao deterministica. BLOCK (nenhum POST).");
-            }
-
-            // R4 §6/§7: AUSENCIA tambem bloqueia. Antes, componente sem OP passava — o que permitia
-            // consumir componente de origem nao comprovada. Agora a condicao necessaria e a
-            // igualdade TRIPLA: solicitada == item == TODOS os componentes.
-            string opComponente = componente.NumeroOrdem?.Trim() ?? string.Empty;
-            if (opComponente.Length == 0)
-            {
-                return Resultado261Cumulativo.Bloqueado(
-                    $"{MotivoComponenteOrdemAusente} Componente {componente.Identidade}.");
-            }
-
-            if (!string.Equals(opComponente, opSolicitada, StringComparison.OrdinalIgnoreCase)
-                || !string.Equals(opComponente, opItem, StringComparison.OrdinalIgnoreCase))
-            {
-                return Resultado261Cumulativo.Bloqueado(
-                    $"{MotivoComponenteOrdemDivergente} Componente {componente.Identidade}.");
             }
 
             // §3: tri-state de QuantityIsFixed. true E null bloqueiam, por motivos DIFERENTES.
