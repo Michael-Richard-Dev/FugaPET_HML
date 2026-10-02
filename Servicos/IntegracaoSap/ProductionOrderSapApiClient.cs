@@ -230,6 +230,159 @@ public sealed class ProductionOrderSapApiClient
             UriKind.Absolute));
     }
 
+    /// <summary>
+    /// GATE 118B (contrato 118B-A1): leitura FRESCA do item e dos componentes da OP, nas rotas minimas
+    /// validadas em runtime. Duas requisicoes GET separadas, $select minimo e, nos componentes,
+    /// $inlinecount=allpages para COMPROVAR completude. Nao e snapshot atomico e nao faz POST.
+    /// Qualquer leitura nao-2xx/nao-mapeavel => resultado INDISPONIVEL (fail-closed), nunca lista vazia
+    /// silenciosa.
+    /// </summary>
+    public async Task<LeituraFrescaOrdem261> ConsultarEstadoFresco261Async(
+        string numeroOrdem,
+        CancellationToken cancellationToken = default)
+    {
+        string ordem = numeroOrdem?.Trim() ?? string.Empty;
+        if (ordem.Length == 0)
+        {
+            return LeituraFrescaOrdem261.Indisponivel(ordem, "Leitura fresca do 261 sem OP: bloqueado.");
+        }
+
+        (IReadOnlyList<ItemOrdemProducaoSap> itens, int? _, bool okItem) = await ConsultarColecaoFrescaAsync(
+            MontarUrlColecaoFresca("A_ProductionOrderItem_2", ordem, SelectItemFresco),
+            MapearItem, MapearItemXml, cancellationToken);
+
+        if (!okItem)
+        {
+            return LeituraFrescaOrdem261.Indisponivel(
+                ordem, "Leitura fresca do item da OP indisponivel no SAP: bloqueado (nenhum POST).");
+        }
+
+        ItemOrdemProducaoSap? item = itens.Count > 0 ? itens[0] : null;
+        if (item is null)
+        {
+            return LeituraFrescaOrdem261.Indisponivel(
+                ordem, "Leitura fresca do item da OP voltou vazia: bloqueado (nenhum POST).");
+        }
+
+        (IReadOnlyList<ComponenteOrdemProducaoSap> componentes, int? declarados, bool okComp) =
+            await ConsultarColecaoFrescaAsync(
+                MontarUrlColecaoFresca("A_ProductionOrderComponent_2", ordem, SelectComponenteFresco),
+                MapearComponente, MapearComponenteXml, cancellationToken);
+
+        if (!okComp)
+        {
+            return LeituraFrescaOrdem261.Indisponivel(
+                ordem, "Leitura fresca dos componentes da OP indisponivel no SAP: bloqueado (nenhum POST).");
+        }
+
+        return new LeituraFrescaOrdem261
+        {
+            NumeroOrdemConsultada = ordem,
+            Disponivel = true,
+            Mensagem = "Leitura fresca item+componentes concluida.",
+            Item = item,
+            Componentes = componentes,
+            ComponentesDeclaradosPeloServico = declarados
+        };
+    }
+
+    private const string SelectItemFresco =
+        "$select=ManufacturingOrder,ManufacturingOrderItem,MfgOrderItemPlannedTotalQty,"
+        + "MfgOrderItemGoodsReceiptQty,ProductionUnit,Material,ProductionPlant,StorageLocation,Batch";
+
+    private const string SelectComponenteFresco =
+        "$select=Reservation,ReservationItem,ManufacturingOrder,ManufacturingOrderSequence,"
+        + "ManufacturingOrderOperation,Material,Plant,StorageLocation,Batch,RequiredQuantity,"
+        + "WithdrawnQuantity,ConfirmedAvailableQuantity,QuantityIsFixed,BaseUnit,GoodsMovementType,"
+        + "ReservationIsFinallyIssued,MatlCompIsMarkedForDeletion";
+
+    private Uri MontarUrlColecaoFresca(string entidade, string numeroOrdem, string select)
+    {
+        string ordem = numeroOrdem.Trim().Replace("'", "''");
+        string filtro = $"ManufacturingOrder eq '{ordem}'".Replace(" ", "%20");
+        string query = $"$format=json&$filter={filtro}&{select}&$inlinecount=allpages";
+        return ValidarDestino(new Uri(
+            $"{_baseUri.AbsoluteUri}{entidade}?{AnexarSapClient(query)}",
+            UriKind.Absolute));
+    }
+
+    /// <summary>
+    /// GET de colecao para a leitura FRESCA: diferente de <c>ConsultarColecaoAsync</c>, NAO engole
+    /// falha devolvendo lista vazia — devolve ok=false para o chamador bloquear. Tambem extrai o
+    /// <c>__count</c> do $inlinecount quando presente.
+    /// </summary>
+    private async Task<(IReadOnlyList<T> Itens, int? Declarados, bool Ok)> ConsultarColecaoFrescaAsync<T>(
+        Uri url,
+        Func<JsonElement, T> mapearJson,
+        Func<XElement, T> mapearXml,
+        CancellationToken cancellationToken)
+    {
+        using HttpRequestMessage requisicao = CriarRequisicao(HttpMethod.Get, url);
+        using HttpResponseMessage resposta = await _httpClient.SendAsync(requisicao, cancellationToken);
+        string corpo = await resposta.Content.ReadAsStringAsync(cancellationToken);
+        if (!resposta.IsSuccessStatusCode)
+        {
+            RegistrarDiagnostico(EtapaFallback, url, resposta, corpo);
+            return ([], null, false);
+        }
+
+        return (MapearColecao(corpo, mapearJson, mapearXml), LerContagemDeclarada(corpo), true);
+    }
+
+    /// <summary>
+    /// GATE 118B (§12): extrai o <c>__count</c> ($inlinecount=allpages) do corpo JSON/Atom. Ausente ou
+    /// nao numerico => null, e completude NAO comprovada.
+    /// </summary>
+    internal static int? LerContagemDeclarada(string corpo)
+    {
+        if (string.IsNullOrWhiteSpace(corpo))
+        {
+            return null;
+        }
+
+        string texto = corpo.TrimStart();
+        if (texto.StartsWith('{'))
+        {
+            try
+            {
+                using JsonDocument documento = JsonDocument.Parse(corpo);
+                JsonElement raiz = documento.RootElement;
+                if (raiz.TryGetProperty("d", out JsonElement d))
+                {
+                    raiz = d;
+                }
+
+                if (raiz.ValueKind == JsonValueKind.Object && raiz.TryGetProperty("__count", out JsonElement contagem))
+                {
+                    return contagem.ValueKind switch
+                    {
+                        JsonValueKind.Number when contagem.TryGetInt32(out int n) => n,
+                        JsonValueKind.String when int.TryParse(
+                            contagem.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int s) => s,
+                        _ => null
+                    };
+                }
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+
+            return null;
+        }
+
+        try
+        {
+            XDocument documento = XDocument.Parse(corpo);
+            string? valor = documento.Descendants(MetadadosOData + "count").FirstOrDefault()?.Value?.Trim();
+            return int.TryParse(valor, NumberStyles.Integer, CultureInfo.InvariantCulture, out int xml) ? xml : null;
+        }
+        catch (XmlException)
+        {
+            return null;
+        }
+    }
+
     private Uri MontarUrlColecao(string entidade, string numeroOrdem, string? ordenarPor)
     {
         string ordem = numeroOrdem.Trim().Replace("'", "''");
@@ -403,6 +556,11 @@ public sealed class ProductionOrderSapApiClient
             UnidadeBase = LerTexto(c, "BaseUnit"),
             QuantidadeRetirada = LerDecimal(c, "WithdrawnQuantity"),
             QuantidadeDisponivelConfirmada = LerDecimal(c, "ConfirmedAvailableQuantity"),
+            // GATE 118B: espelhos TRI-STATE para o alocador 261 (ausente => null, nunca 0/false).
+            QuantidadeNecessariaSap = LerDecimalNulo(c, "RequiredQuantity"),
+            QuantidadeRetiradaSap = LerDecimalNulo(c, "WithdrawnQuantity"),
+            QuantidadeDisponivelConfirmadaSap = LerDecimalNulo(c, "ConfirmedAvailableQuantity"),
+            QuantidadeFixa = LerFlagNulo(c, "QuantityIsFixed"),
             TipoMovimento = LerTexto(c, "GoodsMovementType"),
             Lote = LerTexto(c, "Batch"),
             ItemBOM = LerTexto(c, "BOMItem"),
@@ -442,7 +600,10 @@ public sealed class ProductionOrderSapApiClient
             Centro = LerTexto(i, "ProductionPlant"),
             Deposito = LerTexto(i, "StorageLocation"),
             QuantidadePrevista = LerDecimal(i, "MfgOrderItemPlannedTotalQty"),
-            QuantidadeEntregue = LerDecimal(i, "MfgOrderItemActualDeliveryQty"),
+            // GATE 118B: MfgOrderItemActualDeliveryQty nao existe no contrato; leitura removida.
+            // Campo autoritativo de producao recebida, em TRI-STATE:
+            QuantidadeRecebidaSap = LerDecimalNulo(i, "MfgOrderItemGoodsReceiptQty"),
+            QuantidadePrevistaSap = LerDecimalNulo(i, "MfgOrderItemPlannedTotalQty"),
             Unidade = LerTexto(i, "ProductionUnit"),
             Lote = LerTexto(i, "Batch")
         };
@@ -559,6 +720,11 @@ public sealed class ProductionOrderSapApiClient
             UnidadeBase = LerXmlTexto(p, "BaseUnit"),
             QuantidadeRetirada = LerXmlDecimal(p, "WithdrawnQuantity"),
             QuantidadeDisponivelConfirmada = LerXmlDecimal(p, "ConfirmedAvailableQuantity"),
+            // GATE 118B: espelhos TRI-STATE (paridade com o caminho JSON).
+            QuantidadeNecessariaSap = LerXmlDecimalNulo(p, "RequiredQuantity"),
+            QuantidadeRetiradaSap = LerXmlDecimalNulo(p, "WithdrawnQuantity"),
+            QuantidadeDisponivelConfirmadaSap = LerXmlDecimalNulo(p, "ConfirmedAvailableQuantity"),
+            QuantidadeFixa = LerXmlFlagNulo(p, "QuantityIsFixed"),
             TipoMovimento = LerXmlTexto(p, "GoodsMovementType"),
             Lote = LerXmlTexto(p, "Batch"),
             ItemBOM = LerXmlTexto(p, "BOMItem"),
@@ -598,7 +764,9 @@ public sealed class ProductionOrderSapApiClient
             Centro = LerXmlTexto(p, "ProductionPlant"),
             Deposito = LerXmlTexto(p, "StorageLocation"),
             QuantidadePrevista = LerXmlDecimal(p, "MfgOrderItemPlannedTotalQty"),
-            QuantidadeEntregue = LerXmlDecimal(p, "MfgOrderItemActualDeliveryQty"),
+            // GATE 118B: MfgOrderItemActualDeliveryQty nao existe no contrato; leitura removida.
+            QuantidadeRecebidaSap = LerXmlDecimalNulo(p, "MfgOrderItemGoodsReceiptQty"),
+            QuantidadePrevistaSap = LerXmlDecimalNulo(p, "MfgOrderItemPlannedTotalQty"),
             Unidade = LerXmlTexto(p, "ProductionUnit"),
             Lote = LerXmlTexto(p, "Batch")
         };
@@ -651,6 +819,72 @@ public sealed class ProductionOrderSapApiClient
             out decimal valor)
             ? valor
             : 0m;
+
+    /// <summary>
+    /// GATE 118B: leitura TRI-STATE de decimal no Atom/XML. Elemento ausente, m:null="true", texto
+    /// vazio ou nao parseavel => null (INDETERMINADO). NUNCA colapsa em 0.
+    /// </summary>
+    private static decimal? LerXmlDecimalNulo(XElement props, string propriedade)
+    {
+        XElement? elemento = props.Element(DadosOData + propriedade);
+        if (elemento is null)
+        {
+            return null;
+        }
+
+        if (string.Equals((string?)elemento.Attribute(MetadadosOData + "null"), "true", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return decimal.TryParse(
+            elemento.Value?.Trim(),
+            NumberStyles.Number,
+            CultureInfo.InvariantCulture,
+            out decimal valor)
+            ? valor
+            : null;
+    }
+
+    /// <summary>
+    /// GATE 118B: leitura TRI-STATE de booleano no Atom/XML. Ausente/m:null/valor nao reconhecido
+    /// => null (INDETERMINADO). NUNCA colapsa em false.
+    /// </summary>
+    private static bool? LerXmlFlagNulo(XElement props, string propriedade)
+    {
+        XElement? elemento = props.Element(DadosOData + propriedade);
+        if (elemento is null)
+        {
+            return null;
+        }
+
+        if (string.Equals((string?)elemento.Attribute(MetadadosOData + "null"), "true", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return InterpretarFlagNulo(elemento.Value);
+    }
+
+    /// <summary>
+    /// GATE 118B: interpreta o texto de um booleano SAP em TRI-STATE. Reconhece APENAS as formas
+    /// verdadeiras explicitas (X/true/1) e as falsas explicitas (false/0). Vazio ou qualquer outro
+    /// texto e INDETERMINADO (null) em vez de virar false.
+    /// </summary>
+    private static bool? InterpretarFlagNulo(string? valor)
+    {
+        string texto = valor?.Trim() ?? string.Empty;
+        if (string.Equals(texto, "X", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(texto, "true", StringComparison.OrdinalIgnoreCase)
+            || texto == "1")
+        {
+            return true;
+        }
+
+        return string.Equals(texto, "false", StringComparison.OrdinalIgnoreCase) || texto == "0"
+            ? false
+            : null;
+    }
 
     private static IReadOnlyList<T> LerColecao<T>(
         JsonElement pai,
@@ -712,6 +946,50 @@ public sealed class ProductionOrderSapApiClient
         return string.Equals(texto, "X", StringComparison.OrdinalIgnoreCase)
                || string.Equals(texto, "true", StringComparison.OrdinalIgnoreCase)
                || texto == "1";
+    }
+
+    /// <summary>
+    /// GATE 118B: leitura TRI-STATE de decimal no JSON. Propriedade ausente, JSON null, string vazia
+    /// ou texto nao parseavel => null (INDETERMINADO). NUNCA colapsa em 0.
+    /// </summary>
+    private static decimal? LerDecimalNulo(JsonElement elemento, string propriedade)
+    {
+        if (!elemento.TryGetProperty(propriedade, out JsonElement valor))
+        {
+            return null;
+        }
+
+        return valor.ValueKind switch
+        {
+            JsonValueKind.Number when valor.TryGetDecimal(out decimal n) => n,
+            JsonValueKind.String when decimal.TryParse(
+                valor.GetString(),
+                NumberStyles.Number,
+                CultureInfo.InvariantCulture,
+                out decimal s) => s,
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// GATE 118B: leitura TRI-STATE de booleano no JSON. Propriedade ausente, JSON null ou texto nao
+    /// reconhecido => null (INDETERMINADO). NUNCA colapsa em false.
+    /// </summary>
+    private static bool? LerFlagNulo(JsonElement elemento, string propriedade)
+    {
+        if (!elemento.TryGetProperty(propriedade, out JsonElement valor))
+        {
+            return null;
+        }
+
+        return valor.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Number when valor.TryGetInt32(out int n) => n != 0,
+            JsonValueKind.String => InterpretarFlagNulo(valor.GetString()),
+            _ => null
+        };
     }
 
     private static decimal LerDecimal(JsonElement elemento, string propriedade)

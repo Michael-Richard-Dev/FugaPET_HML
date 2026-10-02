@@ -304,11 +304,29 @@ public sealed class ProdutoAcabadoPipelineWiringRev4Tests
             codigoUsuario: 42);
         caixa.CodigoProdutoAcabadoCaixa = 123;
 
+        // GATE 118B: as quantidades do 261 vem do ALOCADOR (deltas), nunca mais da OP em cache.
+        Resultado261Cumulativo alocacao = new(
+            CenarioAllocator261.Ok,
+            "alocacao de teste",
+            [
+                ItemAlocado("13473", "1", "2000044", "PP01", "G", "0000000140", 26.667m),
+                ItemAlocado("13473", "2", "3000007", "PP02", "ST", string.Empty, 26.667m),
+                ItemAlocado("13473", "3", "3000008", "PP02", "ST", string.Empty, 26.667m),
+                ItemAlocado("13473", "4", "3000009", "PP02", "ST", string.Empty, 26.667m)
+            ],
+            8m,
+            []);
+
         ProdutoAcabadoPipelineOrigem origem = ProcessoProdutoAcabadoForm.MontarOrigemPipelineRuntime(
             caixa,
             consulta.Ordem,
-            new DateTime(2026, 8, 12, 21, 57, 0, DateTimeKind.Utc));
+            new DateTime(2026, 8, 12, 21, 57, 0, DateTimeKind.Utc),
+            alocacao);
         ResultadoComandosPipeline resultado = ProdutoAcabadoPipelineCommandBuilder.Construir(origem);
+
+        // As quantidades enviadas sao os DELTAS, nao a RequiredQuantity integral (200) da OP.
+        Assert.All(origem.Componentes, componente => Assert.Equal(26.667m, componente.Quantidade));
+        Assert.DoesNotContain(origem.Componentes, componente => componente.Quantidade == 200m);
 
         Assert.Equal(new DateTime(2026, 8, 12), origem.PostingDate);
         Assert.Equal(new DateTime(2026, 8, 12), origem.DocumentDate);
@@ -344,11 +362,13 @@ public sealed class ProdutoAcabadoPipelineWiringRev4Tests
     {
         string form = LerProjeto("Tela", "Processo", "ProcessoProdutoAcabadoForm.cs");
         string metodo = ExtrairMetodo(form, "private async Task SolicitarEnvioCaixaPipelineAsync()");
-        Assert.Contains("ProdutoAcabadoPipelineOrigem origem = MontarOrigemPipelineRuntime(caixa, _ordemAtual, DateTime.UtcNow);", metodo, StringComparison.Ordinal);
+        // GATE 118B: a origem passou a receber o resultado do alocador (leitura fresca + deltas).
+        Assert.Contains("MontarOrigemPipelineRuntime(caixa, _ordemAtual, DateTime.UtcNow, alocacao)", metodo, StringComparison.Ordinal);
+        Assert.Contains("await _controller.CalcularAlocacao261FrescaAsync(caixa)", metodo, StringComparison.Ordinal);
         string helper = ExtrairMetodo(form, "internal static ProdutoAcabadoPipelineOrigem MontarOrigemPipelineRuntime");
         Assert.Contains("PostingDate = dataOperacionalPipeline", helper, StringComparison.Ordinal);
         Assert.Contains("DocumentDate = dataOperacionalPipeline", helper, StringComparison.Ordinal);
-        Assert.Contains("Componentes = MontarComponentesPipelineRuntime(origemOrdem)", helper, StringComparison.Ordinal);
+        Assert.Contains("Componentes = MontarComponentesPipelineRuntime(alocacao)", helper, StringComparison.Ordinal);
         Assert.Contains("Material101 = caixa.Material", helper, StringComparison.Ordinal);
         Assert.DoesNotContain("DateTime.Now", helper, StringComparison.Ordinal);
         Assert.DoesNotContain("DateTime.Today", helper, StringComparison.Ordinal);
@@ -361,6 +381,24 @@ public sealed class ProdutoAcabadoPipelineWiringRev4Tests
         Assert.DoesNotContain("DateTime.Now", builder, StringComparison.Ordinal);
         Assert.DoesNotContain("DateTime.Today", builder, StringComparison.Ordinal);
     }
+
+    /// <summary>GATE 118B: item de alocacao (delta) para montar a origem do pipeline nos testes.</summary>
+    private static Item261Alocado ItemAlocado(
+        string reserva, string itemReserva, string material, string deposito,
+        string unidade, string lote, decimal delta)
+        => new()
+        {
+            Reservation = reserva,
+            ReservationItem = itemReserva,
+            Material = material,
+            Plant = "3007",
+            StorageLocation = deposito,
+            Batch = lote,
+            Unidade = unidade,
+            TargetCumulative = delta,
+            WithdrawnFresco = 0m,
+            Delta261 = delta
+        };
 
     private static OrdemProducaoSap OrdemSapValidaRuntimeShape()
         => new()
@@ -382,7 +420,8 @@ public sealed class ProdutoAcabadoPipelineWiringRev4Tests
                     Centro = "3007",
                     Deposito = "PP02",
                     QuantidadePrevista = 60m,
-                    QuantidadeEntregue = 0m,
+                    QuantidadePrevistaSap = 60m,
+                    QuantidadeRecebidaSap = 0m, // GATE 118B: MfgOrderItemGoodsReceiptQty (tri-state)
                     Unidade = "UN",
                     Lote = "67008561F"
                 }

@@ -84,7 +84,13 @@ public sealed class ProdutoAcabadoUxHuSaldoTests
     {
         string form = LerFonte("Tela", "Processo", "ProcessoProdutoAcabadoForm.cs");
         // Regra única (não duplica aritmética na View): delega ao cálculo central.
-        Assert.Contains("CalculoSaldoProdutoAcabado.SaldoPendenteExibido(_ordemAtual.QuantidadePendente, _caixasPesadas)", form, StringComparison.Ordinal);
+        // GATE 118B: QuantidadePendente passou a ser TRI-STATE (decimal?), porque deriva de
+        // MfgOrderItemGoodsReceiptQty. A View faz o pattern match e SEGUE delegando ao cálculo
+        // central — a regra única permanece, só o acesso ao valor deixou de assumir não-nulo.
+        Assert.Contains("_ordemAtual?.QuantidadePendente is decimal pendente", form, StringComparison.Ordinal);
+        Assert.Contains("CalculoSaldoProdutoAcabado.SaldoPendenteExibido(pendente, _caixasPesadas)", form, StringComparison.Ordinal);
+        // E a View continua sem aritmética própria de saldo.
+        Assert.DoesNotContain("QuantidadePendente -", form, StringComparison.Ordinal);
         // Usada no carregamento da OP e chamada de refresh após o resultado definitivo do envio.
         Assert.Contains("classificationDateTextBox.Text = FormatarKg(CalcularSaldoPendenteExibido());", form, StringComparison.Ordinal);
         Assert.Contains("AtualizarSaldoPendente();", form, StringComparison.Ordinal);

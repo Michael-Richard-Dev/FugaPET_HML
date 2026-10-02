@@ -1,4 +1,4 @@
-using FugaPET_HML.Controle.Processo;
+﻿using FugaPET_HML.Controle.Processo;
 using FugaPET_HML.Modelo.IntegracaoSap;
 using FugaPET_HML.Modelo.Processo;
 using FugaPET_HML.Servicos.IntegracaoSap;
@@ -90,7 +90,8 @@ public sealed class ProcessoProdutoAcabadoTests
                     Centro = "3007",
                     Deposito = "PA01",
                     QuantidadePrevista = 10m,
-                    QuantidadeEntregue = 10m,
+                    QuantidadePrevistaSap = 10m,
+                    QuantidadeRecebidaSap = 10m,
                     Unidade = "KG",
                     Lote = "L001"
                 }
@@ -763,7 +764,8 @@ public sealed class ProcessoProdutoAcabadoTests
                     Centro = "3007",
                     Deposito = "PA01",
                     QuantidadePrevista = 10m,
-                    QuantidadeEntregue = 2m,
+                    QuantidadePrevistaSap = 10m,
+                    QuantidadeRecebidaSap = 2m,
                     Unidade = "KG",
                     Lote = "L001"
                 }
@@ -778,7 +780,7 @@ public sealed class ProcessoProdutoAcabadoTests
             Centro = "3007",
             DepositoDestino = "PA01",
             QuantidadePlanejada = 10m,
-            QuantidadeEntregue = 2m,
+            QuantidadeRecebidaSap = 2m,
             QuantidadePendente = 8m,
             Unidade = unidade,
             Lote = "L001",

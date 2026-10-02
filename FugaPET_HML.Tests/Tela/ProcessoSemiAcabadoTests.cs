@@ -238,8 +238,12 @@ public sealed class ProcessoSemiAcabadoTests
         Assert.Equal("3007", item.Centro);
         Assert.Equal("PA01", item.DepositoDestino);
         Assert.Equal(10m, item.QuantidadePlanejada);
-        Assert.Equal(2m, item.QuantidadeEntregue);
-        Assert.Equal(8m, item.QuantidadePendente);
+        // GATE 118B: comportamento VIGENTE do Semi-Acabado preservado de forma explicita. Antes este
+        // valor vinha de MfgOrderItemActualDeliveryQty, campo que NAO existe no contrato real, logo
+        // sempre foi 0 em runtime — o 2m do fixture nunca chegava aqui. Apontar o Semi-Acabado para
+        // MfgOrderItemGoodsReceiptQty muda um valor PERSISTIDO e exige gate proprio.
+        Assert.Equal(0m, item.QuantidadeEntregue);
+        Assert.Equal(10m, item.QuantidadePendente);
         Assert.Equal("KG", item.Unidade);
         Assert.True(item.Liberada);
         Assert.False(item.EncerradaOuDeletada);
@@ -1188,7 +1192,10 @@ public sealed class ProcessoSemiAcabadoTests
                     Centro = "3007",
                     Deposito = "PA01",
                     QuantidadePrevista = 10m,
-                    QuantidadeEntregue = 2m,
+                    // GATE 118B: MfgOrderItemActualDeliveryQty nao existe no contrato; o campo que
+                    // alimentava QuantidadeEntregue foi removido. O Semi-Acabado segue FORA do escopo
+                    // 118B e preserva o comportamento vigente (entregue = 0).
+                    QuantidadeRecebidaSap = 2m,
                     Unidade = "KG",
                     Lote = "L001"
                 }

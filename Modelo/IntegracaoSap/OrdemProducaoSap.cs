@@ -48,6 +48,22 @@ public sealed record ComponenteOrdemProducaoSap
     public string UnidadeBase { get; init; } = string.Empty;         // BaseUnit
     public decimal QuantidadeRetirada { get; init; }                 // WithdrawnQuantity
     public decimal QuantidadeDisponivelConfirmada { get; init; }     // ConfirmedAvailableQuantity
+
+    // GATE 118B: espelhos TRI-STATE dos mesmos campos SAP. As tres propriedades acima sao legado
+    // (decimal nao-nullable) e colapsam ausente/null em 0 — comportamento preservado para a Tela de
+    // Consumo. O alocador 261 do Produto Acabado consome EXCLUSIVAMENTE as versoes abaixo, onde
+    // null significa AUSENTE/INDETERMINADO e NUNCA zero.
+    public decimal? QuantidadeNecessariaSap { get; init; }           // RequiredQuantity      Decimal(13,3)
+    public decimal? QuantidadeRetiradaSap { get; init; }             // WithdrawnQuantity     Decimal(13,3)
+    public decimal? QuantidadeDisponivelConfirmadaSap { get; init; } // ConfirmedAvailableQuantity Decimal(15,3)
+
+    /// <summary>
+    /// QuantityIsFixed (Edm.Boolean, Nullable=true). Semantica provada no gate 118B-A1 pela
+    /// documentacao SAP da propria entidade A_ProductionOrderComponent_2:
+    /// false = quantidade PROPORCIONAL a quantidade da ordem; true = quantidade CONSTANTE.
+    /// null = AUSENTE/INDETERMINADO. Proibido converter null em false.
+    /// </summary>
+    public bool? QuantidadeFixa { get; init; }                       // QuantityIsFixed
     public string TipoMovimento { get; init; } = string.Empty;       // GoodsMovementType
     public string Lote { get; init; } = string.Empty;               // Batch
     public string ItemBOM { get; init; } = string.Empty;            // BOMItem
@@ -102,7 +118,23 @@ public sealed record ItemOrdemProducaoSap
     public string Centro { get; init; } = string.Empty;             // ProductionPlant (pode nao vir)
     public string Deposito { get; init; } = string.Empty;           // StorageLocation
     public decimal QuantidadePrevista { get; init; }                 // MfgOrderItemPlannedTotalQty
-    public decimal QuantidadeEntregue { get; init; }                 // MfgOrderItemActualDeliveryQty
+
+    // GATE 118B / 118B-A1: MfgOrderItemActualDeliveryQty NAO EXISTE em A_ProductionOrderItem_2
+    // (zero ocorrencias no $metadata real de API_PRODUCTION_ORDER_2_SRV em QAS110). A propriedade
+    // antiga QuantidadeEntregue era alimentada por esse campo inexistente e, por isso, valia SEMPRE 0.
+    // Foi REMOVIDA em vez de reapontada: o contrato proibe tratar a ausencia como 0, como default ou
+    // como equivalente funcional de MfgOrderItemGoodsReceiptQty.
+    // O campo autoritativo de producao ja recebida e o abaixo, TRI-STATE.
+
+    /// <summary>
+    /// MfgOrderItemGoodsReceiptQty (Edm.Decimal, Precision=13, Scale=3, Nullable=true).
+    /// Quantidade JA RECEBIDA do item da ordem. null = AUSENTE/INDETERMINADO, nunca zero.
+    /// </summary>
+    public decimal? QuantidadeRecebidaSap { get; init; }             // MfgOrderItemGoodsReceiptQty
+
+    /// <summary>MfgOrderItemPlannedTotalQty em TRI-STATE (null = ausente/indeterminado).</summary>
+    public decimal? QuantidadePrevistaSap { get; init; }             // MfgOrderItemPlannedTotalQty
+
     public string Unidade { get; init; } = string.Empty;            // ProductionUnit (pode nao vir)
     public string Lote { get; init; } = string.Empty;               // Batch
 }

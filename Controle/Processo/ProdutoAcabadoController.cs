@@ -422,6 +422,61 @@ public sealed class ProdutoAcabadoController
             origem.CodigoCaixa, comandos.Comando261, comandos.Comando101, usuario, terminal, cancellationToken);
     }
 
+    /// <summary>
+    /// GATE 118B (§5): releitura FRESCA da OP no SAP (STEP 1 item, STEP 2 componentes) + validacao
+    /// (§5 STEP 3) + calculo do alocador cumulativo (STEP 4). NAO envia nada: devolve os DELTAS por
+    /// componente para que o chamador monte a origem do pipeline (STEP 5). Nenhum snapshot atomico e
+    /// alegado; a consistencia cruzada entre as duas leituras e verificada pelo alocador.
+    /// Qualquer indisponibilidade/indeterminacao => Bloqueado com ZERO itens (nenhum POST possivel).
+    /// </summary>
+    public async Task<Resultado261Cumulativo> CalcularAlocacao261FrescaAsync(
+        ProdutoAcabadoCaixa caixa,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(caixa);
+
+        string numeroOrdem = caixa.NumeroOrdemProducao?.Trim() ?? string.Empty;
+        if (numeroOrdem.Length == 0)
+        {
+            return Resultado261Cumulativo.Bloqueado(
+                "Caixa sem OP: alocacao 261 bloqueada (nenhum POST).");
+        }
+
+        LeituraFrescaOrdem261 fresca =
+            await _productionOrderSapServico.ConsultarEstadoFresco261Async(numeroOrdem, cancellationToken);
+
+        if (!fresca.Disponivel || fresca.Item is null)
+        {
+            return Resultado261Cumulativo.Bloqueado(
+                string.IsNullOrWhiteSpace(fresca.Mensagem)
+                    ? "Releitura fresca da OP indisponivel: alocacao 261 bloqueada (nenhum POST)."
+                    : fresca.Mensagem);
+        }
+
+        IReadOnlyList<Componente261Fresco> componentes =
+            ProdutoAcabado261AllocatorCumulativo.ProjetarComponentes(fresca);
+
+        decimal? producaoCaixa = ProdutoAcabado261AllocatorCumulativo.ResolverProducaoCaixaCorrente(
+            caixa, fresca.Item.Unidade);
+
+        Entrada261Cumulativa entrada = new()
+        {
+            NumeroOrdem = numeroOrdem,
+            NumeroOrdemItemFresco = fresca.NumeroOrdemConsultada,
+            PlannedProductionOp = fresca.Item.QuantidadePrevistaSap,
+            PriorProducedConfirmed = fresca.Item.QuantidadeRecebidaSap,
+            CurrentBoxProduction = producaoCaixa,
+            ProductionUnit = fresca.Item.Unidade,
+            Componentes = componentes,
+            ComponentesCompletosComprovado = fresca.ComponentesCompletos,
+            ConsumoLocalConfirmadoPorComponente =
+                ProdutoAcabado261AllocatorCumulativo.DerivarLedgerLocalEsperado(
+                    componentes, fresca.Item.QuantidadeRecebidaSap, fresca.Item.QuantidadePrevistaSap)
+        };
+
+        return ProdutoAcabado261AllocatorCumulativo.Calcular(entrada);
+    }
+
     public bool SapSimulado => _productionOrderSapServico.EhSimulado;
 
     public async Task<ResultadoConsultaProdutoAcabado> ConsultarOrdemProducaoAsync(
@@ -1057,7 +1112,12 @@ public sealed class ProdutoAcabadoController
     {
         ItemOrdemProducaoSap? item = ordemSap.Itens.FirstOrDefault();
         decimal planejada = item?.QuantidadePrevista ?? ordemSap.QuantidadePrevista;
-        decimal entregue = item?.QuantidadeEntregue ?? 0m;
+
+        // GATE 118B: a producao JA recebida vem de MfgOrderItemGoodsReceiptQty em TRI-STATE.
+        // O campo antigo (MfgOrderItemActualDeliveryQty) NAO existe no contrato real e por isso valia
+        // sempre 0. Aqui o null e PRESERVADO ate a camada de exibicao; nenhuma decisao de envio usa
+        // este valor — o alocador 261 le o tri-state direto da leitura FRESCA.
+        decimal? recebida = item?.QuantidadeRecebidaSap;
 
         return new ProdutoAcabadoOrdem
         {
@@ -1069,8 +1129,9 @@ public sealed class ProdutoAcabadoController
             Centro = PrimeiroTexto(item?.Centro, ordemSap.Centro),
             DepositoDestino = PrimeiroTexto(item?.Deposito, ordemSap.Deposito),
             QuantidadePlanejada = planejada,
-            QuantidadeEntregue = entregue,
-            QuantidadePendente = Math.Max(planejada - entregue, 0m),
+            QuantidadeRecebidaSap = recebida,
+            // Pendente so e calculavel quando o recebido e CONHECIDO; indeterminado => null.
+            QuantidadePendente = recebida is decimal r ? Math.Max(planejada - r, 0m) : null,
             Unidade = PrimeiroTexto(item?.Unidade, ordemSap.Unidade, "KG").ToUpperInvariant(),
             Lote = PrimeiroTexto(item?.Lote, ordemSap.Lote),
             ItemOrdem = item?.ItemOrdem?.Trim() ?? string.Empty,

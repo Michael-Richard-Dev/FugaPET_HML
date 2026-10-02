@@ -695,9 +695,11 @@ public partial class ProcessoProdutoAcabadoForm : Form
     /// ÚNICA, reutilizada no carregamento da OP e após cada confirmação — sem acessar banco/OData na Form.
     /// </summary>
     private decimal CalcularSaldoPendenteExibido()
-        => _ordemAtual is null
-            ? 0m
-            : CalculoSaldoProdutoAcabado.SaldoPendenteExibido(_ordemAtual.QuantidadePendente, _caixasPesadas);
+        // GATE 118B: QuantidadePendente agora e TRI-STATE. Pendente indeterminado exibe 0 (apenas
+        // EXIBICAO, igual ao comportamento anterior quando nao havia OP) e nunca alimenta decisao de envio.
+        => _ordemAtual?.QuantidadePendente is decimal pendente
+            ? CalculoSaldoProdutoAcabado.SaldoPendenteExibido(pendente, _caixasPesadas)
+            : 0m;
 
     /// <summary>REGRA 4: atualiza IMEDIATAMENTE o campo SALDO PENDENTE (sem recarregar a OP), pela regra única.</summary>
     private void AtualizarSaldoPendente()
@@ -943,9 +945,22 @@ public partial class ProcessoProdutoAcabadoForm : Form
         }
 
         string terminal = _contextoTerminal?.NomeTerminal ?? string.Empty;
+
+        // GATE 118B (§5 STEP 1..4): IMEDIATAMENTE antes do calculo definitivo, relê item + componentes
+        // no SAP e roda o alocador cumulativo. Bloqueio aqui => nenhum POST (261/101/HU nem comecam).
+        Resultado261Cumulativo alocacao = await _controller.CalcularAlocacao261FrescaAsync(caixa);
+        if (alocacao.Cenario != CenarioAllocator261.Ok)
+        {
+            statusLabel.Text = alocacao.Mensagem;
+            MessageBox.Show(alocacao.Mensagem, "Produto Acabado", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
         // Origem SEM inferência: a View só entrega dados funcionais confiáveis (OP + caixa). Identidade técnica
         // de tentativa/correlation é responsabilidade do orquestrador/store. Campos 261/101 seguem fail-closed.
-        ProdutoAcabadoPipelineOrigem origem = MontarOrigemPipelineRuntime(caixa, _ordemAtual, DateTime.UtcNow);
+        // (§5 STEP 5) As quantidades do 261 sao os DELTAS do alocador, nunca a necessidade integral da OP.
+        ProdutoAcabadoPipelineOrigem origem =
+            MontarOrigemPipelineRuntime(caixa, _ordemAtual, DateTime.UtcNow, alocacao);
 
         _envioCaixaSapEmAndamento = true;
         AtualizarEstadoEnvioCaixaSap();
@@ -1064,10 +1079,19 @@ public partial class ProcessoProdutoAcabadoForm : Form
     /// espelhando o contrato homologado do 261 (PostingDate e DocumentDate recebem a mesma data explícita).
     /// Sem data de envio, retorna MinValue para o builder bloquear fail-closed.
     /// </summary>
+    /// <remarks>
+    /// GATE 118B: os componentes do 261 NAO sao mais derivados da OP em cache. A quantidade por caixa
+    /// vem EXCLUSIVAMENTE do alocador cumulativo, alimentado por leitura FRESCA do SAP, e e o DELTA
+    /// contra o WithdrawnQuantity fresco — nunca a RequiredQuantity integral da OP (defeito do
+    /// incidente). O parametro <paramref name="alocacao"/> e obrigatorio e precisa estar em
+    /// <see cref="CenarioAllocator261.Ok"/>; qualquer outro cenario produz origem SEM componentes, que
+    /// o builder de commands bloqueia fail-closed (zero HTTP).
+    /// </remarks>
     internal static ProdutoAcabadoPipelineOrigem MontarOrigemPipelineRuntime(
         ProdutoAcabadoCaixa caixa,
         ProdutoAcabadoOrdem? ordem,
-        DateTime dataLancamentoUtc)
+        DateTime dataLancamentoUtc,
+        Resultado261Cumulativo? alocacao)
     {
         ArgumentNullException.ThrowIfNull(caixa);
 
@@ -1080,7 +1104,7 @@ public partial class ProcessoProdutoAcabadoForm : Form
             NumeroOrdem = caixa.NumeroOrdemProducao ?? origemOrdem?.NumeroOrdem ?? string.Empty,
             PostingDate = dataOperacionalPipeline,
             DocumentDate = dataOperacionalPipeline,
-            Componentes = MontarComponentesPipelineRuntime(origemOrdem),
+            Componentes = MontarComponentesPipelineRuntime(alocacao),
             Material101 = caixa.Material,
             Plant101 = caixa.Centro,
             StorageLocation101 = caixa.Deposito,
@@ -1091,26 +1115,29 @@ public partial class ProcessoProdutoAcabadoForm : Form
         };
     }
 
-    private static IReadOnlyList<ProdutoAcabadoComponenteOrigem> MontarComponentesPipelineRuntime(ProdutoAcabadoOrdem? ordem)
+    /// <summary>
+    /// GATE 118B: projeta os DELTAS do alocador nos componentes do 261. Alocacao ausente, bloqueada ou
+    /// com nada a enviar => lista VAZIA (o builder bloqueia). Zero fallback para a OP em cache.
+    /// </summary>
+    internal static IReadOnlyList<ProdutoAcabadoComponenteOrigem> MontarComponentesPipelineRuntime(
+        Resultado261Cumulativo? alocacao)
     {
-        if (ordem?.Componentes is null || ordem.Componentes.Count == 0)
+        if (alocacao is null || alocacao.Cenario != CenarioAllocator261.Ok || alocacao.Itens.Count == 0)
         {
             return [];
         }
 
-        return ordem.Componentes
-            .Where(componente => string.IsNullOrWhiteSpace(componente.TipoMovimento)
-                || string.Equals(componente.TipoMovimento.Trim(), "261", StringComparison.OrdinalIgnoreCase))
-            .Select(componente => new ProdutoAcabadoComponenteOrigem
+        return alocacao.Itens
+            .Select(item => new ProdutoAcabadoComponenteOrigem
             {
-                Material = componente.Material,
-                Plant = componente.Centro,
-                StorageLocation = componente.Deposito,
-                Quantidade = componente.QuantidadeNecessaria,
-                Unidade = componente.Unidade,
-                Reservation = componente.Reserva,
-                ReservationItem = componente.ItemReserva,
-                Batch = componente.Lote
+                Material = item.Material,
+                Plant = item.Plant,
+                StorageLocation = item.StorageLocation,
+                Quantidade = item.Delta261,
+                Unidade = item.Unidade,
+                Reservation = item.Reservation,
+                ReservationItem = item.ReservationItem,
+                Batch = item.Batch
             })
             .ToArray();
     }
@@ -1374,7 +1401,11 @@ public partial class ProcessoProdutoAcabadoForm : Form
         // REGRA 4: saldo pendente exibido = regra ÚNICA (OP.QuantidadePendente − caixas CONFIRMADA_SAP).
         classificationDateTextBox.Text = FormatarKg(CalcularSaldoPendenteExibido());
         manufacturingDateTextBox.Text = FormatarKg(_ordemAtual.QuantidadePlanejada);
-        expirationDateTextBox.Text = FormatarKg(_ordemAtual.QuantidadeEntregue);
+        // GATE 118B: producao recebida e TRI-STATE (MfgOrderItemGoodsReceiptQty). Indeterminado NAO
+        // vira "0,000" na tela: mostra vazio, para nao simular um valor que o SAP nao devolveu.
+        expirationDateTextBox.Text = _ordemAtual.QuantidadeRecebidaSap is decimal recebidaSap
+            ? FormatarKg(recebidaSap)
+            : string.Empty;
         readForecastBoxesTextBox.Text = _normaEmbalagem?.QuantidadeProdutosPorCaixa.ToString(CultureInfo.InvariantCulture) ?? "0";
         // NORMA EMBALAGEM: PackagingInstruction quando preenchido; "NÃO INFORMADA" quando há norma válida
         // sem código; vazio quando não há norma válida.
@@ -2825,7 +2856,10 @@ public partial class ProcessoProdutoAcabadoForm : Form
             decimal liquido = _caixasPesadas.Sum(caixa => caixa.PesoLiquidoKg);
             packagesCounterLabel.Text = FormatarKg(liquido);
             packagesValueLabel.Text = FormatarKg(liquido);
-            packagesTotalLabel.Text = temOp ? $"de {FormatarKg(_ordemAtual!.QuantidadePendente)} KG" : "de 0";
+            // GATE 118B: pendente TRI-STATE — indeterminado nao inventa numero no rodape.
+            packagesTotalLabel.Text = _ordemAtual?.QuantidadePendente is decimal pendentePeso
+                ? $"de {FormatarKg(pendentePeso)} KG"
+                : "de 0";
         }
         else
         {
@@ -2833,8 +2867,8 @@ public partial class ProcessoProdutoAcabadoForm : Form
             int produtos = _caixasPesadas.Sum(caixa => caixa.QuantidadeProdutos);
             packagesCounterLabel.Text = produtos.ToString("000", CultureInfo.InvariantCulture);
             packagesValueLabel.Text = produtos.ToString("000", CultureInfo.InvariantCulture);
-            packagesTotalLabel.Text = temOp
-                ? $"de {_ordemAtual!.QuantidadePendente.ToString("0", CultureInfo.InvariantCulture)}"
+            packagesTotalLabel.Text = _ordemAtual?.QuantidadePendente is decimal pendenteQtd
+                ? $"de {pendenteQtd.ToString("0", CultureInfo.InvariantCulture)}"
                 : "de 0";
         }
 
