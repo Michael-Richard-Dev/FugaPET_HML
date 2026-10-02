@@ -187,7 +187,7 @@ public sealed class ProcessoProdutoAcabadoTests
         Assert.Contains("RegistrarPesoManualAsync", form, StringComparison.Ordinal);
         Assert.Contains("GarantirTaraCaixaSelecionadaAsync", form, StringComparison.Ordinal);
         Assert.Contains("decimal pesoLiquidoKg = pesoBrutoKg - taraKg;", form, StringComparison.Ordinal);
-        Assert.Contains("await RegistrarCaixaProdutoAcabadoAsync(pesoBrutoKg, tara.PesoKg, \"BALANCA\")", form, StringComparison.Ordinal);
+        Assert.Contains("await RegistrarCaixaProdutoAcabadoAsync(pesoBrutoKg, tara.PesoKg, \"BALANCA\", leitura.CodigoBalanca)", form, StringComparison.Ordinal);
         Assert.Contains("await RegistrarCaixaProdutoAcabadoAsync(pesoBrutoKg, tara.PesoKg, \"MANUAL\")", form, StringComparison.Ordinal);
         Assert.Contains("Peso total das caixas ultrapassa o saldo pendente da OP.", form, StringComparison.Ordinal);
         // Tarefa 21.6 (Ajuste 6): colunas separadas (sem cabecalho combinado Tara/Líquido ou Origem/Status).
@@ -477,7 +477,7 @@ public sealed class ProcessoProdutoAcabadoTests
     {
         // §9/§11.E: material de embalagem por origem controlada (nunca PALLET01); preview inválido bloqueia add.
         string form = LerArquivoProjeto("Tela", "Processo", "ProcessoProdutoAcabadoForm.cs");
-        string registrar = ExtrairMetodo(form, "private async Task<bool> RegistrarCaixaProdutoAcabadoAsync(decimal pesoBrutoKg, decimal taraKg, string origem)");
+        string registrar = ExtrairMetodo(form, "private async Task<bool> RegistrarCaixaProdutoAcabadoAsync(decimal pesoBrutoKg, decimal taraKg, string origem,");
 
         Assert.Contains("ObterMaterialEmbalagemCaixaControlada()", registrar, StringComparison.Ordinal);
         Assert.Contains("await _controller.FinalizarCaixaLocalAsync(", registrar, StringComparison.Ordinal);
@@ -564,7 +564,7 @@ public sealed class ProcessoProdutoAcabadoTests
         string form = LerArquivoProjeto("Tela", "Processo", "ProcessoProdutoAcabadoForm.cs");
         string registrar = ExtrairMetodo(
             form,
-            "private async Task<bool> RegistrarCaixaProdutoAcabadoAsync(decimal pesoBrutoKg, decimal taraKg, string origem)");
+            "private async Task<bool> RegistrarCaixaProdutoAcabadoAsync(decimal pesoBrutoKg, decimal taraKg, string origem,");
         // §1: delega ao Controller/Service persistente (nunca transição manual de estado persistente).
         int delegacao = registrar.IndexOf("await _controller.FinalizarCaixaLocalAsync(", StringComparison.Ordinal);
         int atualizacaoVisual = registrar.IndexOf("AtualizarBotoesOperacao();", StringComparison.Ordinal);

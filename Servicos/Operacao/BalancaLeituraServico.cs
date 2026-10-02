@@ -63,7 +63,10 @@ public sealed class BalancaLeituraServico
     {
         try
         {
-            return ResultadoLeituraPeso.Ok(_leitorBalanca.LerPeso(configuracao));
+            return ResultadoLeituraPeso.Ok(_leitorBalanca.LerPeso(configuracao)) with
+            {
+                CodigoBalanca = configuracao.CodigoBalanca
+            };
         }
         catch (ErroOperacionalEsperadoException ex)
         {
@@ -143,6 +146,7 @@ public sealed class BalancaLeituraServico
 
         return new BalancaLeituraConfiguracao
         {
+            CodigoBalanca = balanca.CodigoBalanca,
             PortaSerial = balanca.PortaSerial,
             BaudRate = balanca.BaudRate ?? 4800,
             DataBits = balanca.DataBits ?? 7,

@@ -641,7 +641,8 @@ public sealed class ProdutoAcabadoController
         string? materialEmbalagem = null,
         OrigemMaterialEmbalagemCaixa origemMaterialEmbalagem = OrigemMaterialEmbalagemCaixa.NaoInformada,
         string terminal = "",
-        long? codigoUsuario = null)
+        long? codigoUsuario = null,
+        long? codigoBalanca = null)
     {
         ArgumentNullException.ThrowIfNull(ordem);
         ArgumentNullException.ThrowIfNull(norma);
@@ -682,6 +683,8 @@ public sealed class ProdutoAcabadoController
             QuantidadeProdutos = norma.QuantidadeProdutosPorCaixa,
             UnidadeQuantidade = (norma.Unidade ?? string.Empty).Trim().ToUpperInvariant(),
             OrigemPesagem = origemPesagem,
+            CodigoBalanca = string.Equals(origemPesagem, "BALANCA", StringComparison.OrdinalIgnoreCase)
+                ? codigoBalanca : null,
             CorrelationId = Guid.NewGuid(),
             StatusIntegracao = StatusIntegracaoCaixa.FinalizadaLocal,
             Terminal = terminal ?? string.Empty,
@@ -702,7 +705,8 @@ public sealed class ProdutoAcabadoController
         string? materialEmbalagem = null,
         OrigemMaterialEmbalagemCaixa origemMaterialEmbalagem = OrigemMaterialEmbalagemCaixa.NaoInformada,
         string terminal = "",
-        long? codigoUsuario = null)
+        long? codigoUsuario = null,
+        long? codigoBalanca = null)
     {
         ProdutoAcabadoCaixa caixa = MontarCaixa(
             ordem,
@@ -714,7 +718,8 @@ public sealed class ProdutoAcabadoController
             materialEmbalagem,
             origemMaterialEmbalagem,
             terminal,
-            codigoUsuario);
+            codigoUsuario,
+            codigoBalanca);
         caixa.CodigoCaixaLocal = string.Empty;
         return caixa;
     }
@@ -946,7 +951,9 @@ public sealed class ProdutoAcabadoController
         long? codigoUsuario = null,
         string? materialEmbalagem = null,
         OrigemMaterialEmbalagemCaixa origemMaterialEmbalagem = OrigemMaterialEmbalagemCaixa.NaoInformada,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        long? codigoBalanca = null,
+        Action<Servicos.Diagnostico.EtapaRegistroCaixa120E>? diagnostico = null)
     {
         ArgumentNullException.ThrowIfNull(ordem);
         ArgumentNullException.ThrowIfNull(norma);
@@ -955,12 +962,19 @@ public sealed class ProdutoAcabadoController
             return ResultadoFinalizacaoCaixa.Bloqueada("UsuÃ¡rio nÃ£o identificado para registrar a caixa.", null);
         }
 
+        diagnostico?.Invoke(Servicos.Diagnostico.EtapaRegistroCaixa120E.MONTAR_CAIXA);
+        if (string.Equals(origemPesagem.Trim(), "BALANCA", StringComparison.OrdinalIgnoreCase)
+            && codigoBalanca is not > 0)
+        {
+            throw new InvalidOperationException("Pesagem BALANCA exige codigo_balanca resolvido.");
+        }
+
         ProdutoAcabadoCaixa caixa = MontarCaixaSemIdentidadeSequencial(
             ordem, norma, pesoBrutoKg, taraKg, origemPesagem,
-            materialEmbalagem, origemMaterialEmbalagem, terminal, codigoUsuario);
+            materialEmbalagem, origemMaterialEmbalagem, terminal, codigoUsuario, codigoBalanca);
 
         ResultadoFinalizacaoHu resultado = await _huService.RegistrarEFinalizarCaixaAsync(
-            caixa, usuario, terminal, cancellationToken);
+            caixa, usuario, terminal, cancellationToken, diagnostico);
 
         return resultado.Sucesso && resultado.Caixa is not null
             ? ResultadoFinalizacaoCaixa.Ok(resultado.Caixa, resultado.RequestJson, EnvioHuAutorizado)

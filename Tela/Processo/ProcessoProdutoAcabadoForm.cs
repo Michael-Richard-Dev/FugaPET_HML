@@ -1738,7 +1738,7 @@ public partial class ProcessoProdutoAcabadoForm : Form
             return;
         }
 
-        await RegistrarCaixaProdutoAcabadoAsync(pesoBrutoKg, tara.PesoKg, "BALANCA");
+        await RegistrarCaixaProdutoAcabadoAsync(pesoBrutoKg, tara.PesoKg, "BALANCA", leitura.CodigoBalanca);
     }
 
     private async Task RegistrarPesoManualAsync()
@@ -1770,7 +1770,8 @@ public partial class ProcessoProdutoAcabadoForm : Form
         await RegistrarCaixaProdutoAcabadoAsync(pesoBrutoKg, tara.PesoKg, "MANUAL");
     }
 
-    private async Task<bool> RegistrarCaixaProdutoAcabadoAsync(decimal pesoBrutoKg, decimal taraKg, string origem)
+    private async Task<bool> RegistrarCaixaProdutoAcabadoAsync(decimal pesoBrutoKg, decimal taraKg, string origem,
+        long? codigoBalanca = null)
     {
         if (_ordemAtual is null || _normaEmbalagem is null)
         {
@@ -1810,6 +1811,7 @@ public partial class ProcessoProdutoAcabadoForm : Form
         // §1: a finalização REAL delega ao Controller → ProdutoAcabadoHuService → Repository (banco = fonte
         // da verdade). O snapshot PERSISTIDO (com numeração/estado do banco) substitui o objeto temporário.
         ResultadoFinalizacaoCaixa resultado;
+        var etapaRegistro = Servicos.Diagnostico.EtapaRegistroCaixa120E.MONTAR_CAIXA;
         try
         {
             resultado = await _controller.FinalizarCaixaLocalAsync(
@@ -1821,11 +1823,17 @@ public partial class ProcessoProdutoAcabadoForm : Form
                 terminal,
                 codigoUsuario: codigoUsuario,
                 materialEmbalagem: string.IsNullOrWhiteSpace(materialEmbalagem) ? null : materialEmbalagem,
-                origemMaterialEmbalagem: origemEmbalagem);
+                origemMaterialEmbalagem: origemEmbalagem,
+                codigoBalanca: codigoBalanca,
+                diagnostico: etapa =>
+                {
+                    etapaRegistro = etapa;
+                    Servicos.Diagnostico.RegistroCaixaDiag120E.Registrar(etapa);
+                });
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Trace.TraceWarning($"[ProdutoAcabado] Falha ao registrar caixa no banco: {ex.GetType().Name}");
+            Servicos.Diagnostico.RegistroCaixaDiag120E.Registrar(etapaRegistro, ex);
             MessageBox.Show("Não foi possível registrar a caixa no banco. Tente novamente.", "Produto Acabado", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return false;
         }

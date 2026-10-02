@@ -79,10 +79,12 @@ public sealed class ProdutoAcabadoHuService : IProdutoAcabadoHuBridgeServico
     /// registrar. Retorna o snapshot persistido final.
     /// </summary>
     public async Task<ResultadoFinalizacaoHu> RegistrarEFinalizarCaixaAsync(
-        ProdutoAcabadoCaixa caixa, long usuario, string terminal, CancellationToken cancellationToken = default)
+        ProdutoAcabadoCaixa caixa, long usuario, string terminal, CancellationToken cancellationToken = default,
+        Action<Servicos.Diagnostico.EtapaRegistroCaixa120E>? diagnostico = null)
     {
         ArgumentNullException.ThrowIfNull(caixa);
 
+        diagnostico?.Invoke(Servicos.Diagnostico.EtapaRegistroCaixa120E.CONSULTAR_CAIXA_ATIVA);
         ProdutoAcabadoCaixa? ativa = await _repositorio.ObterAtivaPorTerminalAsync(terminal, cancellationToken);
         if (ativa is not null)
         {
@@ -91,16 +93,19 @@ public sealed class ProdutoAcabadoHuService : IProdutoAcabadoHuBridgeServico
                 + "Conclua ou cancele antes de registrar outra.", ativa);
         }
 
+        diagnostico?.Invoke(Servicos.Diagnostico.EtapaRegistroCaixa120E.MONTAR_PREVIEW);
         ResultadoRequestHandlingUnitCaixa request = _requestBuilder.Montar(caixa);
         if (!request.Sucesso || request.Request is null)
         {
             return ResultadoFinalizacaoHu.Bloqueado(request.Mensagem, null);
         }
 
+        diagnostico?.Invoke(Servicos.Diagnostico.EtapaRegistroCaixa120E.INSERIR_CAIXA);
         ProdutoAcabadoCaixa persistida = await _repositorio.RegistrarCaixaAsync(caixa, cancellationToken);
         long codigo = persistida.CodigoProdutoAcabadoCaixa
             ?? throw new InvalidOperationException("Caixa persistida sem código.");
 
+        diagnostico?.Invoke(Servicos.Diagnostico.EtapaRegistroCaixa120E.INSERIR_PESAGEM);
         await _repositorio.RegistrarPesagemAsync(new RegistroPesagemHuCaixa
         {
             CodigoHuCaixa = codigo,
@@ -116,6 +121,7 @@ public sealed class ProdutoAcabadoHuService : IProdutoAcabadoHuBridgeServico
 
         // REV4-§5/§10: TODA póscondição bool do contrato 044 é verificada; false ⇒ BLOQUEADO (nunca vira
         // sucesso lógico da camada Service). A finalização só é OK depois de comprovar o snapshot persistido.
+        diagnostico?.Invoke(Servicos.Diagnostico.EtapaRegistroCaixa120E.FINALIZAR_LOCAL);
         if (!await _repositorio.FinalizarLocalAsync(codigo, usuario, terminal, cancellationToken))
         {
             return ResultadoFinalizacaoHu.Bloqueado(
@@ -132,6 +138,7 @@ public sealed class ProdutoAcabadoHuService : IProdutoAcabadoHuBridgeServico
         // relemos a caixa do repositório e comprovamos EXPLICITAMENTE código + FINALIZADA_LOCAL — a janela
         // que fn_pa_045_iniciar_fluxo aceita. Snapshot ausente, leitura com falha, código divergente ou
         // status diferente ⇒ FAIL-CLOSED sem binding, sem preview, sem aguardar, sem SAP.
+        diagnostico?.Invoke(Servicos.Diagnostico.EtapaRegistroCaixa120E.VERIFICAR_FINALIZACAO_E_BINDING);
         if (_estabelecerBindingPipeline045 is not null)
         {
             ProdutoAcabadoCaixa? snapshotFinalizado;
@@ -162,6 +169,7 @@ public sealed class ProdutoAcabadoHuService : IProdutoAcabadoHuBridgeServico
             }
         }
 
+        diagnostico?.Invoke(Servicos.Diagnostico.EtapaRegistroCaixa120E.SALVAR_PREVIEW);
         if (!await _repositorio.SalvarPreviewAsync(codigo, request.JsonSanitizado, request.Endpoint, cancellationToken))
         {
             return ResultadoFinalizacaoHu.Bloqueado(
@@ -169,6 +177,7 @@ public sealed class ProdutoAcabadoHuService : IProdutoAcabadoHuBridgeServico
                 await _repositorio.ObterPorCodigoAsync(codigo, cancellationToken) ?? persistida);
         }
 
+        diagnostico?.Invoke(Servicos.Diagnostico.EtapaRegistroCaixa120E.AGUARDAR_AUTORIZACAO);
         if (!await _repositorio.AguardarAutorizacaoAsync(codigo, cancellationToken))
         {
             return ResultadoFinalizacaoHu.Bloqueado(
@@ -178,6 +187,7 @@ public sealed class ProdutoAcabadoHuService : IProdutoAcabadoHuBridgeServico
 
         // Recarrega o snapshot e só declara OK se o estado persistido for o esperado (AGUARDANDO_AUTORIZACAO_SAP)
         // ou um estado comprovadamente posterior permitido pelo contrato sob concorrência controlada (PRONTA).
+        diagnostico?.Invoke(Servicos.Diagnostico.EtapaRegistroCaixa120E.RELER_SNAPSHOT);
         ProdutoAcabadoCaixa? snapshot = await _repositorio.ObterPorCodigoAsync(codigo, cancellationToken);
         if (snapshot is null
             || snapshot.StatusIntegracao is not (StatusIntegracaoCaixa.AguardandoAutorizacaoSap or StatusIntegracaoCaixa.ProntaParaEnvio))
@@ -501,4 +511,3 @@ public sealed record ResultadoReconciliacaoHu(CenarioReconciliacaoHu Cenario, st
     public static ResultadoReconciliacaoHu NaoEncontrada(string mensagem, ProdutoAcabadoCaixa? caixa) => new(CenarioReconciliacaoHu.NaoEncontrada, mensagem, null, caixa);
     public static ResultadoReconciliacaoHu Indeterminada(string mensagem, ProdutoAcabadoCaixa? caixa) => new(CenarioReconciliacaoHu.Indeterminada, mensagem, null, caixa);
 }
-

@@ -6,6 +6,8 @@ namespace FugaPET_HML.Servicos.Operacao;
 /// </summary>
 public sealed record ResultadoLeituraPeso(bool Sucesso, string Peso, string Mensagem)
 {
+    public long? CodigoBalanca { get; init; }
+
     public static ResultadoLeituraPeso Ok(string peso) => new(true, peso, string.Empty);
 
     public static ResultadoLeituraPeso Falha(string mensagem) => new(false, string.Empty, mensagem);
