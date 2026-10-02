@@ -113,6 +113,14 @@ public sealed record OperacaoOrdemProducaoSap
 /// <summary>Item da OP (to_ProductionOrderItem / A_ProductionOrderItem_2).</summary>
 public sealed record ItemOrdemProducaoSap
 {
+    /// <summary>
+    /// GATE 118B-R4: OP REALMENTE RETORNADA pelo SAP no item (ManufacturingOrder), parte da KEY de
+    /// A_ProductionOrderItem_2. Antes era descartada no mapeamento, o que tornava a checagem
+    /// cruzada "OP solicitada x OP do item" TAUTOLOGICA (comparava a request consigo mesma).
+    /// Vazia = AUSENTE; nunca e preenchida por fallback da OP solicitada.
+    /// </summary>
+    public string NumeroOrdem { get; init; } = string.Empty;         // ManufacturingOrder
+
     public string ItemOrdem { get; init; } = string.Empty;           // ManufacturingOrderItem
     public string Material { get; init; } = string.Empty;            // Material
     public string Centro { get; init; } = string.Empty;             // ProductionPlant (pode nao vir)

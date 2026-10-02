@@ -516,7 +516,9 @@ public sealed class ProdutoAcabado261AllocatorCumulativo118BTests
             Entrada(ComponentesFixture(), 0m, 8m, ordemItem: "1000210"));
 
         Assert.Equal(CenarioAllocator261.Bloqueado, r.Cenario);
-        Assert.Equal(ProdutoAcabado261AllocatorCumulativo.MotivoContradicaoEntreLeituras, r.Mensagem);
+        // GATE 118B-R4: motivo generico substituido por codigo explicito de MISMATCH.
+        Assert.Equal(ProdutoAcabado261AllocatorCumulativo.MotivoItemOrdemDivergente, r.Mensagem);
+        Assert.Contains("ITEM_MANUFACTURING_ORDER_MISMATCH", r.Mensagem, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -531,7 +533,8 @@ public sealed class ProdutoAcabado261AllocatorCumulativo118BTests
             Entrada(componentes, priorProduzido: 0m, caixaCorrente: 8m));
 
         Assert.Equal(CenarioAllocator261.Bloqueado, r.Cenario);
-        Assert.Equal(ProdutoAcabado261AllocatorCumulativo.MotivoContradicaoEntreLeituras, r.Mensagem);
+        Assert.Contains("COMPONENT_MANUFACTURING_ORDER_MISMATCH", r.Mensagem, StringComparison.Ordinal);
+        Assert.Contains("3092/1", r.Mensagem, StringComparison.Ordinal);
     }
 
     [Fact]

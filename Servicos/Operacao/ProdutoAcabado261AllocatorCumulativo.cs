@@ -155,8 +155,24 @@ public static class ProdutoAcabado261AllocatorCumulativo
     public const string MotivoLedgerIndisponivel =
         "Ledger local de consumo indisponivel: BLOCK_RECONCILIATION_REQUIRED (nenhum POST).";
 
-    public const string MotivoContradicaoEntreLeituras =
-        "Contradicao entre a leitura do item e a dos componentes (OP divergente): BLOCK (nenhum POST).";
+    // GATE 118B-R4: a contradicao entre leituras deixou de ter UM motivo generico. Sao quatro
+    // condicoes materialmente diferentes, cada uma com codigo proprio, porque "o SAP nao devolveu a
+    // OP" e um defeito de contrato e "o SAP devolveu OUTRA OP" e um erro de correlacao.
+    public const string MotivoItemOrdemAusente =
+        "ITEM_MANUFACTURING_ORDER_MISSING: o item retornado pelo SAP nao traz ManufacturingOrder. "
+        + "Correlacao com a OP solicitada nao comprovavel. BLOCK (nenhum POST).";
+
+    public const string MotivoItemOrdemDivergente =
+        "ITEM_MANUFACTURING_ORDER_MISMATCH: a OP do item retornado pelo SAP difere da OP solicitada. "
+        + "BLOCK (nenhum POST).";
+
+    public const string MotivoComponenteOrdemAusente =
+        "COMPONENT_MANUFACTURING_ORDER_MISSING: componente retornado sem ManufacturingOrder. "
+        + "BLOCK (nenhum POST).";
+
+    public const string MotivoComponenteOrdemDivergente =
+        "COMPONENT_MANUFACTURING_ORDER_MISMATCH: a OP do componente difere da OP solicitada/do item. "
+        + "BLOCK (nenhum POST).";
 
     public static Resultado261Cumulativo Calcular(Entrada261Cumulativa entrada)
     {
@@ -167,13 +183,21 @@ public static class ProdutoAcabado261AllocatorCumulativo
             return Resultado261Cumulativo.Bloqueado("Alocador 261 sem OP: BLOCK (nenhum POST).");
         }
 
-        // ---- §5 STEP 3: consistencia CRUZADA entre as duas leituras (nao ha snapshot atomico) ----
-        if (!string.Equals(
-                entrada.NumeroOrdemItemFresco.Trim(),
-                entrada.NumeroOrdem.Trim(),
-                StringComparison.OrdinalIgnoreCase))
+        // ---- §5 STEP 3 / R4 §5: consistencia CRUZADA real entre as duas leituras.
+        // NumeroOrdemItemFresco precisa ser a OP MATERIALMENTE RETORNADA no item pelo SAP. Se vier do
+        // eco da request, esta comparacao e tautologica e nao prova nada (blocker do 118E).
+        // Nao ha snapshot atomico: por isso a checagem e obrigatoria aqui, antes de qualquer item.
+        string opSolicitada = entrada.NumeroOrdem.Trim();
+        string opItem = entrada.NumeroOrdemItemFresco?.Trim() ?? string.Empty;
+
+        if (opItem.Length == 0)
         {
-            return Resultado261Cumulativo.Bloqueado(MotivoContradicaoEntreLeituras);
+            return Resultado261Cumulativo.Bloqueado(MotivoItemOrdemAusente);
+        }
+
+        if (!string.Equals(opItem, opSolicitada, StringComparison.OrdinalIgnoreCase))
+        {
+            return Resultado261Cumulativo.Bloqueado(MotivoItemOrdemDivergente);
         }
 
         if (string.IsNullOrWhiteSpace(entrada.ProductionUnit))
@@ -236,10 +260,21 @@ public static class ProdutoAcabado261AllocatorCumulativo
                     "Componente sem Reservation/ReservationItem: identidade nao deterministica. BLOCK (nenhum POST).");
             }
 
-            if (!string.IsNullOrWhiteSpace(componente.NumeroOrdem)
-                && !string.Equals(componente.NumeroOrdem.Trim(), entrada.NumeroOrdem.Trim(), StringComparison.OrdinalIgnoreCase))
+            // R4 §6/§7: AUSENCIA tambem bloqueia. Antes, componente sem OP passava — o que permitia
+            // consumir componente de origem nao comprovada. Agora a condicao necessaria e a
+            // igualdade TRIPLA: solicitada == item == TODOS os componentes.
+            string opComponente = componente.NumeroOrdem?.Trim() ?? string.Empty;
+            if (opComponente.Length == 0)
             {
-                return Resultado261Cumulativo.Bloqueado(MotivoContradicaoEntreLeituras);
+                return Resultado261Cumulativo.Bloqueado(
+                    $"{MotivoComponenteOrdemAusente} Componente {componente.Identidade}.");
+            }
+
+            if (!string.Equals(opComponente, opSolicitada, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(opComponente, opItem, StringComparison.OrdinalIgnoreCase))
+            {
+                return Resultado261Cumulativo.Bloqueado(
+                    $"{MotivoComponenteOrdemDivergente} Componente {componente.Identidade}.");
             }
 
             // §3: tri-state de QuantityIsFixed. true E null bloqueiam, por motivos DIFERENTES.
@@ -422,6 +457,41 @@ public static class ProdutoAcabado261AllocatorCumulativo
 
     private static bool Equivale(string a, string? b)
         => !string.IsNullOrWhiteSpace(b) && string.Equals(a, b.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// GATE 118B-R4: monta a entrada do alocador a partir da leitura FRESCA + caixa corrente. E o
+    /// MESMO caminho usado em runtime pelo Controller (seam unico, nao via paralela de teste), para
+    /// que o wiring da OP retornada possa ser exercitado de ponta a ponta.
+    /// <para>
+    /// NumeroOrdemItemFresco vem EXCLUSIVAMENTE de <c>fresca.Item.NumeroOrdem</c> — a OP
+    /// materialmente retornada pelo SAP. NUNCA de <c>fresca.NumeroOrdemConsultada</c>, que e apenas
+    /// o eco da request e tornaria a checagem cruzada tautologica.
+    /// </para>
+    /// </summary>
+    public static Entrada261Cumulativa MontarEntrada(
+        LeituraFrescaOrdem261 fresca,
+        ProdutoAcabadoCaixa caixa,
+        string numeroOrdemSolicitada)
+    {
+        ArgumentNullException.ThrowIfNull(fresca);
+        ArgumentNullException.ThrowIfNull(caixa);
+
+        IReadOnlyList<Componente261Fresco> componentes = ProjetarComponentes(fresca);
+
+        return new Entrada261Cumulativa
+        {
+            NumeroOrdem = numeroOrdemSolicitada?.Trim() ?? string.Empty,
+            NumeroOrdemItemFresco = fresca.Item?.NumeroOrdem ?? string.Empty,
+            PlannedProductionOp = fresca.Item?.QuantidadePrevistaSap,
+            PriorProducedConfirmed = fresca.Item?.QuantidadeRecebidaSap,
+            CurrentBoxProduction = ResolverProducaoCaixaCorrente(caixa, fresca.Item?.Unidade),
+            ProductionUnit = fresca.Item?.Unidade ?? string.Empty,
+            Componentes = componentes,
+            ComponentesCompletosComprovado = fresca.ComponentesCompletos,
+            ConsumoLocalConfirmadoPorComponente = DerivarLedgerLocalEsperado(
+                componentes, fresca.Item?.QuantidadeRecebidaSap, fresca.Item?.QuantidadePrevistaSap)
+        };
+    }
 
     /// <summary>
     /// Projeta a leitura FRESCA do cliente SAP nos componentes tri-state do alocador, preservando

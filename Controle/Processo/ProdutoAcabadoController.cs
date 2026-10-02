@@ -453,26 +453,11 @@ public sealed class ProdutoAcabadoController
                     : fresca.Mensagem);
         }
 
-        IReadOnlyList<Componente261Fresco> componentes =
-            ProdutoAcabado261AllocatorCumulativo.ProjetarComponentes(fresca);
-
-        decimal? producaoCaixa = ProdutoAcabado261AllocatorCumulativo.ResolverProducaoCaixaCorrente(
-            caixa, fresca.Item.Unidade);
-
-        Entrada261Cumulativa entrada = new()
-        {
-            NumeroOrdem = numeroOrdem,
-            NumeroOrdemItemFresco = fresca.NumeroOrdemConsultada,
-            PlannedProductionOp = fresca.Item.QuantidadePrevistaSap,
-            PriorProducedConfirmed = fresca.Item.QuantidadeRecebidaSap,
-            CurrentBoxProduction = producaoCaixa,
-            ProductionUnit = fresca.Item.Unidade,
-            Componentes = componentes,
-            ComponentesCompletosComprovado = fresca.ComponentesCompletos,
-            ConsumoLocalConfirmadoPorComponente =
-                ProdutoAcabado261AllocatorCumulativo.DerivarLedgerLocalEsperado(
-                    componentes, fresca.Item.QuantidadeRecebidaSap, fresca.Item.QuantidadePrevistaSap)
-        };
+        // GATE 118B-R4: a montagem da entrada e o SEAM UNICO compartilhado com os testes de wiring.
+        // NumeroOrdemItemFresco sai de fresca.Item.NumeroOrdem (OP retornada pelo SAP) e NAO de
+        // fresca.NumeroOrdemConsultada (eco da request) — eco tornava a checagem tautologica.
+        Entrada261Cumulativa entrada = ProdutoAcabado261AllocatorCumulativo.MontarEntrada(
+            fresca, caixa, numeroOrdem);
 
         return ProdutoAcabado261AllocatorCumulativo.Calcular(entrada);
     }

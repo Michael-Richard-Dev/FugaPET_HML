@@ -595,6 +595,9 @@ public sealed class ProductionOrderSapApiClient
     private static ItemOrdemProducaoSap MapearItem(JsonElement i)
         => new()
         {
+            // GATE 118B-R4: OP real do item. Ausente => string vazia (ausencia preservada),
+            // NUNCA a OP solicitada na request.
+            NumeroOrdem = LerTexto(i, "ManufacturingOrder"),
             ItemOrdem = LerTexto(i, "ManufacturingOrderItem"),
             Material = LerTexto(i, "Material"),
             Centro = LerTexto(i, "ProductionPlant"),
@@ -759,6 +762,8 @@ public sealed class ProductionOrderSapApiClient
     private static ItemOrdemProducaoSap MapearItemXml(XElement p)
         => new()
         {
+            // GATE 118B-R4: paridade com o caminho JSON — OP real do item, sem fallback da request.
+            NumeroOrdem = LerXmlTexto(p, "ManufacturingOrder"),
             ItemOrdem = LerXmlTexto(p, "ManufacturingOrderItem"),
             Material = LerXmlTexto(p, "Material"),
             Centro = LerXmlTexto(p, "ProductionPlant"),
