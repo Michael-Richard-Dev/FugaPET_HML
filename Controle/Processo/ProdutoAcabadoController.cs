@@ -1131,7 +1131,7 @@ public sealed class ProdutoAcabadoController
             QuantidadeRecebidaSap = recebida,
             // Pendente so e calculavel quando o recebido e CONHECIDO; indeterminado => null.
             QuantidadePendente = recebida is decimal r ? Math.Max(planejada - r, 0m) : null,
-            Unidade = PrimeiroTexto(item?.Unidade, ordemSap.Unidade, "KG").ToUpperInvariant(),
+            Unidade = PrimeiroTexto(item?.Unidade, ordemSap.Unidade).ToUpperInvariant(),
             Lote = PrimeiroTexto(item?.Lote, ordemSap.Lote),
             ItemOrdem = item?.ItemOrdem?.Trim() ?? string.Empty,
             Operacao = ordemSap.Operacoes.FirstOrDefault()?.Operacao ?? string.Empty,

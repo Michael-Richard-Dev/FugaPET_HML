@@ -5,6 +5,17 @@ namespace FugaPET_HML.Tests.Processo;
 public sealed class ProdutoAcabadoSaldoProducao121BTests
 {
     [Fact]
+    public void Mapper_ProductionUnitAusente_NaoInventaKgParaAbatimento()
+    {
+        var metodo = typeof(FugaPET_HML.Controle.Processo.ProdutoAcabadoController).GetMethod(
+            "MapearOrdem", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+        var origem = new FugaPET_HML.Modelo.IntegracaoSap.OrdemProducaoSap();
+        var ordem = (ProdutoAcabadoOrdem)metodo.Invoke(null, [origem])!;
+        Assert.Equal(string.Empty, ordem.Unidade);
+        Assert.Equal(60m, Saldo(60m, ordem.Unidade, Caixa(unidade: "KG")));
+    }
+
+    [Fact]
     public void ConfirmadaSap_NaoAbateRecebimentoJaConsideradoNaBase()
     {
         var caixa = new ProdutoAcabadoCaixa
