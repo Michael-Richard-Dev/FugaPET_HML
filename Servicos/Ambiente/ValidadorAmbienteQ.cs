@@ -111,9 +111,11 @@ public static class ValidadorAmbienteQ
             return ResultadoValidacaoAmbienteQ.Bloqueado("Ambiente Q bloqueado: sap-client Q dedicado ausente ou invalido.");
         }
 
-        // GATES 112D / 113E — modos de escrita ADMITIDOS no startup do Q, e SOMENTE eles.
-        // Gates SEMPRE proibidos (nenhum modo os admite):
-        //   escrita_habilitada (escrita SAP genérica) e pallet_write_habilitado (INT012 de palete).
+        // GATES 112D / 113E / 122C — modos de escrita ADMITIDOS no startup do Q, e SOMENTE eles.
+        // Gate SEMPRE proibido (nenhum modo o admite):
+        //   escrita_habilitada (escrita SAP genérica).
+        // GATE 122C: pallet_write_habilitado passou de "sempre proibido" para "admitido APENAS no
+        //   perfil composto completo" (SAFE_PA_PIPELINE_WITH_PALLET) — ver ValidarModoEscritaAdmitido.
         // Modos seguros:
         //   SAFE_HU_ONLY_STARTUP (112D) ..... hu_write isolado. Autoriza exclusivamente POST /HandlingUnit
         //       (EscritaHuPermitida recusa qualquer outro método/endpoint); nada de 261/101/INT012/pipeline.
@@ -128,9 +130,10 @@ public static class ValidadorAmbienteQ
             return ResultadoValidacaoAmbienteQ.Bloqueado(
                 "Ambiente Q bloqueado: write gates devem iniciar false — ligado(s): "
                 + string.Join(", ", gatesProibidosLigados)
-                + ". Apenas hu_write_habilitado isolado (HU-only) ou o trio "
+                + ". Apenas hu_write_habilitado isolado (HU-only), o trio "
                 + "pa_pipeline_habilitado + pa_material_document_write_habilitado + hu_write_habilitado "
-                + "(pipeline 261→101→HU) podem iniciar true.");
+                + "(pipeline 261→101→HU) ou esse trio + packaging_habilitado + pallet_write_habilitado "
+                + $"({ModoSeguroPipelineComPalete}) podem iniciar true.");
         }
 
         return ValidarModoEscritaAdmitido(configuracao);
@@ -192,10 +195,18 @@ public static class ValidadorAmbienteQ
         => executarProbeReadOnly(cancellationToken);
 
     /// <summary>
-    /// GATES 112D/113E: gates de escrita que NUNCA podem iniciar true em NENHUM modo.
+    /// GATES 112D/113E/122C: gates de escrita que NUNCA podem iniciar true em NENHUM modo.
+    /// <para>
+    /// Resta APENAS <c>escrita_habilitada</c> (escrita SAP genérica): nenhum modo seguro a admite.
+    /// </para>
+    /// <para>
+    /// GATE 122C: <c>pallet_write_habilitado</c> SAIU desta lista. Ele não é mais proibido em termos
+    /// absolutos — passou a ser validado como COMBINAÇÃO por
+    /// <see cref="ValidarModoEscritaAdmitido"/>, exatamente como já ocorria com
     /// <c>hu_write_habilitado</c>, <c>pa_pipeline_habilitado</c> e
-    /// <c>pa_material_document_write_habilitado</c> estão DELIBERADAMENTE fora desta lista: eles participam
-    /// dos modos seguros e são validados como COMBINAÇÃO por <see cref="ValidarModoEscritaAdmitido"/>.
+    /// <c>pa_material_document_write_habilitado</c>. Isolado ou em combinação parcial ele continua
+    /// BLOQUEANDO o startup; só o perfil composto completo (SAFE_PA_PIPELINE_WITH_PALLET) o admite.
+    /// </para>
     /// </summary>
     internal static string[] ObterGatesPerigososLigados(ConfiguracaoSap configuracao)
     {
@@ -205,11 +216,6 @@ public static class ValidadorAmbienteQ
         if (configuracao.EscritaHabilitada)
         {
             ligados.Add("escrita_habilitada (escrita SAP genérica)");
-        }
-
-        if (configuracao.PalletWriteHabilitado)
-        {
-            ligados.Add("pallet_write_habilitado (INT012 de palete)");
         }
 
         return [.. ligados];
@@ -223,6 +229,12 @@ public static class ValidadorAmbienteQ
     /// Combinação parcial é recusada NOMEANDO o que falta — habilitar meia cadeia 261→101→HU é pior que
     /// não habilitar.
     /// </summary>
+    /// <summary>Nome canonico do modo seguro que inclui o write de palete (GATE 122B/122C).</summary>
+    public const string ModoSeguroPipelineComPalete = "SAFE_PA_PIPELINE_WITH_PALLET";
+
+    /// <summary>Nome canonico do modo seguro do pipeline sem palete.</summary>
+    public const string ModoSeguroPipeline = "SAFE_PA_PIPELINE";
+
     internal static ResultadoValidacaoAmbienteQ ValidarModoEscritaAdmitido(ConfiguracaoSap configuracao)
     {
         ArgumentNullException.ThrowIfNull(configuracao);
@@ -230,6 +242,34 @@ public static class ValidadorAmbienteQ
         bool pipeline = configuracao.ProdutoAcabadoPipelineHabilitado;
         bool materialDocumentPa = configuracao.ProdutoAcabadoMaterialDocumentWriteHabilitado;
         bool hu = configuracao.HuWriteHabilitado;
+        bool packaging = configuracao.PackagingHabilitado;
+        bool palete = configuracao.PalletWriteHabilitado;
+
+        // GATE 122C — Modo 3: SAFE_PA_PIPELINE_WITH_PALLET.
+        // O palete só é admitido no perfil composto EXATO: o trio do pipeline + packaging, TODOS true.
+        // Fora disso, pallet=true BLOQUEIA — inclusive isolado e em qualquer combinação parcial.
+        // Motivo: o palete agrupa HUs que só existem se 261→101→HU tiver rodado inteiro, e a norma de
+        // embalagem (packaging) é o que fornece o material de embalagem real do palete.
+        if (palete)
+        {
+            if (pipeline && materialDocumentPa && hu && packaging)
+            {
+                return ResultadoValidacaoAmbienteQ.Ok();
+            }
+
+            List<string> faltantesPalete = [];
+            if (!pipeline) { faltantesPalete.Add("pa_pipeline_habilitado"); }
+            if (!materialDocumentPa) { faltantesPalete.Add("pa_material_document_write_habilitado"); }
+            if (!hu) { faltantesPalete.Add("hu_write_habilitado"); }
+            if (!packaging) { faltantesPalete.Add("packaging_habilitado"); }
+
+            return ResultadoValidacaoAmbienteQ.Bloqueado(
+                $"Ambiente Q bloqueado: pallet_write_habilitado só inicia true no modo "
+                + $"{ModoSeguroPipelineComPalete} — exige pa_pipeline_habilitado + "
+                + "pa_material_document_write_habilitado + hu_write_habilitado + packaging_habilitado "
+                + "juntos; faltando: " + string.Join(", ", faltantesPalete)
+                + ". Habilitar o palete sem a cadeia completa é mais perigoso que não habilitar.");
+        }
 
         // Modo 1 (112D): nenhum gate, ou hu_write isolado.
         if (!pipeline && !materialDocumentPa)
@@ -237,7 +277,8 @@ public static class ValidadorAmbienteQ
             return ResultadoValidacaoAmbienteQ.Ok();
         }
 
-        // Modo 2 (113E): o trio COMPLETO do pipeline.
+        // Modo 2 (113E): o trio COMPLETO do pipeline. Comportamento PRESERVADO sem alteração —
+        // packaging continua NÃO sendo exigido aqui (só o é quando o palete entra).
         if (pipeline && materialDocumentPa && hu)
         {
             return ResultadoValidacaoAmbienteQ.Ok();
@@ -264,6 +305,27 @@ public static class ValidadorAmbienteQ
             + "pa_pipeline_habilitado + pa_material_document_write_habilitado + hu_write_habilitado juntos; "
             + "faltando: " + string.Join(", ", faltantes)
             + ". Alternativa admitida: hu_write_habilitado isolado (HU-only).");
+    }
+
+    /// <summary>
+    /// GATE 122C: nome do modo de escrita efetivamente admitido, para diagnóstico. Devolve null quando
+    /// a combinação NÃO é admitida — nunca inventa um modo para uma combinação bloqueada.
+    /// </summary>
+    internal static string? ObterModoEscritaAdmitido(ConfiguracaoSap configuracao)
+    {
+        ArgumentNullException.ThrowIfNull(configuracao);
+
+        if (ObterGatesPerigososLigados(configuracao).Length > 0
+            || !ValidarModoEscritaAdmitido(configuracao).Valido)
+        {
+            return null;
+        }
+
+        return configuracao.PalletWriteHabilitado
+            ? ModoSeguroPipelineComPalete
+            : configuracao.ProdutoAcabadoPipelineHabilitado
+                ? ModoSeguroPipeline
+                : "SAFE_HU_ONLY_STARTUP";
     }
 
     private static IEnumerable<string> ObterUrlsSap(ConfiguracaoSap configuracao)
