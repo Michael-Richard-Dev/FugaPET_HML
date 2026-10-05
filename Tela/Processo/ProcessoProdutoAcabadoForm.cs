@@ -706,7 +706,9 @@ public partial class ProcessoProdutoAcabadoForm : Form
     {
         if (_ordemAtual is not null)
         {
-            classificationDateTextBox.Text = FormatarKg(CalcularSaldoPendenteExibido());
+            // GATE 121A: saldo pendente e QUANTIDADE DE PRODUCAO ⇒ unidade da OP, nao KG cravado.
+            classificationDateTextBox.Text =
+                FormatarQuantidadeProducao(CalcularSaldoPendenteExibido(), UnidadeProducaoAtual);
         }
     }
 
@@ -1399,12 +1401,15 @@ public partial class ProcessoProdutoAcabadoForm : Form
         lotTextBox.Text = _ordemAtual.Lote;
         ovenExitTextBox.Text = _ordemAtual.DepositoDestino;
         // REGRA 4: saldo pendente exibido = regra ÚNICA (OP.QuantidadePendente − caixas CONFIRMADA_SAP).
-        classificationDateTextBox.Text = FormatarKg(CalcularSaldoPendenteExibido());
-        manufacturingDateTextBox.Text = FormatarKg(_ordemAtual.QuantidadePlanejada);
+        // GATE 121A: os TRES campos de quantidade de producao usam a ProductionUnit REAL da OP.
+        classificationDateTextBox.Text =
+            FormatarQuantidadeProducao(CalcularSaldoPendenteExibido(), UnidadeProducaoAtual);
+        manufacturingDateTextBox.Text =
+            FormatarQuantidadeProducao(_ordemAtual.QuantidadePlanejada, UnidadeProducaoAtual);
         // GATE 118B: producao recebida e TRI-STATE (MfgOrderItemGoodsReceiptQty). Indeterminado NAO
         // vira "0,000" na tela: mostra vazio, para nao simular um valor que o SAP nao devolveu.
         expirationDateTextBox.Text = _ordemAtual.QuantidadeRecebidaSap is decimal recebidaSap
-            ? FormatarKg(recebidaSap)
+            ? FormatarQuantidadeProducao(recebidaSap, UnidadeProducaoAtual)
             : string.Empty;
         readForecastBoxesTextBox.Text = _normaEmbalagem?.QuantidadeProdutosPorCaixa.ToString(CultureInfo.InvariantCulture) ?? "0";
         // NORMA EMBALAGEM: PackagingInstruction quando preenchido; "NÃO INFORMADA" quando há norma válida
@@ -2855,18 +2860,24 @@ public partial class ProcessoProdutoAcabadoForm : Form
         boxesValueLabel.Text = qtdCaixas.ToString("000", CultureInfo.InvariantCulture);
         boxesTotalLabel.Text = "de 0";
 
-        bool temOp = _ordemAtual is not null;
-        string unidade = (_ordemAtual?.Unidade ?? "KG").Trim().ToUpperInvariant();
+        // GATE 121A: a unidade da OP NAO e mais defaultada para "KG" quando ausente — nada de
+        // inventar unidade. A escolha do bloco (peso x produtos) fica IDENTICA ao comportamento
+        // anterior, porque unidade vazia continua caindo em ehPeso (a agregacao nao muda).
+        string unidade = (_ordemAtual?.Unidade ?? string.Empty).Trim().ToUpperInvariant();
         bool ehPeso = unidade is "KG" or "KGM" or "G" or "TO" or "";
         if (ehPeso)
         {
             packagesTitleLabel.Text = "PESO REGISTRADO";
+            // Soma de PESO FISICO das caixas: KG e correto aqui.
             decimal liquido = _caixasPesadas.Sum(caixa => caixa.PesoLiquidoKg);
             packagesCounterLabel.Text = FormatarKg(liquido);
             packagesValueLabel.Text = FormatarKg(liquido);
             // GATE 118B: pendente TRI-STATE — indeterminado nao inventa numero no rodape.
+            // GATE 121A: o pendente e QUANTIDADE DE PRODUCAO ⇒ unidade da OP. Corrige tambem o
+            // sufixo " KG" DUPLICADO que existia aqui (FormatarKg ja anexava a unidade, e a
+            // interpolacao anexava outra), e passa a respeitar G/TO em vez de rotular tudo como KG.
             packagesTotalLabel.Text = _ordemAtual?.QuantidadePendente is decimal pendentePeso
-                ? $"de {FormatarKg(pendentePeso)} KG"
+                ? $"de {FormatarQuantidadeProducao(pendentePeso, unidade)}"
                 : "de 0";
         }
         else
@@ -3074,8 +3085,40 @@ public partial class ProcessoProdutoAcabadoForm : Form
         return button;
     }
 
+    /// <summary>
+    /// Formata PESO FISICO. A unidade KG e correta e deliberada aqui: peso bruto, tara e peso
+    /// liquido sao medidos em KG pela balanca, independentemente da ProductionUnit da OP.
+    /// NAO usar para quantidade de producao — para isso existe
+    /// <see cref="FormatarQuantidadeProducao"/> (GATE 121A).
+    /// </summary>
     private static string FormatarKg(decimal valor)
         => $"{valor.ToString("0.000", CultureInfo.GetCultureInfo("pt-BR"))} KG";
+
+    /// <summary>
+    /// GATE 121A: formata QUANTIDADE DE PRODUCAO com a unidade REAL da Ordem de Producao
+    /// (A_ProductionOrder_2.ProductionUnit). Antes estes campos usavam FormatarKg e exibiam "KG"
+    /// cravado, mesmo quando a OP informava UN — o numero estava certo e o rotulo mentia.
+    /// <para>
+    /// FAIL-CLOSED: unidade ausente/vazia/em branco NAO vira "KG". Devolve apenas o numero, sem
+    /// sufixo, para nao afirmar uma unidade que o SAP nao informou.
+    /// </para>
+    /// <para>
+    /// Puramente apresentacional: NAO converte valor, NAO altera a escala numerica e NAO depende
+    /// da unidade para calcular nada. O formato numerico e o MESMO de FormatarKg.
+    /// </para>
+    /// </summary>
+    internal static string FormatarQuantidadeProducao(decimal valor, string? unidadeProducao)
+    {
+        string numero = valor.ToString("0.000", CultureInfo.GetCultureInfo("pt-BR"));
+        string unidade = unidadeProducao?.Trim() ?? string.Empty;
+        return unidade.Length == 0 ? numero : $"{numero} {unidade.ToUpperInvariant()}";
+    }
+
+    /// <summary>
+    /// GATE 121A: unidade de producao da OP carregada. Vazia quando nao ha OP ou quando o SAP nao
+    /// informou ProductionUnit — nunca "KG" por suposicao.
+    /// </summary>
+    private string UnidadeProducaoAtual => _ordemAtual?.Unidade?.Trim() ?? string.Empty;
 
     private static bool TryParsePesoKg(string texto, out decimal peso)
     {

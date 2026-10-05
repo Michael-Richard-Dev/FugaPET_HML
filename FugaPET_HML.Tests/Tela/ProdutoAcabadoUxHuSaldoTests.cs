@@ -92,7 +92,11 @@ public sealed class ProdutoAcabadoUxHuSaldoTests
         // E a View continua sem aritmética própria de saldo.
         Assert.DoesNotContain("QuantidadePendente -", form, StringComparison.Ordinal);
         // Usada no carregamento da OP e chamada de refresh após o resultado definitivo do envio.
-        Assert.Contains("classificationDateTextBox.Text = FormatarKg(CalcularSaldoPendenteExibido());", form, StringComparison.Ordinal);
+        // GATE 121A: o saldo pendente é QUANTIDADE DE PRODUÇÃO, então passou a ser formatado com a
+        // ProductionUnit real da OP em vez de "KG" cravado. A regra única e a fonte do número não
+        // mudaram — só o sufixo de unidade exibido.
+        Assert.Contains("FormatarQuantidadeProducao(CalcularSaldoPendenteExibido(), UnidadeProducaoAtual)", form, StringComparison.Ordinal);
+        Assert.DoesNotContain("FormatarKg(CalcularSaldoPendenteExibido())", form, StringComparison.Ordinal);
         Assert.Contains("AtualizarSaldoPendente();", form, StringComparison.Ordinal);
         // A Form não acessa banco/OData diretamente para isso.
         Assert.DoesNotContain("NpgsqlConnection", form, StringComparison.Ordinal);
