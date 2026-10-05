@@ -189,9 +189,8 @@ public sealed class ProdutoAcabadoUnidadeProducaoVisual121ATests
     }
 
     [Fact]
-    public void I_CalculoDoSaldoPendentePermaneceIntacto()
+    public void I_SaldoPendenteNaoDescontaPesoDeCaixaConfirmadaSap()
     {
-        // O calculo nao foi tocado por este gate (continua subtraindo caixas CONFIRMADA_SAP).
         ProdutoAcabadoCaixa confirmada = new()
         {
             StatusIntegracao = StatusIntegracaoCaixa.ConfirmadaSap,
@@ -200,8 +199,8 @@ public sealed class ProdutoAcabadoUnidadeProducaoVisual121ATests
         };
 
         Assert.Equal(
-            9016m - 14.350m,
-            CalculoSaldoProdutoAcabado.SaldoPendenteExibido(9016m, [confirmada]));
+            9016m,
+            CalculoSaldoProdutoAcabado.SaldoPendenteExibido(9016m, [confirmada], "UN"));
     }
 
     // ===================== J: fluxo 261/101/HU intocado =====================
@@ -269,7 +268,7 @@ public sealed class ProdutoAcabadoUnidadeProducaoVisual121ATests
 
         // Antes: $"de {FormatarKg(pendentePeso)} KG" => "9016,000 KG KG".
         Assert.DoesNotContain("""{FormatarKg(pendentePeso)} KG""", fonte, StringComparison.Ordinal);
-        Assert.Contains("""de {FormatarQuantidadeProducao(pendentePeso, unidade)}""", fonte, StringComparison.Ordinal);
+        Assert.Contains("""de {FormatarQuantidadeProducao(CalcularSaldoPendenteExibido(), UnidadeProducaoAtual)}""", fonte, StringComparison.Ordinal);
     }
 
     // ===================== escopo: o formatador e local desta tela =====================

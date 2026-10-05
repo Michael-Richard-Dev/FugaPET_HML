@@ -689,16 +689,14 @@ public partial class ProcessoProdutoAcabadoForm : Form
     }
 
     /// <summary>
-    /// REGRA 4: SALDO PENDENTE exibido = saldo pendente da OP (fonte SAP: <c>QuantidadePendente</c>) menos a
-    /// produção que EFETIVAMENTE concluiu o fluxo (caixas CONFIRMADA_SAP). NÃO abate caixa cancelada, apenas
-    /// pesada, AguardandoAutorizacaoSap, EnviandoSap, ErroSap, IndeterminadoTimeout ou não confirmada. Regra
-    /// ÚNICA, reutilizada no carregamento da OP e após cada confirmação — sem acessar banco/OData na Form.
+    /// Saldo pendente exibido: base SAP menos reserva local elegível na mesma unidade de produção.
+    /// Campo principal e rodapé reutilizam a mesma regra, sem acessar banco/OData na Form.
     /// </summary>
     private decimal CalcularSaldoPendenteExibido()
         // GATE 118B: QuantidadePendente agora e TRI-STATE. Pendente indeterminado exibe 0 (apenas
         // EXIBICAO, igual ao comportamento anterior quando nao havia OP) e nunca alimenta decisao de envio.
         => _ordemAtual?.QuantidadePendente is decimal pendente
-            ? CalculoSaldoProdutoAcabado.SaldoPendenteExibido(pendente, _caixasPesadas)
+            ? CalculoSaldoProdutoAcabado.SaldoPendenteExibido(pendente, _caixasPesadas, UnidadeProducaoAtual)
             : 0m;
 
     /// <summary>REGRA 4: atualiza IMEDIATAMENTE o campo SALDO PENDENTE (sem recarregar a OP), pela regra única.</summary>
@@ -1400,7 +1398,6 @@ public partial class ProcessoProdutoAcabadoForm : Form
         finishedProductTextBox.Visible = descricaoUtil;
         lotTextBox.Text = _ordemAtual.Lote;
         ovenExitTextBox.Text = _ordemAtual.DepositoDestino;
-        // REGRA 4: saldo pendente exibido = regra ÚNICA (OP.QuantidadePendente − caixas CONFIRMADA_SAP).
         // GATE 121A: os TRES campos de quantidade de producao usam a ProductionUnit REAL da OP.
         classificationDateTextBox.Text =
             FormatarQuantidadeProducao(CalcularSaldoPendenteExibido(), UnidadeProducaoAtual);
@@ -2876,9 +2873,6 @@ public partial class ProcessoProdutoAcabadoForm : Form
             // GATE 121A: o pendente e QUANTIDADE DE PRODUCAO ⇒ unidade da OP. Corrige tambem o
             // sufixo " KG" DUPLICADO que existia aqui (FormatarKg ja anexava a unidade, e a
             // interpolacao anexava outra), e passa a respeitar G/TO em vez de rotular tudo como KG.
-            packagesTotalLabel.Text = _ordemAtual?.QuantidadePendente is decimal pendentePeso
-                ? $"de {FormatarQuantidadeProducao(pendentePeso, unidade)}"
-                : "de 0";
         }
         else
         {
@@ -2886,10 +2880,11 @@ public partial class ProcessoProdutoAcabadoForm : Form
             int produtos = _caixasPesadas.Sum(caixa => caixa.QuantidadeProdutos);
             packagesCounterLabel.Text = produtos.ToString("000", CultureInfo.InvariantCulture);
             packagesValueLabel.Text = produtos.ToString("000", CultureInfo.InvariantCulture);
-            packagesTotalLabel.Text = _ordemAtual?.QuantidadePendente is decimal pendenteQtd
-                ? $"de {pendenteQtd.ToString("0", CultureInfo.InvariantCulture)}"
-                : "de 0";
         }
+
+        packagesTotalLabel.Text = _ordemAtual?.QuantidadePendente is not null
+            ? $"de {FormatarQuantidadeProducao(CalcularSaldoPendenteExibido(), UnidadeProducaoAtual)}"
+            : "de 0";
 
         // REV3-§10: o texto reflete o estado real do gate de escrita HU (não afirma "desativado" quando autorizado).
         string estadoEnvio = _controller.EnvioHuAutorizado
