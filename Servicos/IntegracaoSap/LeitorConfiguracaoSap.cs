@@ -1,4 +1,5 @@
 using System.Text.Json;
+using FugaPET_HML.Servicos.Ambiente;
 
 namespace FugaPET_HML.Servicos.IntegracaoSap;
 
@@ -38,11 +39,18 @@ public static class LeitorConfiguracaoSap
     // GATE Q PACKAGING-05: habilitação da capability de norma de embalagem — Q-namespaced, alvo Process.
     internal const string VariavelAmbientePackagingHabilitado = "FUGAPET_Q_SAP_PACKAGING_ENABLED";
 
+    /// <summary>Caminho canonico da configuracao local (ao lado do EXE).</summary>
+    public static string CaminhoConfiguracaoLocal
+        => Path.Combine(AppContext.BaseDirectory, NomeArquivoConfiguracao);
+
     public static ConfiguracaoSap Carregar()
         => Carregar(
-            Path.Combine(AppContext.BaseDirectory, NomeArquivoConfiguracao),
+            CaminhoConfiguracaoLocal,
             ObterVariavelAmbienteSistema,
-            LerVariavelAmbientePorAlvoSistema);
+            LerVariavelAmbientePorAlvoSistema,
+            // GATE 120G: perfil de ambiente lido da MESMA configuracao local, para que o duplo clique
+            // no EXE resolva os defaults Q sem script externo.
+            PerfilAmbienteLocal.CarregarDoArquivo(CaminhoConfiguracaoLocal));
 
     // GATE Q PACKAGING-05: leitura POR ALVO (Process/User/Machine) sem merge, para o gate da capability.
     internal static string? LerVariavelAmbientePorAlvoSistema(string nome, EnvironmentVariableTarget alvo)
@@ -54,16 +62,63 @@ public static class LeitorConfiguracaoSap
     /// false/inválido/ausente) ⇒ false (fail-closed). Config técnica legada de Packaging NUNCA participa.
     /// </summary>
     internal static bool ResolverPackagingHabilitado(Func<string, EnvironmentVariableTarget, string?> lerPorAlvo)
+        => ResolverPackagingHabilitado(lerPorAlvo, padraoPerfil: false);
+
+    /// <summary>
+    /// GATE 120G: mesma regra de seguranca do PACKAGING-05 (User/Machine presentes ⇒ fail-closed),
+    /// agora com a precedencia do 120G: Process explicito vence; na ausencia dele vale o default do
+    /// perfil Q local. Config tecnica legada de Packaging continua NAO participando.
+    /// </summary>
+    internal static bool ResolverPackagingHabilitado(
+        Func<string, EnvironmentVariableTarget, string?> lerPorAlvo,
+        bool padraoPerfil)
     {
         ArgumentNullException.ThrowIfNull(lerPorAlvo);
 
-        string? processo = lerPorAlvo(VariavelAmbientePackagingHabilitado, EnvironmentVariableTarget.Process)?.Trim();
         string? usuario = lerPorAlvo(VariavelAmbientePackagingHabilitado, EnvironmentVariableTarget.User)?.Trim();
         string? maquina = lerPorAlvo(VariavelAmbientePackagingHabilitado, EnvironmentVariableTarget.Machine)?.Trim();
 
-        return string.Equals(processo, "true", StringComparison.OrdinalIgnoreCase)
-            && string.IsNullOrWhiteSpace(usuario)
-            && string.IsNullOrWhiteSpace(maquina);
+        // Persistencia em User/Machine permanece PROIBIDA: presenca em qualquer um ⇒ false.
+        if (!string.IsNullOrWhiteSpace(usuario) || !string.IsNullOrWhiteSpace(maquina))
+        {
+            return false;
+        }
+
+        string? processo = lerPorAlvo(VariavelAmbientePackagingHabilitado, EnvironmentVariableTarget.Process)?.Trim();
+        return bool.TryParse(processo, out bool explicitoProcesso) ? explicitoProcesso : padraoPerfil;
+    }
+
+    /// <summary>
+    /// GATE 120G: precedencia UNICA dos gates operacionais booleanos.
+    /// <list type="number">
+    /// <item>override EXPLICITO de Process environment (true/false parseavel) — mecanismo dos gates tecnicos;</item>
+    /// <item>configuracao local: chave propria do arquivo OU default do perfil Q;</item>
+    /// <item>false (fail-closed).</item>
+    /// </list>
+    /// <para>
+    /// O override e lido SOMENTE no alvo Process. O alvo User deixou de participar dos gates de
+    /// escrita: persistir capability em User/Machine e proibido, e aceitar User aqui permitiria
+    /// habilitar escrita por environment persistente — exatamente o que o contrato veda.
+    /// </para>
+    /// <para>
+    /// Na etapa 2, arquivo e perfil se SOMAM: a chave do arquivo pode ADICIONAR, o perfil Q pode
+    /// ADICIONAR, e nenhum dos dois faz veto. Para desligar um gate em Q usa-se o override de
+    /// Process com "false" — que vence por ser a etapa 1.
+    /// </para>
+    /// </summary>
+    internal static bool ResolverGateOperacional(
+        Func<string, EnvironmentVariableTarget, string?>? lerPorAlvo,
+        string variavel,
+        bool valorArquivo,
+        bool padraoPerfil)
+    {
+        string? processo = lerPorAlvo?.Invoke(variavel, EnvironmentVariableTarget.Process)?.Trim();
+        if (bool.TryParse(processo, out bool explicitoProcesso))
+        {
+            return explicitoProcesso;
+        }
+
+        return valorArquivo || padraoPerfil;
     }
 
     internal static string? ObterVariavelAmbienteSistema(string nome)
@@ -86,8 +141,11 @@ public static class LeitorConfiguracaoSap
     internal static ConfiguracaoSap Carregar(
         string caminhoArquivo,
         Func<string, string?> obterVariavelAmbiente,
-        Func<string, EnvironmentVariableTarget, string?>? lerVariavelPorAlvo = null)
+        Func<string, EnvironmentVariableTarget, string?>? lerVariavelPorAlvo = null,
+        PerfilAmbienteLocal? perfilAmbiente = null)
     {
+        // GATE 120G: perfil ausente/nao reconhecido ⇒ nenhum default concedido (fail-closed).
+        bool perfilQ = perfilAmbiente?.EhQ == true;
         string baseUrlArquivo = string.Empty;
         string purchaseOrderBaseUrlArquivo = string.Empty;
         string materialDocumentBaseUrlArquivo = string.Empty;
@@ -105,6 +163,10 @@ public static class LeitorConfiguracaoSap
         bool huWriteHabilitadoArquivo = false;
         string handlingUnitBaseUrlArquivo = string.Empty;
         bool paPipelineHabilitadoArquivo = false;
+        // GATE 120G: estes dois gates ignoravam a chave do arquivo (o leitor passava o literal false),
+        // o que deixava pa_material_document_write_enabled MORTO na configuracao implantada.
+        bool paMaterialDocumentWriteHabilitadoArquivo = false;
+        bool palletWriteHabilitadoArquivo = false;
         string palletInt012BaseUrlArquivo = string.Empty;
         IReadOnlyList<string> palletInt012HostsPermitidosArquivo = [];
         int timeout = 30;
@@ -145,6 +207,10 @@ public static class LeitorConfiguracaoSap
                     huWriteHabilitadoArquivo = LerBooleano(sap, "hu_write_habilitado", false);
                     handlingUnitBaseUrlArquivo = LerTexto(sap, "handling_unit_base_url", string.Empty);
                     paPipelineHabilitadoArquivo = LerBooleano(sap, "pa_pipeline_habilitado", false);
+                    // Nome EXATO ja presente na configuracao implantada do Q (nao inventado aqui).
+                    paMaterialDocumentWriteHabilitadoArquivo =
+                        LerBooleano(sap, "pa_material_document_write_enabled", false);
+                    palletWriteHabilitadoArquivo = LerBooleano(sap, "pallet_write_habilitado", false);
                     palletInt012BaseUrlArquivo = LerTexto(sap, "pallet_int012_base_url", string.Empty);
                     palletInt012HostsPermitidosArquivo = LerListaTextos(sap, "pallet_int012_hosts_permitidos");
                     timeout = LerInteiro(sap, "timeout_segundos", 30);
@@ -198,32 +264,40 @@ public static class LeitorConfiguracaoSap
                 obterVariavelAmbiente,
                 VariavelAmbienteHostsPermitidos,
                 hostsPermitidosArquivo),
-            EscritaHabilitada = ObterBooleanoOuArquivo(
-                obterVariavelAmbiente,
+            // GATE 120G: escrita SAP GENERICA. O perfil NAO participa (padraoPerfil: false sempre) —
+            // nenhum perfil pode liga-la. So muda por chave de arquivo ou override explicito de Process.
+            EscritaHabilitada = ResolverGateOperacional(
+                lerVariavelPorAlvo,
                 VariavelAmbienteEscritaHabilitada,
-                escritaHabilitada),
-            // Autorizacao ESPECIFICA e ISOLADA do POST de HU (padrao false; independente de WRITE_ENABLED).
-            HuWriteHabilitado = ObterBooleanoOuArquivo(
-                obterVariavelAmbiente,
+                escritaHabilitada,
+                padraoPerfil: false),
+            // Autorizacao ESPECIFICA e ISOLADA do POST de HU (independente de WRITE_ENABLED).
+            HuWriteHabilitado = ResolverGateOperacional(
+                lerVariavelPorAlvo,
                 VariavelAmbienteHuWriteHabilitado,
-                huWriteHabilitadoArquivo),
+                huWriteHabilitadoArquivo,
+                DefaultsPerfilQ.HandlingUnitWrite(perfilAmbiente)),
             HandlingUnitBaseUrl = ObterOuAmbiente(
                 obterVariavelAmbiente,
                 VariavelAmbienteHandlingUnitBaseUrl,
                 handlingUnitBaseUrlArquivo),
             // Gates ISOLADOS do Produto Acabado / pipeline / palete INT012 (padrao false; independentes de WRITE_ENABLED e de HU).
-            ProdutoAcabadoMaterialDocumentWriteHabilitado = ObterBooleanoOuArquivo(
-                obterVariavelAmbiente,
+            ProdutoAcabadoMaterialDocumentWriteHabilitado = ResolverGateOperacional(
+                lerVariavelPorAlvo,
                 VariavelAmbientePaMaterialDocumentWriteHabilitado,
-                false),
-            PalletWriteHabilitado = ObterBooleanoOuArquivo(
-                obterVariavelAmbiente,
+                paMaterialDocumentWriteHabilitadoArquivo,
+                DefaultsPerfilQ.MaterialDocumentProdutoAcabado(perfilAmbiente)),
+            // GATE 120G: escrita de palete INT012. O perfil NAO participa (padraoPerfil: false sempre).
+            PalletWriteHabilitado = ResolverGateOperacional(
+                lerVariavelPorAlvo,
                 VariavelAmbientePalletWriteHabilitado,
-                false),
-            ProdutoAcabadoPipelineHabilitado = ObterBooleanoOuArquivo(
-                obterVariavelAmbiente,
+                palletWriteHabilitadoArquivo,
+                padraoPerfil: false),
+            ProdutoAcabadoPipelineHabilitado = ResolverGateOperacional(
+                lerVariavelPorAlvo,
                 VariavelAmbientePaPipelineHabilitado,
-                paPipelineHabilitadoArquivo),
+                paPipelineHabilitadoArquivo,
+                DefaultsPerfilQ.PipelineProdutoAcabado(perfilAmbiente)),
             PalletInt012BaseUrl = ObterOuAmbiente(
                 obterVariavelAmbiente,
                 VariavelAmbientePalletInt012BaseUrl,
@@ -237,7 +311,9 @@ public static class LeitorConfiguracaoSap
             PalletInt012Senha = ObterSomenteAmbiente(obterVariavelAmbiente, VariavelAmbientePalletInt012Senha),
             // GATE Q PACKAGING-05: capability Packaging só true por Process=true (User/Machine ausentes).
             // Sem leitor por alvo (ex.: testes de carga que não exercitam o gate) ⇒ false fail-closed.
-            PackagingHabilitado = lerVariavelPorAlvo is not null && ResolverPackagingHabilitado(lerVariavelPorAlvo),
+            // GATE 120G: mesma regra, agora com o default do perfil Q quando nao ha Process explicito.
+            PackagingHabilitado = lerVariavelPorAlvo is not null
+                && ResolverPackagingHabilitado(lerVariavelPorAlvo, DefaultsPerfilQ.Packaging(perfilAmbiente)),
             TimeoutSegundos = timeout
         };
     }

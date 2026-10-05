@@ -91,6 +91,11 @@ public sealed class LeitorConfiguracaoSapTests : IDisposable
         Assert.True(configuracao.EscritaHabilitada);
     }
 
+    /// <summary>
+    /// GATE 120G: o override dos gates de escrita passou a ser lido EXCLUSIVAMENTE no alvo Process
+    /// (persistir capability em User/Machine e proibido). O teste agora informa o leitor por alvo,
+    /// que e exatamente o que o runtime passa em <c>LeitorConfiguracaoSap.Carregar()</c>.
+    /// </summary>
     [Fact]
     public void Carregar_ComVariavelDeEscritaTrue_DeveSobrescreverArquivo()
     {
@@ -102,9 +107,31 @@ public sealed class LeitorConfiguracaoSapTests : IDisposable
 
         ConfiguracaoSap configuracao = LeitorConfiguracaoSap.Carregar(
             _arquivoTemporario,
-            nome => ambiente.GetValueOrDefault(nome));
+            nome => ambiente.GetValueOrDefault(nome),
+            (nome, alvo) => alvo == EnvironmentVariableTarget.Process ? ambiente.GetValueOrDefault(nome) : null);
 
         Assert.True(configuracao.EscritaHabilitada);
+    }
+
+    /// <summary>
+    /// GATE 120G: o mesmo valor em User NAO liga o gate — escrita SAP generica nunca e habilitada por
+    /// environment persistente.
+    /// </summary>
+    [Fact]
+    public void Carregar_ComVariavelDeEscritaTrueSomenteEmUser_NaoDeveHabilitar()
+    {
+        GravarConfiguracao(Guid.NewGuid().ToString("N"), Guid.NewGuid().ToString("N"));
+        Dictionary<string, string> ambiente = new()
+        {
+            ["FUGAPET_Q_SAP_WRITE_ENABLED"] = "true"
+        };
+
+        ConfiguracaoSap configuracao = LeitorConfiguracaoSap.Carregar(
+            _arquivoTemporario,
+            nome => ambiente.GetValueOrDefault(nome),
+            (nome, alvo) => alvo == EnvironmentVariableTarget.User ? ambiente.GetValueOrDefault(nome) : null);
+
+        Assert.False(configuracao.EscritaHabilitada);
     }
 
     [Fact]

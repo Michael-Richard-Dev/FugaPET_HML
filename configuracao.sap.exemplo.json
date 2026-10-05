@@ -1,4 +1,8 @@
 {
+  "_ambiente_120g": "GATE 120G: a secao 'ambiente' abaixo e o perfil CANONICO lido no startup. Com \"perfil\": \"Q\" o EXE iniciado por DUPLO CLIQUE determina sozinho que esta em Q e carrega os defaults operacionais Q (pipeline, material document do PA, HU e packaging), sem PowerShell, sem BAT, sem setx, sem Registry e sem environment de User/Machine. A escrita SAP GENERICA (escrita_habilitada) e a escrita de PALETE INT012 (pallet_write_habilitado) NAO fazem parte do perfil e continuam false: nenhum perfil consegue liga-las. Variavel de ambiente de Process, quando presente, continua sobrepondo qualquer flag (mecanismo dos gates tecnicos). Perfil ausente, vazio ou desconhecido = fail-closed: nenhuma capability.",
+  "ambiente": {
+    "perfil": "Q"
+  },
   "sap": {
     "base_url": "https://vhfufds4ci.sap.fugacouros.com.br:44300/sap/opu/odata4/sap/api_purchaseorder_2/srvd_a2x/sap/purchaseorder/0001",
     "purchase_order_base_url": "https://vhfufds4ci.sap.fugacouros.com.br:44300/sap/opu/odata4/sap/api_purchaseorder_2/srvd_a2x/sap/purchaseorder/0001/",

@@ -12,10 +12,17 @@ static class Program
     {
         ApplicationConfiguration.Initialize();
 
+        // GATE 120G: perfil de ambiente lido UMA vez da configuracao local, e usado tanto para
+        // determinar ENVIRONMENT=Q quanto para os defaults operacionais Q. Permite o duplo clique
+        // direto no EXE sem PowerShell/BAT/setx/Registry/User/Machine.
+        PerfilAmbienteLocal perfilAmbiente =
+            PerfilAmbienteLocal.CarregarDoArquivo(LeitorConfiguracaoSap.CaminhoConfiguracaoLocal);
+
         ResultadoValidacaoAmbienteQ ambiente = ValidadorAmbienteQ.ValidarStartup(
             LeitorConfiguracaoSap.Carregar(),
             LeitorConfiguracaoBancoPostgreSql.Carregar(),
-            LeitorConfiguracaoSap.ObterVariavelAmbienteSistema);
+            LeitorConfiguracaoSap.ObterVariavelAmbienteSistema,
+            perfilAmbiente);
         if (!ambiente.Valido)
         {
             MessageBox.Show(

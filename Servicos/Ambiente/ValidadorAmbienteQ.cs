@@ -17,8 +17,19 @@ public static class ValidadorAmbienteQ
         ConfiguracaoSap configuracaoSap,
         ConfiguracaoBancoPostgreSql configuracaoBanco,
         Func<string, string?> obterVariavelAmbiente)
+        => ValidarStartup(configuracaoSap, configuracaoBanco, obterVariavelAmbiente, perfilAmbiente: null);
+
+    /// <summary>
+    /// GATE 120G: startup com o perfil de ambiente LOCAL, para o EXE iniciado por duplo clique.
+    /// Perfil null/nao reconhecido mantem o comportamento anterior (exige FUGAPET_Q_APP_ENV=Q).
+    /// </summary>
+    public static ResultadoValidacaoAmbienteQ ValidarStartup(
+        ConfiguracaoSap configuracaoSap,
+        ConfiguracaoBancoPostgreSql configuracaoBanco,
+        Func<string, string?> obterVariavelAmbiente,
+        PerfilAmbienteLocal? perfilAmbiente)
     {
-        ResultadoValidacaoAmbienteQ appEnv = ValidarAppEnv(obterVariavelAmbiente);
+        ResultadoValidacaoAmbienteQ appEnv = ValidarAppEnv(obterVariavelAmbiente, perfilAmbiente);
         if (!appEnv.Valido)
         {
             return appEnv;
@@ -34,11 +45,44 @@ public static class ValidadorAmbienteQ
     }
 
     public static ResultadoValidacaoAmbienteQ ValidarAppEnv(Func<string, string?> obterVariavelAmbiente)
+        => ValidarAppEnv(obterVariavelAmbiente, perfilAmbiente: null);
+
+    /// <summary>
+    /// GATE 120G: o ambiente passa a poder ser determinado pela configuracao LOCAL, nao apenas por
+    /// variavel de ambiente criada por script externo. Precedencia:
+    /// <list type="number">
+    /// <item>FUGAPET_Q_APP_ENV presente ⇒ decide (e precisa valer Q);</item>
+    /// <item>ausente ⇒ perfil local Q;</item>
+    /// <item>nenhum dos dois ⇒ BLOQUEADO (fail-closed).</item>
+    /// </list>
+    /// AMBIGUIDADE e tratada como bloqueio: variavel presente com valor != Q NAO e "corrigida" pelo
+    /// perfil local, mesmo que o perfil diga Q.
+    /// </summary>
+    public static ResultadoValidacaoAmbienteQ ValidarAppEnv(
+        Func<string, string?> obterVariavelAmbiente,
+        PerfilAmbienteLocal? perfilAmbiente)
     {
-        string? valor = obterVariavelAmbiente(VariavelAmbienteAppEnv);
-        return string.Equals(valor?.Trim(), AmbienteEsperado, StringComparison.OrdinalIgnoreCase)
-            ? ResultadoValidacaoAmbienteQ.Ok()
-            : ResultadoValidacaoAmbienteQ.Bloqueado($"Ambiente Q bloqueado: defina {VariavelAmbienteAppEnv}=Q.");
+        ArgumentNullException.ThrowIfNull(obterVariavelAmbiente);
+
+        string valor = obterVariavelAmbiente(VariavelAmbienteAppEnv)?.Trim() ?? string.Empty;
+        if (valor.Length > 0)
+        {
+            return string.Equals(valor, AmbienteEsperado, StringComparison.OrdinalIgnoreCase)
+                ? ResultadoValidacaoAmbienteQ.Ok()
+                : ResultadoValidacaoAmbienteQ.Bloqueado(
+                    $"Ambiente Q bloqueado: {VariavelAmbienteAppEnv} presente com valor diferente de Q. "
+                    + "O perfil local NAO sobrepoe um ambiente declarado explicitamente.");
+        }
+
+        if (perfilAmbiente?.EhQ == true)
+        {
+            return ResultadoValidacaoAmbienteQ.Ok();
+        }
+
+        return ResultadoValidacaoAmbienteQ.Bloqueado(
+            $"Ambiente Q bloqueado: defina {VariavelAmbienteAppEnv}=Q ou declare "
+            + $"\"{PerfilAmbienteLocal.SecaoAmbiente}\": {{ \"{PerfilAmbienteLocal.ChavePerfil}\": "
+            + $"\"{PerfilAmbienteLocal.NomePerfilQ}\" }} na configuracao local.");
     }
 
     public static ResultadoValidacaoAmbienteQ ValidarSap(ConfiguracaoSap configuracao)

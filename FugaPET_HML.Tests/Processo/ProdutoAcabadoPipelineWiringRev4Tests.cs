@@ -546,7 +546,10 @@ public sealed class ProdutoAcabadoPipelineWiringRev4Tests
 
             ConfiguracaoSap configuracao = LeitorConfiguracaoSap.Carregar(
                 arquivo,
-                nome => ambiente.GetValueOrDefault(nome));
+                nome => ambiente.GetValueOrDefault(nome),
+                // GATE 120G: override de gate de escrita e lido SOMENTE no alvo Process — este e o
+                // leitor por alvo que o runtime passa em LeitorConfiguracaoSap.Carregar().
+                (nome, alvo) => alvo == EnvironmentVariableTarget.Process ? ambiente.GetValueOrDefault(nome) : null);
             ProdutoAcabadoController controller = new(
                 new ProductionOrderSapFakeServico(OrdemSapValida()),
                 configuracaoSap: configuracao,
