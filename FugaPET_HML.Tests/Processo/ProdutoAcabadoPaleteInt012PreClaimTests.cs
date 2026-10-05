@@ -376,8 +376,19 @@ public sealed class ProdutoAcabadoPaleteInt012PreClaimTests
             return Task.FromResult(linhas);
         }
 
+        /// <summary>
+        /// GATE 122C: o guard de recovery consulta o estado PERSISTIDO do palete antes do claim.
+        /// Um palete recém-criado localmente está em RASCUNHO — é esse o estado real de produção
+        /// nestes cenários, e é ele que autoriza o envio. View vazia significaria estado NÃO
+        /// comprovado e bloquearia o POST (fail-closed), o que não é o cenário destes testes.
+        /// </summary>
+        public string StatusPaleteNaView { get; set; } = "RASCUNHO";
+
         public Task<IReadOnlyList<Linha045>> LerViewRuntimeAsync(string view, string colunaFiltro, Parametro045 valorFiltro, CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<Linha045>>([]);
+            => Task.FromResult<IReadOnlyList<Linha045>>(
+                view == "vw_pa_045_palete_estado_runtime"
+                    ? [L(("codigo_hu_palete", 900L), ("status_hu_palete", StatusPaleteNaView))]
+                    : []);
         public async Task<T> ExecutarEmTransacaoAsync<T>(Func<IExecutorFuncoes045Transacional, CancellationToken, Task<T>> operacao, CancellationToken cancellationToken = default)
             => await operacao(new Tx(this), cancellationToken);
         public Task<IReadOnlyList<Linha045>> LerComposicaoPaletesLocaisPorOrdemAsync(string numeroOrdemProducao, string? terminal, CancellationToken cancellationToken = default)
