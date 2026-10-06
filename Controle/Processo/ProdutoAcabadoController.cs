@@ -453,11 +453,37 @@ public sealed class ProdutoAcabadoController
                     : fresca.Mensagem);
         }
 
+        // GATE 124E: acumulado REAL ja consumido, para o componente KG/PP05. Le as caixas do MESMO
+        // contexto persistido (OP + item + material + lote + terminal) e soma o peso liquido das que
+        // JA fecharam o pipeline (CONFIRMADA_SAP), excluindo a corrente e as canceladas.
+        // Falha de leitura => null => o alocador BLOQUEIA o componente elegivel (nunca cai para
+        // teorico, nunca estima historico).
+        decimal? pesoConfirmadoAnterior = null;
+        try
+        {
+            IReadOnlyList<ProdutoAcabadoCaixa> caixasContexto =
+                await _huService.ListarCaixasPersistidasPorContextoAsync(
+                    caixa.NumeroOrdemProducao, caixa.ItemOrdemProducao, caixa.Material, caixa.Lote,
+                    caixa.Terminal, cancellationToken);
+
+            pesoConfirmadoAnterior = ProdutoAcabado261AllocatorCumulativo
+                .SomarPesoLiquidoConfirmadoAnterior(caixasContexto, caixa.CodigoProdutoAcabadoCaixa);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // Acumulado real NAO comprovado: permanece null e o alocador bloqueia o KG/PP05.
+            pesoConfirmadoAnterior = null;
+        }
+
         // GATE 118B-R4: a montagem da entrada e o SEAM UNICO compartilhado com os testes de wiring.
         // NumeroOrdemItemFresco sai de fresca.Item.NumeroOrdem (OP retornada pelo SAP) e NAO de
         // fresca.NumeroOrdemConsultada (eco da request) — eco tornava a checagem tautologica.
         Entrada261Cumulativa entrada = ProdutoAcabado261AllocatorCumulativo.MontarEntrada(
-            fresca, caixa, numeroOrdem);
+            fresca, caixa, numeroOrdem, pesoConfirmadoAnterior);
 
         return ProdutoAcabado261AllocatorCumulativo.Calcular(entrada);
     }

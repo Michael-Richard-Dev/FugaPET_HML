@@ -71,6 +71,23 @@ public sealed record Entrada261Cumulativa
     /// pipeline considera ja consumido. Obrigatorio. null = ledger indisponivel => bloqueio.
     /// </summary>
     public IReadOnlyDictionary<string, decimal>? ConsumoLocalConfirmadoPorComponente { get; init; }
+
+    // ===== GATE 124E: consumo REAL por peso liquido da caixa (KG + PP05) =====
+
+    /// <summary>
+    /// Peso liquido REAL da caixa corrente, em KG (<c>ProdutoAcabadoCaixa.PesoLiquidoKg</c>).
+    /// Fonte funcional decidida pelo responsavel no 124E. null = indisponivel => bloqueia o
+    /// componente elegivel (nunca cai para teorico).
+    /// </summary>
+    public decimal? PesoLiquidoCaixaCorrenteKg { get; init; }
+
+    /// <summary>
+    /// Soma dos pesos liquidos REAIS das caixas ANTERIORES cujo pipeline fechou (CONFIRMADA_SAP) no
+    /// MESMO contexto (OP + item + material + lote + terminal), EXCLUINDO a caixa corrente e as
+    /// canceladas. E o acumulado real ja consumido localmente. null = nao reconstruivel => bloqueia
+    /// o componente elegivel.
+    /// </summary>
+    public decimal? PesoLiquidoConfirmadoAnteriorKg { get; init; }
 }
 
 /// <summary>GATE 118B: uma linha de saida = um item do 261, com o DELTA (nunca o cumulativo).</summary>
@@ -170,6 +187,26 @@ public static class ProdutoAcabado261AllocatorCumulativo
         "COMPONENT_MANUFACTURING_ORDER_MISSING: componente retornado sem ManufacturingOrder. "
         + "BLOCK (nenhum POST).";
 
+    // ===== GATE 124E: elegibilidade do consumo REAL por peso liquido da caixa =====
+
+    /// <summary>Unidade do componente que admite consumo real por peso (124E).</summary>
+    public const string UnidadeConsumoRealPorPeso = "KG";
+
+    /// <summary>Deposito do componente que admite consumo real por peso (124E).</summary>
+    public const string DepositoConsumoRealPorPeso = "PP05";
+
+    public const string MotivoMultiplosComponentesConsumoReal =
+        "CONSUMO_REAL_ATRIBUICAO_AMBIGUA: mais de um componente em KG/PP05 na mesma OP. Nao existe "
+        + "regra comprovada para distribuir o peso liquido da caixa entre eles. BLOCK (nenhum POST).";
+
+    public const string MotivoPesoCaixaCorrenteIndisponivel =
+        "CONSUMO_REAL_PESO_CAIXA_AUSENTE: peso liquido da caixa corrente ausente ou <= 0. Componente "
+        + "KG/PP05 NAO cai para o rateio teorico. BLOCK (nenhum POST).";
+
+    public const string MotivoAcumuladoRealIndisponivel =
+        "CONSUMO_REAL_ACUMULADO_NAO_RECONSTRUIVEL: a soma dos pesos liquidos das caixas confirmadas "
+        + "anteriores nao pudo ser determinada. BLOCK (nenhum POST).";
+
     public const string MotivoComponenteOrdemDivergente =
         "COMPONENT_MANUFACTURING_ORDER_MISMATCH: a OP do componente difere da OP solicitada/do item. "
         + "BLOCK (nenhum POST).";
@@ -265,6 +302,16 @@ public static class ProdutoAcabado261AllocatorCumulativo
             return Resultado261Cumulativo.Bloqueado(MotivoSemComponentes);
         }
 
+        // GATE 124E §4: a atribuicao do peso liquido da caixa a UM componente so e inequivoca quando
+        // existe EXATAMENTE UM componente em KG/PP05. Dois ou mais exigiriam uma regra de rateio que
+        // nao esta comprovada em lugar nenhum — e inventar rateio aqui moveria estoque errado.
+        // Bloqueia SO este cenario; os demais componentes seguem a regra atual.
+        int consumoRealElegiveis = elegiveis.Count(EhComponenteConsumoRealPorPeso);
+        if (consumoRealElegiveis > 1)
+        {
+            return Resultado261Cumulativo.Bloqueado(MotivoMultiplosComponentesConsumoReal);
+        }
+
         List<Item261Alocado> itens = [];
         List<string> deltaZero = [];
 
@@ -325,8 +372,31 @@ public static class ProdutoAcabado261AllocatorCumulativo
                     + "difere do consumo confirmado localmente. BLOCK_RECONCILIATION_REQUIRED (nenhum POST).");
             }
 
-            decimal alvoCumulativo = CalcularAlvoCumulativo(
-                necessidadeOp, produzidoCumulativo, planejado);
+            // GATE 124E: componente em KG/PP05 usa o PESO LIQUIDO REAL das caixas, nao o rateio
+            // proporcional da ficha tecnica. Todo o resto do contrato 118B e preservado: mesmo
+            // arredondamento (3 casas, AwayFromZero), mesmo delta contra o Withdrawn FRESCO, mesmos
+            // guards, mesma reconciliacao.
+            decimal alvoCumulativo;
+            if (EhComponenteConsumoRealPorPeso(componente))
+            {
+                if (entrada.PesoLiquidoCaixaCorrenteKg is not decimal pesoCorrente || pesoCorrente <= 0m)
+                {
+                    return Resultado261Cumulativo.Bloqueado(
+                        $"{MotivoPesoCaixaCorrenteIndisponivel} Componente {componente.Identidade}.");
+                }
+
+                if (entrada.PesoLiquidoConfirmadoAnteriorKg is not decimal pesoAnterior || pesoAnterior < 0m)
+                {
+                    return Resultado261Cumulativo.Bloqueado(
+                        $"{MotivoAcumuladoRealIndisponivel} Componente {componente.Identidade}.");
+                }
+
+                alvoCumulativo = CalcularAlvoCumulativoReal(pesoAnterior, pesoCorrente);
+            }
+            else
+            {
+                alvoCumulativo = CalcularAlvoCumulativo(necessidadeOp, produzidoCumulativo, planejado);
+            }
 
             decimal delta = alvoCumulativo - retiradoFresco;
 
@@ -399,7 +469,8 @@ public static class ProdutoAcabado261AllocatorCumulativo
     public static IReadOnlyDictionary<string, decimal>? DerivarLedgerLocalEsperado(
         IReadOnlyList<Componente261Fresco> componentes,
         decimal? produzidoAnteriorConfirmado,
-        decimal? planejadoOp)
+        decimal? planejadoOp,
+        decimal? pesoLiquidoConfirmadoAnteriorKg = null)
     {
         ArgumentNullException.ThrowIfNull(componentes);
 
@@ -421,10 +492,56 @@ public static class ProdutoAcabado261AllocatorCumulativo
                 continue; // sem identidade/necessidade: o alocador bloqueia por guard proprio.
             }
 
+            // GATE 124E: para o componente KG/PP05 a expectativa LOCAL tambem passa a ser REAL — a soma
+            // dos pesos liquidos das caixas confirmadas anteriores. Se continuasse proporcional, a
+            // reconciliacao compararia teorico contra real e bloquearia SEMPRE.
+            if (EhComponenteConsumoRealPorPeso(componente))
+            {
+                if (pesoLiquidoConfirmadoAnteriorKg is not decimal pesoAnterior || pesoAnterior < 0m)
+                {
+                    continue; // acumulado real indisponivel: o alocador bloqueia por guard proprio.
+                }
+
+                ledger[componente.Identidade] = Math.Round(
+                    pesoAnterior, CasasDecimaisContratoSap, MidpointRounding.AwayFromZero);
+                continue;
+            }
+
             ledger[componente.Identidade] = CalcularAlvoCumulativo(necessidade, anterior, planejado);
         }
 
         return ledger;
+    }
+
+    /// <summary>
+    /// GATE 124E §5: alvo cumulativo REAL do componente KG/PP05 = soma dos pesos liquidos das caixas
+    /// confirmadas anteriores + peso liquido da caixa corrente. Arredondado na MESMA escala do
+    /// contrato SAP (3 casas, AwayFromZero), igual ao caminho proporcional.
+    /// <para>
+    /// A caixa corrente entra UMA vez: ela ainda nao esta CONFIRMADA_SAP, logo nao esta no acumulado
+    /// anterior. Caixa ja contabilizada nao e somada duas vezes por construcao.
+    /// </para>
+    /// </summary>
+    internal static decimal CalcularAlvoCumulativoReal(
+        decimal pesoConfirmadoAnteriorKg, decimal pesoCaixaCorrenteKg)
+        => Math.Round(
+            pesoConfirmadoAnteriorKg + pesoCaixaCorrenteKg,
+            CasasDecimaisContratoSap,
+            MidpointRounding.AwayFromZero);
+
+    /// <summary>
+    /// GATE 124E: componente cujo consumo e o PESO LIQUIDO REAL da caixa, e nao o rateio da ficha
+    /// tecnica. Elegibilidade EXATA: BaseUnit = KG E StorageLocation = PP05. Qualquer outra
+    /// combinacao preserva o comportamento atual — nao basta a OP estar em KG ou em UN.
+    /// </summary>
+    internal static bool EhComponenteConsumoRealPorPeso(Componente261Fresco componente)
+    {
+        ArgumentNullException.ThrowIfNull(componente);
+
+        return string.Equals(
+                   componente.BaseUnit?.Trim(), UnidadeConsumoRealPorPeso, StringComparison.OrdinalIgnoreCase)
+               && string.Equals(
+                   componente.StorageLocation?.Trim(), DepositoConsumoRealPorPeso, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Componente de consumo 261. Tipo de movimento vazio nao exclui (contrato vigente).</summary>
@@ -471,7 +588,8 @@ public static class ProdutoAcabado261AllocatorCumulativo
     public static Entrada261Cumulativa MontarEntrada(
         LeituraFrescaOrdem261 fresca,
         ProdutoAcabadoCaixa caixa,
-        string numeroOrdemSolicitada)
+        string numeroOrdemSolicitada,
+        decimal? pesoLiquidoConfirmadoAnteriorKg = null)
     {
         ArgumentNullException.ThrowIfNull(fresca);
         ArgumentNullException.ThrowIfNull(caixa);
@@ -488,9 +606,44 @@ public static class ProdutoAcabado261AllocatorCumulativo
             ProductionUnit = fresca.Item?.Unidade ?? string.Empty,
             Componentes = componentes,
             ComponentesCompletosComprovado = fresca.ComponentesCompletos,
+            // GATE 124E: peso liquido REAL da caixa corrente e acumulado real das confirmadas anteriores.
+            PesoLiquidoCaixaCorrenteKg = caixa.PesoLiquidoKg,
+            PesoLiquidoConfirmadoAnteriorKg = pesoLiquidoConfirmadoAnteriorKg,
             ConsumoLocalConfirmadoPorComponente = DerivarLedgerLocalEsperado(
-                componentes, fresca.Item?.QuantidadeRecebidaSap, fresca.Item?.QuantidadePrevistaSap)
+                componentes,
+                fresca.Item?.QuantidadeRecebidaSap,
+                fresca.Item?.QuantidadePrevistaSap,
+                pesoLiquidoConfirmadoAnteriorKg)
         };
+    }
+
+    /// <summary>
+    /// GATE 124E §5: acumulado REAL ja consumido = soma dos pesos liquidos das caixas do MESMO contexto
+    /// cujo pipeline FECHOU (CONFIRMADA_SAP), EXCLUINDO a caixa corrente.
+    /// <para>
+    /// Exclui, por construcao: a propria caixa corrente (por codigo), caixas CANCELADAS e qualquer
+    /// caixa que nao chegou a CONFIRMADA_SAP (EM_PESAGEM, ENVIANDO_SAP, ERRO_SAP,
+    /// INDETERMINADO_TIMEOUT, BLOQUEADA) — estados cujo 261 nao esta comprovado. Caixa sem codigo
+    /// persistido tambem nao entra.
+    /// </para>
+    /// <para>
+    /// Nao usa peso previsto para completar historico: o que nao esta confirmado simplesmente nao soma,
+    /// e a divergencia contra o WithdrawnQuantity fresco e capturada pela reconciliacao.
+    /// </para>
+    /// </summary>
+    public static decimal SomarPesoLiquidoConfirmadoAnterior(
+        IReadOnlyList<ProdutoAcabadoCaixa>? caixasDoContexto, long? codigoCaixaCorrente)
+    {
+        if (caixasDoContexto is null || caixasDoContexto.Count == 0)
+        {
+            return 0m;
+        }
+
+        return caixasDoContexto
+            .Where(c => c.CodigoProdutoAcabadoCaixa is long codigo
+                        && codigo != codigoCaixaCorrente
+                        && c.StatusIntegracao == StatusIntegracaoCaixa.ConfirmadaSap)
+            .Sum(c => c.PesoLiquidoKg);
     }
 
     /// <summary>
