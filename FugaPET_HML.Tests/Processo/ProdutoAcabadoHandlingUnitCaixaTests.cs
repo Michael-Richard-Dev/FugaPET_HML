@@ -1185,6 +1185,31 @@ public sealed class ProdutoAcabadoHandlingUnitCaixaTests
             return Task.FromResult(lista);
         }
 
+        /// <summary>
+        /// GATE 124H: espelha a consulta real do acumulado 261 — mesmo contexto funcional, SEM
+        /// terminal, e somente CONFIRMADA_SAP.
+        /// </summary>
+        public Task<IReadOnlyList<ProdutoAcabadoCaixa>> ListarConfirmadasPorContextoSemTerminalAsync(string numeroOrdemProducao, string itemOrdemProducao, string material, string lote, CancellationToken ct = default)
+        {
+            static string N(string? v) => (v ?? string.Empty).Trim();
+            if (N(numeroOrdemProducao).Length == 0 || N(itemOrdemProducao).Length == 0
+                || N(material).Length == 0 || N(lote).Length == 0)
+            {
+                return Task.FromResult<IReadOnlyList<ProdutoAcabadoCaixa>>([]);
+            }
+
+            IReadOnlyList<ProdutoAcabadoCaixa> lista = _store.Values
+                .Where(c => string.Equals(N(c.NumeroOrdemProducao), N(numeroOrdemProducao), StringComparison.Ordinal)
+                    && string.Equals(N(c.ItemOrdemProducao), N(itemOrdemProducao), StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(N(c.Material), N(material), StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(N(c.Lote), N(lote), StringComparison.OrdinalIgnoreCase)
+                    && c.StatusIntegracao == StatusIntegracaoCaixa.ConfirmadaSap)
+                .OrderBy(c => c.NumeroCaixa)
+                .Select(Clonar)
+                .ToList();
+            return Task.FromResult(lista);
+        }
+
         private Task<bool> Transicao(long codigo, StatusIntegracaoCaixa de, StatusIntegracaoCaixa para)
         {
             if (_store.TryGetValue(codigo, out ProdutoAcabadoCaixa? c) && c.StatusIntegracao == de)

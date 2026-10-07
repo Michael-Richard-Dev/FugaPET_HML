@@ -86,6 +86,10 @@ public sealed class PaPipelineEarlyBinding113JTests
             => Task.FromResult<IReadOnlyList<ProdutoAcabadoCaixa>>([]);
         public Task<IReadOnlyList<ProdutoAcabadoCaixa>> ListarPorContextoAsync(string o, string i, string m, string l, string t, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<ProdutoAcabadoCaixa>>([]);
+
+        // GATE 124H: acumulado real do 261 SEM terminal. Fake sem caixas persistidas ⇒ lista vazia.
+        public Task<IReadOnlyList<ProdutoAcabadoCaixa>> ListarConfirmadasPorContextoSemTerminalAsync(string o, string i, string m, string l, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<ProdutoAcabadoCaixa>>([]);
         public Task<IReadOnlyList<ProdutoAcabadoCaixa>> ListarPorHandlingUnitsAsync(IReadOnlyList<string> hus, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<ProdutoAcabadoCaixa>>([]);
         public Task<IReadOnlyList<ProdutoAcabadoCaixa>> ListarPorIntervaloHandlingUnitAsync(string de, string ate, string? terminal, CancellationToken ct = default)

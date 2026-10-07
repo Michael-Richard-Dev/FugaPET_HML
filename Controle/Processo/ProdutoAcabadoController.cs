@@ -453,18 +453,21 @@ public sealed class ProdutoAcabadoController
                     : fresca.Mensagem);
         }
 
-        // GATE 124E: acumulado REAL ja consumido, para o componente KG/PP05. Le as caixas do MESMO
-        // contexto persistido (OP + item + material + lote + terminal) e soma o peso liquido das que
-        // JA fecharam o pipeline (CONFIRMADA_SAP), excluindo a corrente e as canceladas.
+        // GATE 124E: acumulado REAL ja consumido, para o componente KG/PP05 — soma do peso liquido das
+        // caixas que JA fecharam o pipeline (CONFIRMADA_SAP), excluindo a corrente e as canceladas.
+        // GATE 124H: a leitura passou a ser a FOCAL SEM TERMINAL. O WithdrawnQuantity do SAP e
+        // cumulativo por componente (Reservation+ReservationItem) e NAO conhece terminal; o ledger
+        // anterior, particionado por terminal, comparava escopos diferentes e podia SUBCONSUMIR em
+        // silencio quando a mesma OP fosse produzida em mais de um terminal.
         // Falha de leitura => null => o alocador BLOQUEIA o componente elegivel (nunca cai para
         // teorico, nunca estima historico).
         decimal? pesoConfirmadoAnterior = null;
         try
         {
             IReadOnlyList<ProdutoAcabadoCaixa> caixasContexto =
-                await _huService.ListarCaixasPersistidasPorContextoAsync(
+                await _huService.ListarConfirmadasPorContextoSemTerminalAsync(
                     caixa.NumeroOrdemProducao, caixa.ItemOrdemProducao, caixa.Material, caixa.Lote,
-                    caixa.Terminal, cancellationToken);
+                    cancellationToken);
 
             pesoConfirmadoAnterior = ProdutoAcabado261AllocatorCumulativo
                 .SomarPesoLiquidoConfirmadoAnterior(caixasContexto, caixa.CodigoProdutoAcabadoCaixa);

@@ -105,6 +105,10 @@ public sealed class PaPipeline113MBlockersTests
             => Task.FromResult<IReadOnlyList<ProdutoAcabadoCaixa>>([]);
         public Task<IReadOnlyList<ProdutoAcabadoCaixa>> ListarPorContextoAsync(string o, string i, string m, string l, string t, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<ProdutoAcabadoCaixa>>([]);
+
+        // GATE 124H: acumulado real do 261 SEM terminal. Fake sem caixas persistidas ⇒ lista vazia.
+        public Task<IReadOnlyList<ProdutoAcabadoCaixa>> ListarConfirmadasPorContextoSemTerminalAsync(string o, string i, string m, string l, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<ProdutoAcabadoCaixa>>([]);
         public Task<IReadOnlyList<ProdutoAcabadoCaixa>> ListarPorHandlingUnitsAsync(IReadOnlyList<string> hus, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<ProdutoAcabadoCaixa>>([]);
         public Task<IReadOnlyList<ProdutoAcabadoCaixa>> ListarPorIntervaloHandlingUnitAsync(string de, string ate, string? terminal, CancellationToken ct = default)
@@ -214,6 +218,9 @@ public sealed class PaPipeline113MBlockersTests
         public Task<ProdutoAcabadoCaixa?> ObterAtivaPorTerminalAsync(string t, CancellationToken ct = default) => interno.ObterAtivaPorTerminalAsync(t, ct);
         public Task<IReadOnlyList<ProdutoAcabadoCaixa>> ListarPorOrdemTerminalAsync(string o, string t, CancellationToken ct = default) => interno.ListarPorOrdemTerminalAsync(o, t, ct);
         public Task<IReadOnlyList<ProdutoAcabadoCaixa>> ListarPorContextoAsync(string o, string i, string m, string l, string t, CancellationToken ct = default) => interno.ListarPorContextoAsync(o, i, m, l, t, ct);
+
+        // GATE 124H: delega ao fake interno, como as demais leituras.
+        public Task<IReadOnlyList<ProdutoAcabadoCaixa>> ListarConfirmadasPorContextoSemTerminalAsync(string o, string i, string m, string l, CancellationToken ct = default) => interno.ListarConfirmadasPorContextoSemTerminalAsync(o, i, m, l, ct);
         public Task<IReadOnlyList<ProdutoAcabadoCaixa>> ListarPorHandlingUnitsAsync(IReadOnlyList<string> hus, CancellationToken ct = default) => interno.ListarPorHandlingUnitsAsync(hus, ct);
         public Task<IReadOnlyList<ProdutoAcabadoCaixa>> ListarPorIntervaloHandlingUnitAsync(string de, string ate, string? terminal, CancellationToken ct = default) => interno.ListarPorIntervaloHandlingUnitAsync(de, ate, terminal, ct);
     }

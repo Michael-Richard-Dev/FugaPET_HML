@@ -102,6 +102,26 @@ public interface IProdutoAcabadoRepositorio
     Task<IReadOnlyList<ProdutoAcabadoCaixa>> ListarPorContextoAsync(
         string numeroOrdemProducao, string itemOrdemProducao, string material, string lote, string terminal,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// GATE 124H: leitura FOCAL do acumulado real do 261 (componente KG/PP05). Mesmo contexto funcional
+    /// de <see cref="ListarPorContextoAsync"/> — OP + item + material + lote, todos igualdade
+    /// OBRIGATORIA — porem SEM TERMINAL, e somente caixas CONFIRMADA_SAP.
+    /// <para>
+    /// Motivo: o WithdrawnQuantity do SAP e cumulativo por componente
+    /// (Reservation + ReservationItem) e NAO conhece terminal. Particionar o ledger local por
+    /// terminal comparava escopos diferentes e podia subconsumir em silencio quando a mesma OP fosse
+    /// produzida em mais de um terminal.
+    /// </para>
+    /// <para>
+    /// Consulta SEPARADA de proposito: <see cref="ListarPorContextoAsync"/> continua com terminal,
+    /// porque e o reload da grid por terminal e outros fluxos dependem disso.
+    /// </para>
+    /// FAIL-CLOSED: qualquer campo obrigatorio vazio ⇒ lista VAZIA (nunca amplia o contexto).
+    /// </summary>
+    Task<IReadOnlyList<ProdutoAcabadoCaixa>> ListarConfirmadasPorContextoSemTerminalAsync(
+        string numeroOrdemProducao, string itemOrdemProducao, string material, string lote,
+        CancellationToken cancellationToken = default);
     /// <summary>INC-047: Paletização — seleção manual por HU exata via capability Gaia.</summary>
     Task<IReadOnlyList<ProdutoAcabadoCaixa>> ListarPorHandlingUnitsAsync(
         IReadOnlyList<string> husExternais, CancellationToken cancellationToken = default);

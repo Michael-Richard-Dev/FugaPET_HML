@@ -459,6 +459,18 @@ public sealed class ProdutoAcabadoHuService : IProdutoAcabadoHuBridgeServico
         string numeroOrdemProducao, string itemOrdemProducao, string material, string lote, string terminal,
         CancellationToken cancellationToken = default)
         => _repositorio.ListarPorContextoAsync(numeroOrdemProducao, itemOrdemProducao, material, lote, terminal, cancellationToken);
+
+    /// <summary>
+    /// GATE 124H: acumulado real do 261 (componente KG/PP05) — caixas CONFIRMADA_SAP do mesmo
+    /// contexto funcional (OP+item+material+lote), SEM particionar por terminal. O WithdrawnQuantity
+    /// do SAP e cumulativo por componente e nao conhece terminal; comparar com um ledger por terminal
+    /// subconsumia em silencio quando a OP era produzida em mais de um terminal.
+    /// </summary>
+    public Task<IReadOnlyList<ProdutoAcabadoCaixa>> ListarConfirmadasPorContextoSemTerminalAsync(
+        string numeroOrdemProducao, string itemOrdemProducao, string material, string lote,
+        CancellationToken cancellationToken = default)
+        => _repositorio.ListarConfirmadasPorContextoSemTerminalAsync(
+            numeroOrdemProducao, itemOrdemProducao, material, lote, cancellationToken);
     /// <summary>INC-047: caixas por HU externo (Paletização — seleção MANUAL). Read-only, sem SAP/POST.</summary>
     public Task<IReadOnlyList<ProdutoAcabadoCaixa>> ListarCaixasPorHandlingUnitsAsync(
         IReadOnlyList<string> husExternais, CancellationToken cancellationToken = default)
