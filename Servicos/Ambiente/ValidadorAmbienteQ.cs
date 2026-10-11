@@ -139,7 +139,20 @@ public static class ValidadorAmbienteQ
     {
         ArgumentNullException.ThrowIfNull(configuracao);
 
-        foreach (string url in ObterUrlsSap(configuracao))
+        // GATE 126AA (R1): e obrigatorio existir ao menos UMA URL SAP efetiva. Sem destino real nao ha o
+        // que validar, e aprovar nesse estado era PASS INDEVIDO: perfil, allowlist e sap-client NAO
+        // substituem uma URL. Zero URLs ⇒ fail-closed.
+        string[] urlsEfetivas = [.. ObterUrlsSap(configuracao)];
+        if (urlsEfetivas.Length == 0)
+        {
+            return ResultadoValidacaoAmbienteQ.Bloqueado(
+                "Ambiente Q bloqueado: nenhuma URL SAP efetiva configurada. Allowlist, perfil e sap-client "
+                + "nao substituem um destino SAP real.");
+        }
+
+        // GATE 126AA (R4): UMA unica URL efetiva incompativel bloqueia TODA a validacao. Q + DS nunca e
+        // ambiente valido. Comparacao por igualdade exata de host e porta em ValidarUriSap.
+        foreach (string url in urlsEfetivas)
         {
             if (!ValidarUriSap(url, out string mensagem))
             {
@@ -361,11 +374,29 @@ public static class ValidadorAmbienteQ
                 : "SAFE_HU_ONLY_STARTUP";
     }
 
+    /// <summary>
+    /// GATE 126AA: TODAS as URLs do SAP on-premise que o runtime pode usar, incluindo as formas EFETIVAS
+    /// (derivadas). Uma URL OPCIONAL AUSENTE e simplesmente ignorada; uma URL PRESENTE invalida bloqueia.
+    /// <para>
+    /// Incluidas no 126AA, por estarem configuraveis e serem usadas pelo runtime: PurchaseOrderBaseUrl e
+    /// sua forma efetiva (defeito do 126Y — cenario BaseUrl=Q com PurchaseOrder=DS passava),
+    /// ProductionVersionBaseUrlEfetiva (roteiro autoritativo, GATE 048-E REV2) e WorkCenterBaseUrlEfetiva
+    /// (Plant + WorkCenter do Controle de Apontamentos).
+    /// </para>
+    /// <para>
+    /// NAO incluidas, de proposito: PackagingBaseUrl e PalletInt012BaseUrl. Ambas apontam para o tenant do
+    /// Integration Suite/CPI, que NAO e o host SAP on-premise — valida-las contra o host Q seria errado.
+    /// A rota INT012 tem contrato proprio (allowlist dedicada 046-K, verificada em
+    /// ValidadorIdentidadeQas110).
+    /// </para>
+    /// </summary>
     private static IEnumerable<string> ObterUrlsSap(ConfiguracaoSap configuracao)
     {
         string[] urls =
         [
             configuracao.BaseUrl,
+            configuracao.PurchaseOrderBaseUrl,
+            configuracao.PurchaseOrderBaseUrlEfetiva,
             configuracao.MaterialDocumentBaseUrl,
             configuracao.ProductionOrderBaseUrl,
             configuracao.ProductionOrderBaseUrlEfetiva,
@@ -374,8 +405,9 @@ public static class ValidadorAmbienteQ
             configuracao.ProductBaseUrl,
             configuracao.ProductMasterBaseUrlEfetiva,
             configuracao.HandlingUnitBaseUrl,
-            // GATE 095F: ProductionVersion removida do readiness do Controle (roteiro agora é V3 direto).
-            configuracao.ProductionRoutingBaseUrlEfetiva
+            configuracao.ProductionVersionBaseUrlEfetiva,
+            configuracao.ProductionRoutingBaseUrlEfetiva,
+            configuracao.WorkCenterBaseUrlEfetiva
         ];
 
         return urls.Where(url => !string.IsNullOrWhiteSpace(url)).Distinct(StringComparer.OrdinalIgnoreCase);

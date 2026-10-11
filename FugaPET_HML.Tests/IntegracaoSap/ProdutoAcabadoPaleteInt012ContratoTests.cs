@@ -730,6 +730,211 @@ public sealed class ProdutoAcabadoPaleteInt012ContratoTests
         Assert.Equal(CenarioIdentidadeQas110.RotaCpiInconsistente, ident.Cenario);
     }
 
+    // ========================================================================================
+    // GATE 126AA: o contrato de DESTINO exige (a) ao menos UMA URL SAP efetiva e (b) que TODAS as
+    // URLs efetivas — inclusive PurchaseOrder — sejam Q. Uma unica URL DS bloqueia o conjunto.
+    // ========================================================================================
+
+    /// <summary>Configuracao minima para isolar o contrato de destino (perfil Q + allowlist + mandante).</summary>
+    private static ConfiguracaoSap ConfigDestino(
+        string? baseUrl = null,
+        string? purchaseOrderBaseUrl = null,
+        string? materialDocumentBaseUrl = null,
+        IReadOnlyList<string>? allowlist = null,
+        string sapClient = MandanteQ) => new()
+        {
+            PerfilLocalQ = true,
+            BaseUrl = baseUrl ?? string.Empty,
+            PurchaseOrderBaseUrl = purchaseOrderBaseUrl ?? string.Empty,
+            MaterialDocumentBaseUrl = materialDocumentBaseUrl ?? string.Empty,
+            SapClient = sapClient,
+            HostsPermitidos = allowlist ?? [ValidadorAmbienteQ.SapHostEsperado]
+        };
+
+    [Fact] // 126AA-T1/T6: nenhuma URL SAP efetiva => BLOQUEADO, mesmo com allowlist Q e mandante 110
+    public void AA1_SemNenhumaUrlSapEfetiva_Bloqueado()
+    {
+        ConfiguracaoSap cfg = ConfigDestino();
+
+        ResultadoValidacaoAmbienteQ destino = ValidadorAmbienteQ.ValidarDestinoSapQ(cfg);
+        Assert.False(destino.Valido);
+        Assert.Contains("nenhuma URL SAP efetiva", destino.Mensagem, StringComparison.OrdinalIgnoreCase);
+
+        // E a identidade QAS110 tambem nao e emitida (o guard de startup nao e paralelo ao da tara).
+        ResultadoIdentidadeQas110 ident = ValidadorIdentidadeQas110.Resolver(cfg);
+        Assert.False(ident.Confirmada);
+        Assert.Equal(CenarioIdentidadeQas110.DestinoNaoQ, ident.Cenario);
+
+        // O guard de STARTUP recusa o mesmo cenario (nao foi afrouxado).
+        Assert.False(ValidadorAmbienteQ.ValidarSap(cfg).Valido);
+    }
+
+    [Fact] // 126AA-T2: URL principal Q e PurchaseOrder DS => BLOQUEADO (defeito do 126Y)
+    public void AA2_BaseQComPurchaseOrderDs_Bloqueado()
+    {
+        ConfiguracaoSap cfg = ConfigDestino(
+            baseUrl: UrlQ("API_MATERIAL_DOCUMENT_SRV"),
+            purchaseOrderBaseUrl: UrlDs("API_PURCHASEORDER_SRV"));
+
+        Assert.False(ValidadorAmbienteQ.ValidarDestinoSapQ(cfg).Valido);
+        Assert.False(ValidadorIdentidadeQas110.Resolver(cfg).Confirmada);
+        Assert.False(ValidadorAmbienteQ.ValidarSap(cfg).Valido);
+    }
+
+    [Fact] // 126AA-T3: URL principal DS e PurchaseOrder Q => BLOQUEADO
+    public void AA3_BaseDsComPurchaseOrderQ_Bloqueado()
+    {
+        ConfiguracaoSap cfg = ConfigDestino(
+            baseUrl: UrlDs("API_MATERIAL_DOCUMENT_SRV"),
+            purchaseOrderBaseUrl: UrlQ("API_PURCHASEORDER_SRV"));
+
+        Assert.False(ValidadorAmbienteQ.ValidarDestinoSapQ(cfg).Valido);
+        Assert.False(ValidadorIdentidadeQas110.Resolver(cfg).Confirmada);
+    }
+
+    [Fact] // 126AA-T2b: PurchaseOrder AUSENTE deriva de BaseUrl — Q continua valido, DS continua bloqueado
+    public void AA2b_PurchaseOrderAusente_DerivaDaBaseUrl()
+    {
+        // Ausente + base Q ⇒ efetiva Q ⇒ aprova (ausencia nao e invalidez).
+        Assert.True(ValidadorAmbienteQ.ValidarDestinoSapQ(
+            ConfigDestino(baseUrl: UrlQ("API_MATERIAL_DOCUMENT_SRV"))).Valido);
+
+        // Ausente + base DS ⇒ efetiva DS ⇒ bloqueia.
+        Assert.False(ValidadorAmbienteQ.ValidarDestinoSapQ(
+            ConfigDestino(baseUrl: UrlDs("API_MATERIAL_DOCUMENT_SRV"))).Valido);
+    }
+
+    [Fact] // 126AA-T4: todas as URLs SAP efetivas Q validas => PASS
+    public void AA4_TodasAsUrlsEfetivasQ_Aprova()
+    {
+        ConfiguracaoSap cfg = ConfigDestino(
+            baseUrl: UrlQ("API_PURCHASEORDER_SRV"),
+            purchaseOrderBaseUrl: UrlQ("API_PURCHASEORDER_SRV"),
+            materialDocumentBaseUrl: UrlQ("API_MATERIAL_DOCUMENT_SRV"));
+
+        Assert.True(ValidadorAmbienteQ.ValidarDestinoSapQ(cfg).Valido);
+        ResultadoIdentidadeQas110 ident = ValidadorIdentidadeQas110.Resolver(cfg);
+        Assert.True(ident.Confirmada, ident.Mensagem);
+    }
+
+    [Fact] // 126AA-T5: scheme, host ou porta divergentes => BLOQUEADO
+    public void AA5_SchemeHostOuPortaDivergente_Bloqueado()
+    {
+        // http em vez de https
+        Assert.False(ValidadorAmbienteQ.ValidarDestinoSapQ(ConfigDestino(
+            baseUrl: $"http://{ValidadorAmbienteQ.SapHostEsperado}:{ValidadorAmbienteQ.SapPortaEsperada}/sap/")).Valido);
+
+        // host divergente (nem Q nem DS)
+        Assert.False(ValidadorAmbienteQ.ValidarDestinoSapQ(ConfigDestino(
+            baseUrl: $"https://outro.sap.fugacouros.com.br:{ValidadorAmbienteQ.SapPortaEsperada}/sap/")).Valido);
+
+        // porta divergente
+        Assert.False(ValidadorAmbienteQ.ValidarDestinoSapQ(ConfigDestino(
+            baseUrl: $"https://{ValidadorAmbienteQ.SapHostEsperado}:8443/sap/")).Valido);
+
+        // host que CONTEM o host Q como sufixo/prefixo nao e aceito (sem comparacao parcial)
+        Assert.False(ValidadorAmbienteQ.ValidarDestinoSapQ(ConfigDestino(
+            baseUrl: $"https://x{ValidadorAmbienteQ.SapHostEsperado}:{ValidadorAmbienteQ.SapPortaEsperada}/sap/")).Valido);
+        Assert.False(ValidadorAmbienteQ.ValidarDestinoSapQ(ConfigDestino(
+            baseUrl: $"https://{ValidadorAmbienteQ.SapHostEsperado}.intruso.test:{ValidadorAmbienteQ.SapPortaEsperada}/sap/")).Valido);
+
+        // URL relativa/malformada
+        Assert.False(ValidadorAmbienteQ.ValidarDestinoSapQ(ConfigDestino(baseUrl: "/sap/opu/odata")).Valido);
+    }
+
+    [Fact] // 126AA-T7: DS com mandante 110 e perfil Q => BLOQUEADO (reconfirma o 126X apos o 126AA)
+    public void AA7_DsComMandante110EPerfilQ_Bloqueado()
+    {
+        ConfiguracaoSap ds = ConfigDsMandante110(MapeamentoAprovado());
+        Assert.True(ds.PerfilLocalQ);
+        Assert.Equal(MandanteQ, ds.SapClient);
+
+        Assert.False(ValidadorAmbienteQ.ValidarDestinoSapQ(ds).Valido);
+        Assert.Equal(CenarioIdentidadeQas110.DestinoNaoQ, ValidadorIdentidadeQas110.Resolver(ds).Cenario);
+    }
+
+    [Fact] // 126AA-T8: identidade nao validada => tara indisponivel e payload bloqueado
+    public void AA8_IdentidadeNaoValidada_TaraIndisponivel_SemPayload()
+    {
+        foreach (ConfiguracaoSap cfg in new[]
+        {
+            ConfigDestino(), // sem URL
+            ConfigDestino(baseUrl: UrlQ("API_MATERIAL_DOCUMENT_SRV"), purchaseOrderBaseUrl: UrlDs("API_PURCHASEORDER_SRV")),
+            ConfigDsMandante110()
+        })
+        {
+            ResultadoIdentidadeQas110 ident = ValidadorIdentidadeQas110.Resolver(cfg);
+            Assert.False(ident.Confirmada);
+
+            ResultadoTaraFisicaEmbalagem tara = ResolvedorTaraFisicaEmbalagemPalete.Resolver(
+                MapeamentoAprovado(), ident.Identidade, CentroQ, MaterialPalete);
+            Assert.False(tara.Disponivel);
+            Assert.Null(tara.PesoKg);
+
+            ResultadoPreviewProdutoAcabadoPalete preview =
+                new ProdutoAcabadoPaletePayloadBuilder().MontarPreview(PaletePiloto1(), tara);
+            Assert.False(preview.Sucesso);
+            Assert.Null(preview.Payload);
+        }
+    }
+
+    [Fact] // 126AA-T9: identidade Q valida (todas as URLs Q) + PALLET01 => 29.800 / 28.700 / 1.100
+    public void AA9_IdentidadeQValidaComTodasAsUrls_ProduzOutboundAprovado()
+    {
+        ConfiguracaoSap cfg = new()
+        {
+            PerfilLocalQ = true,
+            BaseUrl = UrlQ("API_PURCHASEORDER_SRV"),
+            PurchaseOrderBaseUrl = UrlQ("API_PURCHASEORDER_SRV"),
+            MaterialDocumentBaseUrl = UrlQ("API_MATERIAL_DOCUMENT_SRV"),
+            ProductionOrderBaseUrl = UrlQ("API_PRODUCTION_ORDER_2_SRV"),
+            ProductBaseUrl = UrlQ("API_PRODUCT_SRV"),
+            HandlingUnitBaseUrl = UrlQ("API_HANDLINGUNIT_SRV"),
+            SapClient = MandanteQ,
+            HostsPermitidos = [ValidadorAmbienteQ.SapHostEsperado],
+            Usuario = "u",
+            Senha = "p",
+            TarasFisicasEmbalagemPalete = MapeamentoAprovado()
+        };
+
+        ResultadoIdentidadeQas110 ident = ValidadorIdentidadeQas110.Resolver(cfg);
+        Assert.True(ident.Confirmada, ident.Mensagem);
+
+        ResultadoTaraFisicaEmbalagem tara = ResolvedorTaraFisicaEmbalagemPalete.Resolver(
+            cfg.TarasFisicasEmbalagemPalete, ident.Identidade, CentroQ, MaterialPalete);
+        ResultadoPreviewProdutoAcabadoPalete preview =
+            new ProdutoAcabadoPaletePayloadBuilder().MontarPreview(PaletePiloto1(), tara);
+
+        Assert.True(preview.Sucesso, preview.Mensagem);
+        Assert.Equal(29.800m, preview.Payload!.GrossWeight);
+        Assert.Equal(28.700m, preview.Payload.NetWeight);
+        Assert.Equal(1.100m, preview.Payload.TareWeight);
+        Assert.Equal("KG", preview.Payload.WeightUnit);
+    }
+
+    [Fact] // 126AA: a enumeracao de destino cobre PurchaseOrder e NAO inclui as rotas CPI
+    public void AA_EnumeracaoDeDestino_CobrePurchaseOrder_ENaoIncluiCpi()
+    {
+        // PurchaseOrder participa: sozinha, uma URL DS nesse campo derruba o conjunto.
+        Assert.False(ValidadorAmbienteQ.ValidarDestinoSapQ(ConfigDestino(
+            baseUrl: UrlQ("API_MATERIAL_DOCUMENT_SRV"),
+            purchaseOrderBaseUrl: UrlDs("API_PURCHASEORDER_SRV"))).Valido);
+
+        // Rotas do tenant CPI NAO sao validadas contra o host SAP on-premise (contrato proprio 046-K).
+        ConfiguracaoSap comCpi = new()
+        {
+            PerfilLocalQ = true,
+            BaseUrl = UrlQ("API_MATERIAL_DOCUMENT_SRV"),
+            SapClient = MandanteQ,
+            HostsPermitidos = [ValidadorAmbienteQ.SapHostEsperado],
+            PackagingBaseUrl = "https://tenant.cfapps.br10.hana.ondemand.com/http/packaging",
+            PalletInt012BaseUrl = "https://tenant.cfapps.br10.hana.ondemand.com/http/QS4_110/x",
+            PalletInt012HostsPermitidos = ["tenant.cfapps.br10.hana.ondemand.com"]
+        };
+        Assert.True(ValidadorAmbienteQ.ValidarDestinoSapQ(comCpi).Valido);
+        Assert.True(ValidadorIdentidadeQas110.Resolver(comCpi).Confirmada);
+    }
+
     private static ConfiguracaoSap ConfigCpi(bool comCredencialCpi, bool writeHabilitado) => new()
     {
         // Credenciais SAP genéricas PREENCHIDAS de propósito, para provar que NÃO há fallback para elas.
