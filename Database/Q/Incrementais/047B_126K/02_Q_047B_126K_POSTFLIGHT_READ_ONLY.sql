@@ -34,7 +34,7 @@ BEGIN
        AND (p.prosecdef OR p.provolatile<>'s'
          OR pg_catalog.pg_get_function_result(p.oid)<>'TABLE(codigo_hu_caixa bigint, handling_unit_external_id text, numero_ordem_producao text, material text, lote text, numero_caixa integer, hu_caixa text, codigo_caixa_local text, peso_bruto numeric, peso_liquido numeric, peso_tara numeric, unidade_peso text, centro text, deposito text, status_hu_caixa text)'
          OR NOT pg_catalog.has_function_privilege('fugapet_q_app',p.oid,'EXECUTE')
-         OR EXISTS(SELECT 1 FROM pg_catalog.aclexplode(pg_catalog.coalesce(p.proacl,pg_catalog.acldefault('f',p.proowner))) acl
+         OR EXISTS(SELECT 1 FROM pg_catalog.aclexplode(COALESCE(p.proacl,pg_catalog.acldefault('f',p.proowner))) acl
                     WHERE acl.grantee=0 AND acl.privilege_type='EXECUTE')))
   THEN RAISE EXCEPTION '126K_POSTFLIGHT_FUNCTION_CONTRACT_INVALID'; END IF;
   IF pg_catalog.obj_description(v_main,'pg_proc') NOT LIKE 'FugaPET_Q_126K_CREATED_RANGE;%'
