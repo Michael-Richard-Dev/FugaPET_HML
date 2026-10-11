@@ -17,9 +17,28 @@ public sealed class ProdutoAcabadoPaleteInt012PreClaimTests
 {
     private static ProdutoAcabadoController Controller(FakeGatewayInt012 gateway, FakeExecutor045Int012 executor)
         => new(new ProductionOrderSapFake(),
-            configuracaoSap: new ConfiguracaoSap { ProdutoAcabadoPipelineHabilitado = true },
+            configuracaoSap: new ConfiguracaoSap
+            {
+                ProdutoAcabadoPipelineHabilitado = true,
+                SapClient = MandanteTeste,
+                // GATE 126V: a composicao outbound exige tara fisica resolvida. Estes testes exercitam os
+                // guards de MATERIAL / claim / POST, nao a resolucao da tara — por isso o mapeamento cobre
+                // tambem os materiais NAO homologados, para que o guard sob teste seja o que dispara (e nao
+                // o bloqueio de tara ausente, que viria antes).
+                TarasFisicasEmbalagemPalete = [.. new[] { "PALLET01", "PALLET02", "PALLET03", "PALLET05" }
+                    .Select(material => new TaraFisicaEmbalagemConfigurada
+                    {
+                        SapClient = MandanteTeste,
+                        Centro = "3007",
+                        MaterialEmbalagem = material,
+                        PesoKg = 1.000m,
+                        Unidade = "KG"
+                    })]
+            },
             pipelineStore: new ProdutoAcabadoPipelinePostgresStore(executor),
             paleteInt012Gateway: gateway);
+
+    private const string MandanteTeste = "110";
 
     private static ProdutoAcabadoPalete Palete(StatusIntegracaoCaixa statusCaixa = StatusIntegracaoCaixa.ConfirmadaSap, string? packaging = "PALLET01") => new()
     {

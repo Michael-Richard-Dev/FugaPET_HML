@@ -1,4 +1,5 @@
 using System.Text.Json;
+using FugaPET_HML.Modelo.IntegracaoSap;
 using FugaPET_HML.Servicos.Ambiente;
 
 namespace FugaPET_HML.Servicos.IntegracaoSap;
@@ -169,6 +170,8 @@ public static class LeitorConfiguracaoSap
         bool palletWriteHabilitadoArquivo = false;
         string palletInt012BaseUrlArquivo = string.Empty;
         IReadOnlyList<string> palletInt012HostsPermitidosArquivo = [];
+        // GATE 126V: mapeamento da tara fisica da embalagem do palete. Lista VAZIA por padrao ⇒ fail-closed.
+        IReadOnlyList<TaraFisicaEmbalagemConfigurada> tarasFisicasEmbalagemPaleteArquivo = [];
         int timeout = 30;
 
         // Arquivo ausente: e valido carregar a configuracao apenas por variaveis de ambiente.
@@ -213,6 +216,9 @@ public static class LeitorConfiguracaoSap
                     palletWriteHabilitadoArquivo = LerBooleano(sap, "pallet_write_habilitado", false);
                     palletInt012BaseUrlArquivo = LerTexto(sap, "pallet_int012_base_url", string.Empty);
                     palletInt012HostsPermitidosArquivo = LerListaTextos(sap, "pallet_int012_hosts_permitidos");
+                    // GATE 126V: tara fisica da embalagem do palete por mandante + centro + material.
+                    tarasFisicasEmbalagemPaleteArquivo =
+                        LerTarasFisicasEmbalagemPalete(sap, "taras_fisicas_embalagem_palete");
                     timeout = LerInteiro(sap, "timeout_segundos", 30);
                 }
             }
@@ -306,6 +312,9 @@ public static class LeitorConfiguracaoSap
                 obterVariavelAmbiente,
                 VariavelAmbientePalletInt012HostsPermitidos,
                 palletInt012HostsPermitidosArquivo),
+            // GATE 126V: SOMENTE arquivo. Nao ha variavel de ambiente para a tara fisica — ela e dado
+            // operacional versionavel por instalacao, nao capability, e nao deve persistir em User/Machine.
+            TarasFisicasEmbalagemPalete = tarasFisicasEmbalagemPaleteArquivo,
             // GATE 046-K: credenciais CPI/INT012 EXCLUSIVAMENTE por ambiente (nunca arquivo/JSON), sem fallback SAP.
             PalletInt012Usuario = ObterSomenteAmbiente(obterVariavelAmbiente, VariavelAmbientePalletInt012Usuario),
             PalletInt012Senha = ObterSomenteAmbiente(obterVariavelAmbiente, VariavelAmbientePalletInt012Senha),
@@ -388,6 +397,60 @@ public static class LeitorConfiguracaoSap
             .Where(item => !string.IsNullOrWhiteSpace(item))
             .Select(item => item!)
             .ToArray();
+    }
+
+    /// <summary>
+    /// GATE 126V: le o mapeamento de tara fisica da embalagem do palete. Entradas SEM peso numerico, com
+    /// peso em tipo errado ou com chave logica incompleta sao DESCARTADAS na carga — nao viram zero, nao
+    /// viram entrada parcial. Uma entrada descartada reaparece a jusante como NaoConfigurada (fail-closed).
+    /// </summary>
+    private static IReadOnlyList<TaraFisicaEmbalagemConfigurada> LerTarasFisicasEmbalagemPalete(
+        JsonElement elemento,
+        string propriedade)
+    {
+        if (!elemento.TryGetProperty(propriedade, out JsonElement valor)
+            || valor.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        List<TaraFisicaEmbalagemConfigurada> mapeamentos = [];
+        foreach (JsonElement item in valor.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            string sapClient = LerTexto(item, "sap_client", string.Empty).Trim();
+            string centro = LerTexto(item, "centro", string.Empty).Trim();
+            string material = LerTexto(item, "material_embalagem", string.Empty).Trim();
+            string unidade = LerTexto(item, "unidade", string.Empty).Trim();
+
+            // Peso AUSENTE ou nao numerico ⇒ entrada descartada (nunca 0m implicito).
+            if (!item.TryGetProperty("peso_kg", out JsonElement peso)
+                || peso.ValueKind != JsonValueKind.Number
+                || !peso.TryGetDecimal(out decimal pesoKg))
+            {
+                continue;
+            }
+
+            if (sapClient.Length == 0 || centro.Length == 0 || material.Length == 0)
+            {
+                continue;
+            }
+
+            mapeamentos.Add(new TaraFisicaEmbalagemConfigurada
+            {
+                SapClient = sapClient,
+                Centro = centro,
+                MaterialEmbalagem = material,
+                PesoKg = pesoKg,
+                Unidade = unidade
+            });
+        }
+
+        return mapeamentos;
     }
 }
 

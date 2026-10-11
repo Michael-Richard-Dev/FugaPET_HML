@@ -331,6 +331,13 @@ public sealed class ConfiguracaoSap
     /// </summary>
     public bool PackagingHabilitado { get; init; }
 
+    /// <summary>
+    /// GATE 126V: mapeamento operacional da tara FISICA do material de embalagem do palete, por
+    /// mandante + centro + material. Origem EXCLUSIVA: configuracao.sap.json, secao "sap" /
+    /// "taras_fisicas_embalagem_palete". Nunca vem de hu_palete, nunca de constante no codigo.
+    /// Vazio ⇒ composicao outbound do palete fica fail-closed (ausencia NAO e tara zero).
+    /// </summary>
+    public IReadOnlyList<Modelo.IntegracaoSap.TaraFisicaEmbalagemConfigurada> TarasFisicasEmbalagemPalete { get; init; } = [];
 
     /// <summary>
     /// Endpoint consultável (somente leitura) do serviço de norma/estrutura de embalagem do Produto Acabado

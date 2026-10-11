@@ -730,7 +730,9 @@ public sealed class ProdutoAcabadoPipelineWiringRev4Tests
             Usuario = "u",
             Senha = "p",
             PalletInt012Usuario = "u",
-            PalletInt012Senha = "p"
+            PalletInt012Senha = "p",
+            SapClient = "110",
+            TarasFisicasEmbalagemPalete = TarasFisicasTeste()
         };
         ProdutoAcabadoController controller = new(new ProductionOrderSapFakeServico(OrdemSapValida()), configuracaoSap: cfg, pipelineStore: new ProdutoAcabadoPipelineStoreMemoria());
         ProdutoAcabadoPalete palete = controller.MontarPalete(OrdemValida(), [CaixaConfirmada(1)], [], 1, 1, "PALLET01");
@@ -748,7 +750,11 @@ public sealed class ProdutoAcabadoPipelineWiringRev4Tests
         FakePaleteGateway gateway = new(EstadoPaleteInt012.Confirmado);
         ProdutoAcabadoController controller = new(
             new ProductionOrderSapFakeServico(OrdemSapValida()),
-            configuracaoSap: new ConfiguracaoSap(),
+            configuracaoSap: new ConfiguracaoSap
+            {
+                SapClient = "110",
+                TarasFisicasEmbalagemPalete = TarasFisicasTeste()
+            },
             pipelineStore: store,
             paleteInt012Gateway: gateway);
         ProdutoAcabadoPalete palete = controller.MontarPalete(OrdemValida(), [CaixaConfirmada(1)], [], 1, 1, "PALLET01");
@@ -782,8 +788,25 @@ public sealed class ProdutoAcabadoPipelineWiringRev4Tests
             Lote = "L001",
             StatusIntegracao = StatusIntegracaoCaixa.ConfirmadaSap,
             HandlingUnitExternalId = $"30001{numero:0000}",
+            // GATE 126V: o centro passa a integrar a chave logica da tara fisica do palete; sem ele o
+            // Plant do palete sairia vazio e a composicao outbound bloquearia por chave incompleta.
+            Centro = "3007",
+            Deposito = "PA01",
             PesoBrutoKg = 10m, PesoLiquidoKg = 9m, TaraKg = 1m
         };
+
+    /// <summary>GATE 126V: mapeamento de tara fisica da embalagem para os cenarios de palete deste arquivo.</summary>
+    private static IReadOnlyList<TaraFisicaEmbalagemConfigurada> TarasFisicasTeste() =>
+    [
+        new()
+        {
+            SapClient = "110",
+            Centro = "3007",
+            MaterialEmbalagem = "PALLET01",
+            PesoKg = 1.000m,
+            Unidade = "KG"
+        }
+    ];
 
     private static int ContarOcorrencias(string texto, string alvo)
     {

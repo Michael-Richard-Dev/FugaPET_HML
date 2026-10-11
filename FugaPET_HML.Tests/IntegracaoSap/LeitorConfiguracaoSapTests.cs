@@ -338,6 +338,93 @@ public sealed class LeitorConfiguracaoSapTests : IDisposable
 
         File.WriteAllText(_arquivoTemporario, json);
     }
+
+    // ====================================================================================
+    // GATE 126V: binding da tara FISICA da embalagem do palete pelo MESMO mecanismo de
+    // configuracao que o runtime Q publicado ja usa (configuracao.sap.json, secao "sap").
+    // ====================================================================================
+
+    [Fact] // comprova o carregamento real do mapeamento aprovado (mandante + centro + material)
+    public void Carregar_DeveLerTaraFisicaEmbalagemPaleteDoArquivo()
+    {
+        GravarConfiguracaoComTarasFisicas(
+            """
+            [
+              { "sap_client": "110", "centro": "3007", "material_embalagem": "PALLET01", "peso_kg": 1.000, "unidade": "KG" }
+            ]
+            """);
+
+        ConfiguracaoSap configuracao = LeitorConfiguracaoSap.Carregar(_arquivoTemporario, _ => null);
+
+        Modelo.IntegracaoSap.TaraFisicaEmbalagemConfigurada mapa =
+            Assert.Single(configuracao.TarasFisicasEmbalagemPalete);
+        Assert.Equal("110", mapa.SapClient);
+        Assert.Equal("3007", mapa.Centro);
+        Assert.Equal("PALLET01", mapa.MaterialEmbalagem);
+        Assert.Equal(1.000m, mapa.PesoKg);
+        Assert.Equal("KG", mapa.Unidade);
+
+        // E resolve para o valor aprovado do piloto.
+        Modelo.IntegracaoSap.ResultadoTaraFisicaEmbalagem tara = ResolvedorTaraFisicaEmbalagemPalete.Resolver(
+            configuracao.TarasFisicasEmbalagemPalete, configuracao.SapClient, "3007", "PALLET01");
+        Assert.True(tara.Disponivel);
+        Assert.Equal(1.000m, tara.PesoKg);
+    }
+
+    [Fact] // secao ausente ⇒ lista vazia ⇒ fail-closed a jusante (NUNCA tara zero)
+    public void Carregar_SemSecaoDeTaraFisica_DeveFicarVazioEFailClosed()
+    {
+        GravarConfiguracao(Guid.NewGuid().ToString("N"), Guid.NewGuid().ToString("N"));
+
+        ConfiguracaoSap configuracao = LeitorConfiguracaoSap.Carregar(_arquivoTemporario, _ => null);
+
+        Assert.Empty(configuracao.TarasFisicasEmbalagemPalete);
+        Modelo.IntegracaoSap.ResultadoTaraFisicaEmbalagem tara = ResolvedorTaraFisicaEmbalagemPalete.Resolver(
+            configuracao.TarasFisicasEmbalagemPalete, "110", "3007", "PALLET01");
+        Assert.False(tara.Disponivel);
+        Assert.Null(tara.PesoKg);
+    }
+
+    [Fact] // entrada sem peso numerico ou com chave incompleta e DESCARTADA na carga (nao vira 0m implicito)
+    public void Carregar_EntradaIncompletaOuSemPeso_DeveSerDescartada()
+    {
+        GravarConfiguracaoComTarasFisicas(
+            """
+            [
+              { "sap_client": "110", "centro": "3007", "material_embalagem": "SEM_PESO", "unidade": "KG" },
+              { "sap_client": "110", "centro": "3007", "material_embalagem": "PESO_TEXTO", "peso_kg": "1.000", "unidade": "KG" },
+              { "sap_client": "110", "centro": "", "material_embalagem": "SEM_CENTRO", "peso_kg": 1.000, "unidade": "KG" },
+              { "sap_client": "", "centro": "3007", "material_embalagem": "SEM_MANDANTE", "peso_kg": 1.000, "unidade": "KG" },
+              { "sap_client": "110", "centro": "3007", "material_embalagem": "OK", "peso_kg": 2.500, "unidade": "KG" }
+            ]
+            """);
+
+        ConfiguracaoSap configuracao = LeitorConfiguracaoSap.Carregar(_arquivoTemporario, _ => null);
+
+        Modelo.IntegracaoSap.TaraFisicaEmbalagemConfigurada mapa =
+            Assert.Single(configuracao.TarasFisicasEmbalagemPalete);
+        Assert.Equal("OK", mapa.MaterialEmbalagem);
+        Assert.Equal(2.500m, mapa.PesoKg);
+    }
+
+    private void GravarConfiguracaoComTarasFisicas(string jsonTaras)
+    {
+        string json = $$"""
+        {
+          "sap": {
+            "base_url": "https://sap.exemplo.local/odata",
+            "usuario": "u",
+            "senha": "p",
+            "sap_client": "110",
+            "hosts_permitidos": [ "sap.exemplo.local" ],
+            "timeout_segundos": 30,
+            "taras_fisicas_embalagem_palete": {{jsonTaras}}
+          }
+        }
+        """;
+
+        File.WriteAllText(_arquivoTemporario, json);
+    }
 }
 
 

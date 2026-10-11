@@ -285,7 +285,24 @@ public sealed class ProcessoProdutoAcabadoTests
     [Fact]
     public void Palete_DeveGerarPreviewComHandlingUnitsESemPost()
     {
-        ProdutoAcabadoController controller = new(new ProductionOrderSapFakeServico(OrdemSapValida()));
+        // GATE 126V: a composicao outbound exige tara fisica resolvida por mandante + centro + material.
+        ProdutoAcabadoController controller = new(
+            new ProductionOrderSapFakeServico(OrdemSapValida()),
+            configuracaoSap: new ConfiguracaoSap
+            {
+                SapClient = "110",
+                TarasFisicasEmbalagemPalete =
+                [
+                    new()
+                    {
+                        SapClient = "110",
+                        Centro = "3007",
+                        MaterialEmbalagem = "PACK_TEST_001",
+                        PesoKg = 1.000m,
+                        Unidade = "KG"
+                    }
+                ]
+            });
         ProdutoAcabadoCaixa caixa1 = Caixa(1, 10m, 1m, 9m);
         ProdutoAcabadoCaixa caixa2 = Caixa(2, 11m, 1m, 10m);
         ProdutoAcabadoPalete palete = controller.MontarPalete(
@@ -301,9 +318,12 @@ public sealed class ProcessoProdutoAcabadoTests
         Assert.True(preview.Sucesso);
         Assert.NotNull(preview.Payload);
         Assert.Equal("$1", preview.Payload!.HandlingUnitExternalID);
-        Assert.Equal(21m, preview.Payload.GrossWeight);
+        // GATE 126V: outbound = local + tara fisica (1.000). Local permanece 21/19/2; o liquido nao muda.
+        Assert.Equal(22m, preview.Payload.GrossWeight);
         Assert.Equal(19m, preview.Payload.NetWeight);
-        Assert.Equal(2m, preview.Payload.TareWeight);
+        Assert.Equal(3m, preview.Payload.TareWeight);
+        Assert.Equal(21m, palete.PesoBrutoKg); // rascunho local NAO alterado
+        Assert.Equal(2m, palete.TaraKg);
         Assert.Equal("KG", preview.Payload.WeightUnit);
         Assert.Equal("3007", preview.Payload.Plant);
         Assert.Equal("PA01", preview.Payload.StorageLocation);

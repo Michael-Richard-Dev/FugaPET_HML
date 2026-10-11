@@ -1128,8 +1128,27 @@ public sealed class ProdutoAcabadoController
     public ResultadoRequestHandlingUnitCaixa GerarRequestHandlingUnitCaixa(ProdutoAcabadoCaixa caixa)
         => _requestBuilder.Montar(caixa);
 
+    /// <summary>
+    /// GATE 126V: resolve a tara FISICA do material de embalagem (configuracao operacional, por mandante +
+    /// centro + material) ANTES de montar o DTO e entrega o resultado ao builder. Preview e POST consomem
+    /// EXATAMENTE este mesmo payload (<see cref="EnviarPaleteInt012Async"/> chama este metodo).
+    /// </summary>
     public ResultadoPreviewProdutoAcabadoPalete GerarPreviewPalete(ProdutoAcabadoPalete palete)
-        => _paletePayloadBuilder.MontarPreview(palete);
+    {
+        ArgumentNullException.ThrowIfNull(palete);
+        return _paletePayloadBuilder.MontarPreview(palete, ResolverTaraFisicaEmbalagemPalete(palete));
+    }
+
+    /// <summary>
+    /// GATE 126V: resolucao PURA da tara fisica a partir da configuracao ja carregada. Nenhuma leitura de
+    /// hu_palete, nenhuma constante de peso no codigo. Ausencia/invalidez/ambiguidade ⇒ fail-closed.
+    /// </summary>
+    internal ResultadoTaraFisicaEmbalagem ResolverTaraFisicaEmbalagemPalete(ProdutoAcabadoPalete palete)
+        => ResolvedorTaraFisicaEmbalagemPalete.Resolver(
+            _configuracaoSap.TarasFisicasEmbalagemPalete,
+            _configuracaoSap.SapClient,
+            palete.Plant,
+            palete.PackagingMaterial);
 
     public Task<IReadOnlyList<TaraCadastro>> ListarTarasAtivasPorSetorAsync(
         long codigoSetor,

@@ -67,7 +67,7 @@ public sealed class ProdutoAcabadoPaleteReloadStoreTests
         Assert.Equal("300014352", caixa.HandlingUnitExternalId);
 
         // O preview não pode mais reprovar por "precisa estar CONFIRMADA_SAP".
-        ResultadoPreviewProdutoAcabadoPalete preview = new ProdutoAcabadoPaletePayloadBuilder().MontarPreview(palete);
+        ResultadoPreviewProdutoAcabadoPalete preview = new ProdutoAcabadoPaletePayloadBuilder().MontarPreview(palete, ResultadoTaraFisicaEmbalagem.Resolvida(1m));
         Assert.True(preview.Sucesso, preview.Mensagem);
         Assert.DoesNotContain("CONFIRMADA_SAP", preview.Mensagem, StringComparison.Ordinal);
     }
@@ -84,7 +84,7 @@ public sealed class ProdutoAcabadoPaleteReloadStoreTests
         ProdutoAcabadoPalete palete = Assert.Single(await store.LerPaletesLocaisPorOrdemAsync("1002024", null));
         Assert.Equal(StatusIntegracaoCaixa.ErroSap, palete.Caixas[0].StatusIntegracao);
 
-        ResultadoPreviewProdutoAcabadoPalete preview = new ProdutoAcabadoPaletePayloadBuilder().MontarPreview(palete);
+        ResultadoPreviewProdutoAcabadoPalete preview = new ProdutoAcabadoPaletePayloadBuilder().MontarPreview(palete, ResultadoTaraFisicaEmbalagem.Resolvida(1m));
         Assert.False(preview.Sucesso);
         Assert.Contains("CONFIRMADA_SAP", preview.Mensagem, StringComparison.Ordinal);
     }
@@ -97,6 +97,39 @@ public sealed class ProdutoAcabadoPaleteReloadStoreTests
 
         ProdutoAcabadoPalete palete = Assert.Single(await store.LerPaletesLocaisPorOrdemAsync("1002024", null));
         Assert.NotEqual(StatusIntegracaoCaixa.ConfirmadaSap, palete.Caixas[0].StatusIntegracao);
+    }
+
+    [Fact] // GATE 126V / T8: o RELOAD do palete local NAO acumula a tara fisica — ela nunca e persistida
+    public async Task T8_ReloadDoPaleteLocal_NaoAcumulaTaraFisica()
+    {
+        // Linha persistida com os pesos LOCAIS do piloto: 28.800 / 28.700 / 0.100 (sem tara de PALLET01).
+        FakeExecutorReload exec = new(
+        [
+            LinhaComposicao(1, "PALLET01", "3007", "PA01", 28.800m, 28.700m, 0.100m, "RASCUNHO", "TERM-1", 5001, 1, 1, "1000283", "0001", "300000100", 1, "4000316", "LOTE1", statusCaixa: "CONFIRMADA_SAP"),
+            LinhaComposicao(1, "PALLET01", "3007", "PA01", 28.800m, 28.700m, 0.100m, "RASCUNHO", "TERM-1", 5002, 2, 2, "1000283", "0001", "300000101", 2, "4000316", "LOTE1", statusCaixa: "CONFIRMADA_SAP"),
+        ]);
+        ProdutoAcabadoPipelinePostgresStore store = new(exec);
+        ProdutoAcabadoPaletePayloadBuilder builder = new();
+        ResultadoTaraFisicaEmbalagem tara = ResultadoTaraFisicaEmbalagem.Resolvida(1.000m);
+
+        // Primeiro ciclo: le do banco e monta o payload.
+        ProdutoAcabadoPalete primeiro = Assert.Single(await store.LerPaletesLocaisPorOrdemAsync("1000283", null));
+        Assert.Equal(28.800m, primeiro.PesoBrutoKg); // o rascunho persistido permanece LOCAL
+        Assert.Equal(0.100m, primeiro.TaraKg);
+        ResultadoPreviewProdutoAcabadoPalete previewUm = builder.MontarPreview(primeiro, tara);
+        Assert.True(previewUm.Sucesso, previewUm.Mensagem);
+        Assert.Equal(29.800m, previewUm.Payload!.GrossWeight);
+        Assert.Equal(1.100m, previewUm.Payload.TareWeight);
+
+        // Segundo ciclo (reload + novo preview, como em reenvio/reconciliacao): resultado IDENTICO.
+        ProdutoAcabadoPalete segundo = Assert.Single(await store.LerPaletesLocaisPorOrdemAsync("1000283", null));
+        Assert.Equal(28.800m, segundo.PesoBrutoKg);
+        Assert.Equal(0.100m, segundo.TaraKg);
+        ResultadoPreviewProdutoAcabadoPalete previewDois = builder.MontarPreview(segundo, tara);
+        Assert.True(previewDois.Sucesso, previewDois.Mensagem);
+        Assert.Equal(29.800m, previewDois.Payload!.GrossWeight); // nunca 30.800
+        Assert.Equal(28.700m, previewDois.Payload.NetWeight);
+        Assert.Equal(1.100m, previewDois.Payload.TareWeight);    // nunca 2.100
     }
 
     [Fact]

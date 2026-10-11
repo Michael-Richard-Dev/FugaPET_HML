@@ -24,6 +24,16 @@
     "senha": "DEFINIR_SENHA_OU_USAR_VARIAVEL_AMBIENTE",
     "timeout_segundos": 30,
     "escrita_habilitada": false,
+    "_taras_fisicas_embalagem_palete_126v": "GATE 126V: tara FISICA do material de embalagem da HU PAI do palete, usada EXCLUSIVAMENTE na composicao do payload INT012 (outbound). NAO altera o palete local, NAO e persistida e NAO vem de hu_palete. Chave logica = sap_client + centro + material_embalagem; o sap_client restringe o mapeamento ao mandante homologado (copiar este arquivo para outro ambiente NAO autoriza a composicao). unidade aceita SOMENTE KG (sem conversao automatica), peso nao negativo e no maximo 3 casas decimais. Ausencia, invalidez ou duas entradas para a mesma chave = FAIL-CLOSED: o preview do palete nao gera payload e nenhum POST ocorre. Ausencia NUNCA e interpretada como tara zero; para declarar tara zero use peso_kg 0 EXPLICITO. Nao e segredo: nao colocar credencial aqui.",
+    "taras_fisicas_embalagem_palete": [
+      {
+        "sap_client": "110",
+        "centro": "3007",
+        "material_embalagem": "PALLET01",
+        "peso_kg": 1.000,
+        "unidade": "KG"
+      }
+    ],
     "_seguranca": "Nao versionar senha real. Em producao/HML, prefira FUGAPET_SAP_USERNAME e FUGAPET_SAP_PASSWORD.",
     "_seguranca_packaging": "A API de embalagem (Integration Suite) usa credenciais PROPRIAS, NUNCA as standard. Defina SOMENTE por variavel de ambiente: FUGAPET_SAP_PACKAGING_USERNAME e FUGAPET_SAP_PACKAGING_PASSWORD. O host do Integration Suite deve estar em packaging_hosts_permitidos. Endpoint = rota exata consultavel (.../GetPackagingSet); a consulta e por $filter=Material eq '...'. Nunca colocar usuario nem senha nem cabecalho de credencial aqui."
   }
