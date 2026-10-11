@@ -1,9 +1,11 @@
 ﻿using FugaPET_HML.AcessoDados.Repositorio;
 using FugaPET_HML.Controle;
 using FugaPET_HML.Controle.Cadastro;
+using FugaPET_HML.Modelo.Ambiente;
 using FugaPET_HML.Modelo.Cadastro;
 using FugaPET_HML.Modelo.IntegracaoSap;
 using FugaPET_HML.Modelo.Processo;
+using FugaPET_HML.Servicos.Ambiente;
 using FugaPET_HML.Servicos.IntegracaoSap;
 using FugaPET_HML.Servicos.Operacao;
 using FugaPET_HML.Servicos.Seguranca;
@@ -1144,11 +1146,16 @@ public sealed class ProdutoAcabadoController
     /// hu_palete, nenhuma constante de peso no codigo. Ausencia/invalidez/ambiguidade ⇒ fail-closed.
     /// </summary>
     internal ResultadoTaraFisicaEmbalagem ResolverTaraFisicaEmbalagemPalete(ProdutoAcabadoPalete palete)
-        => ResolvedorTaraFisicaEmbalagemPalete.Resolver(
+    {
+        // GATE 126X: a identidade QAS110 vem da configuracao EFETIVAMENTE CARREGADA pelo runtime (perfil
+        // local + destino SAP validado pelo contrato de startup). Nao confirmada ⇒ sem tara ⇒ sem payload.
+        ResultadoIdentidadeQas110 identidade = ValidadorIdentidadeQas110.Resolver(_configuracaoSap);
+        return ResolvedorTaraFisicaEmbalagemPalete.Resolver(
             _configuracaoSap.TarasFisicasEmbalagemPalete,
-            _configuracaoSap.SapClient,
+            identidade.Identidade,
             palete.Plant,
             palete.PackagingMaterial);
+    }
 
     public Task<IReadOnlyList<TaraCadastro>> ListarTarasAtivasPorSetorAsync(
         long codigoSetor,

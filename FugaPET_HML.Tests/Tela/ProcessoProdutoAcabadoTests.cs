@@ -291,6 +291,10 @@ public sealed class ProcessoProdutoAcabadoTests
             configuracaoSap: new ConfiguracaoSap
             {
                 SapClient = "110",
+                // GATE 126X: identidade QAS110 exige perfil Q reconhecido + destino SAP Q validado.
+                PerfilLocalQ = true,
+                BaseUrl = $"https://{Servicos.Ambiente.ValidadorAmbienteQ.SapHostEsperado}:{Servicos.Ambiente.ValidadorAmbienteQ.SapPortaEsperada}/sap/opu/odata/sap/API_MATERIAL_DOCUMENT_SRV/",
+                HostsPermitidos = [Servicos.Ambiente.ValidadorAmbienteQ.SapHostEsperado],
                 TarasFisicasEmbalagemPalete =
                 [
                     new()

@@ -1,3 +1,4 @@
+using FugaPET_HML.Modelo.Ambiente;
 using FugaPET_HML.Modelo.IntegracaoSap;
 
 namespace FugaPET_HML.Servicos.IntegracaoSap;
@@ -18,20 +19,34 @@ public static class ResolvedorTaraFisicaEmbalagemPalete
     /// <summary>Precisao do contrato SAP de peso (identica a usada no 261).</summary>
     public const int CasasDecimaisContratoSap = 3;
 
+    /// <summary>
+    /// GATE 126X: a resolucao passou a exigir a IDENTIDADE QAS110 comprovada
+    /// (<see cref="Modelo.Ambiente.IdentidadeAmbienteQas110"/>), e nao mais um mandante solto. O mandante
+    /// continua compondo a chave logica do mapeamento, porem agora e LIDO DA IDENTIDADE VALIDADA — o
+    /// chamador nao pode declarar um mandante arbitrario, e mandante 110 em DS nao resolve nada, porque a
+    /// identidade nao e emitida para destino DS.
+    /// </summary>
     public static ResultadoTaraFisicaEmbalagem Resolver(
         IReadOnlyList<TaraFisicaEmbalagemConfigurada>? mapeamentos,
-        string? sapClientAtivo,
+        IdentidadeAmbienteQas110? identidadeQas110,
         string? centro,
         string? materialEmbalagem)
     {
-        string mandante = (sapClientAtivo ?? string.Empty).Trim();
         string plant = (centro ?? string.Empty).Trim();
         string material = (materialEmbalagem ?? string.Empty).Trim();
 
+        if (identidadeQas110 is null)
+        {
+            return ResultadoTaraFisicaEmbalagem.NaoConfigurada(
+                "identidade do ambiente QAS110 nao comprovada — a tara fisica so e resolvida com perfil Q e "
+                + "destino SAP Q validados. Mandante, isoladamente, nao autoriza.");
+        }
+
+        string mandante = (identidadeQas110.SapClient ?? string.Empty).Trim();
         if (mandante.Length == 0)
         {
             return ResultadoTaraFisicaEmbalagem.NaoConfigurada(
-                "mandante SAP ativo nao identificado — o mapeamento de tara fisica e restrito por mandante.");
+                "mandante SAP ausente na identidade validada — chave logica incompleta.");
         }
 
         if (plant.Length == 0 || material.Length == 0)
@@ -84,7 +99,7 @@ public static class ResolvedorTaraFisicaEmbalagemPalete
                 $"peso com precisao acima do contrato ({CasasDecimaisContratoSap} casas decimais).");
         }
 
-        return ResultadoTaraFisicaEmbalagem.Resolvida(unico.PesoKg);
+        return ResultadoTaraFisicaEmbalagem.Resolvida(identidadeQas110, unico.PesoKg);
     }
 
     private static bool Igual(string? esquerda, string direita)

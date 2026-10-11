@@ -2,6 +2,7 @@ using FugaPET_HML.AcessoDados.Repositorio;
 using FugaPET_HML.Controle.Processo;
 using FugaPET_HML.Modelo.IntegracaoSap;
 using FugaPET_HML.Modelo.Processo;
+using FugaPET_HML.Servicos.Ambiente;
 using FugaPET_HML.Servicos.IntegracaoSap;
 using FugaPET_HML.Servicos.Operacao;
 
@@ -21,6 +22,11 @@ public sealed class ProdutoAcabadoPaleteInt012PreClaimTests
             {
                 ProdutoAcabadoPipelineHabilitado = true,
                 SapClient = MandanteTeste,
+                // GATE 126X: a tara exige IDENTIDADE QAS110 — perfil Q reconhecido na carga + destino SAP Q
+                // validado (host/porta/allowlist). Sem isso o preview bloqueia antes dos guards sob teste.
+                PerfilLocalQ = true,
+                BaseUrl = $"https://{ValidadorAmbienteQ.SapHostEsperado}:{ValidadorAmbienteQ.SapPortaEsperada}/sap/opu/odata/sap/API_MATERIAL_DOCUMENT_SRV/",
+                HostsPermitidos = [ValidadorAmbienteQ.SapHostEsperado],
                 // GATE 126V: a composicao outbound exige tara fisica resolvida. Estes testes exercitam os
                 // guards de MATERIAL / claim / POST, nao a resolucao da tara — por isso o mapeamento cobre
                 // tambem os materiais NAO homologados, para que o guard sob teste seja o que dispara (e nao

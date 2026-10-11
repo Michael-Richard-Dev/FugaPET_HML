@@ -1,5 +1,7 @@
+using FugaPET_HML.Modelo.Ambiente;
 using FugaPET_HML.Modelo.IntegracaoSap;
 using FugaPET_HML.Modelo.Processo;
+using FugaPET_HML.Servicos.Ambiente;
 using FugaPET_HML.Servicos.IntegracaoSap;
 
 namespace FugaPET_HML.Tests.IntegracaoSap;
@@ -43,9 +45,56 @@ public sealed class ProdutoAcabadoPaleteInt012ContratoTests
         TaraKg = 1m
     };
 
-    /// <summary>GATE 126V: tara fisica JA RESOLVIDA, injetada no builder (que permanece puro).</summary>
+    /// <summary>GATE 126V/126X: tara fisica JA RESOLVIDA, injetada no builder (que permanece puro).</summary>
     private static ResultadoTaraFisicaEmbalagem TaraFisica(decimal pesoKg)
-        => ResultadoTaraFisicaEmbalagem.Resolvida(pesoKg);
+        => ResultadoTaraFisicaEmbalagem.Resolvida(IdentidadeQ(), pesoKg);
+
+    /// <summary>
+    /// GATE 126X: identidade QAS110 obtida pelo VALIDADOR DE PRODUCAO, a partir de uma configuracao
+    /// Q-valida. Nao existe fabrica de identidade falsa: o teste exercita o mesmo caminho do runtime.
+    /// </summary>
+    private static IdentidadeAmbienteQas110 IdentidadeQ()
+    {
+        ResultadoIdentidadeQas110 r = ValidadorIdentidadeQas110.Resolver(ConfigQValida());
+        Assert.True(r.Confirmada, r.Mensagem);
+        return r.Identidade!;
+    }
+
+    /// <summary>Configuracao que satisfaz o contrato Q REAL: perfil Q + host/porta Q + allowlist Q.</summary>
+    private static ConfiguracaoSap ConfigQValida(
+        IReadOnlyList<TaraFisicaEmbalagemConfigurada>? taras = null) => new()
+        {
+            PerfilLocalQ = true,
+            BaseUrl = UrlQ("API_PURCHASEORDER_SRV"),
+            MaterialDocumentBaseUrl = UrlQ("API_MATERIAL_DOCUMENT_SRV"),
+            SapClient = MandanteQ,
+            HostsPermitidos = [ValidadorAmbienteQ.SapHostEsperado],
+            Usuario = "u",
+            Senha = "p",
+            TimeoutSegundos = 30,
+            TarasFisicasEmbalagemPalete = taras ?? []
+        };
+
+    /// <summary>Mesma configuracao, porem apontada para o host DS — com o MESMO mandante 110.</summary>
+    private static ConfiguracaoSap ConfigDsMandante110(
+        IReadOnlyList<TaraFisicaEmbalagemConfigurada>? taras = null) => new()
+        {
+            PerfilLocalQ = true, // perfil declarado Q de proposito: provar que perfil nao basta
+            BaseUrl = UrlDs("API_PURCHASEORDER_SRV"),
+            MaterialDocumentBaseUrl = UrlDs("API_MATERIAL_DOCUMENT_SRV"),
+            SapClient = MandanteQ, // 110, identico ao do Q
+            HostsPermitidos = [ValidadorAmbienteQ.SapHostDesenvolvimento],
+            Usuario = "u",
+            Senha = "p",
+            TimeoutSegundos = 30,
+            TarasFisicasEmbalagemPalete = taras ?? []
+        };
+
+    private static string UrlQ(string servico)
+        => $"https://{ValidadorAmbienteQ.SapHostEsperado}:{ValidadorAmbienteQ.SapPortaEsperada}/sap/opu/odata/sap/{servico}/";
+
+    private static string UrlDs(string servico)
+        => $"https://{ValidadorAmbienteQ.SapHostDesenvolvimento}:{ValidadorAmbienteQ.SapPortaEsperada}/sap/opu/odata/sap/{servico}/";
 
     [Fact] // §3/§4: HandlingUnitExternalID == "$1" e != CodigoPaleteLocal
     public void HandlingUnitExternalId_EhLiteralDolar1_NaoOCodigoLocal()
@@ -199,12 +248,36 @@ public sealed class ProdutoAcabadoPaleteInt012ContratoTests
         }
     ];
 
+    /// <summary>
+    /// GATE 126X: a resolucao exige IDENTIDADE QAS110 comprovada. Por padrao usa a identidade valida
+    /// emitida pelo validador de producao; os testes de bloqueio passam identidade nula ou de outro
+    /// mandante.
+    /// </summary>
     private static ResultadoTaraFisicaEmbalagem ResolverPiloto(
         IReadOnlyList<TaraFisicaEmbalagemConfigurada>? mapeamentos,
-        string mandante = MandanteQ,
+        IdentidadeAmbienteQas110? identidade = null,
         string centro = CentroQ,
         string material = MaterialPalete)
-        => ResolvedorTaraFisicaEmbalagemPalete.Resolver(mapeamentos, mandante, centro, material);
+        => ResolvedorTaraFisicaEmbalagemPalete.Resolver(
+            mapeamentos, identidade ?? IdentidadeQ(), centro, material);
+
+    /// <summary>Identidade valida porem de OUTRO mandante (destino Q, sap-client diferente).</summary>
+    private static IdentidadeAmbienteQas110 IdentidadeComMandante(string mandante)
+    {
+        ResultadoIdentidadeQas110 r = ValidadorIdentidadeQas110.Resolver(new ConfiguracaoSap
+        {
+            PerfilLocalQ = true,
+            BaseUrl = UrlQ("API_PURCHASEORDER_SRV"),
+            MaterialDocumentBaseUrl = UrlQ("API_MATERIAL_DOCUMENT_SRV"),
+            SapClient = mandante,
+            HostsPermitidos = [ValidadorAmbienteQ.SapHostEsperado],
+            Usuario = "u",
+            Senha = "p",
+            TimeoutSegundos = 30
+        });
+        Assert.True(r.Confirmada, r.Mensagem);
+        return r.Identidade!;
+    }
 
     [Fact] // T1 + T12: palete 1 produz 29.800 / 28.700 / 1.100 no payload e no JSON serializado, em KG
     public void T1_Palete1_ProduzPesosCompostos_ComUnidadeKg()
@@ -294,7 +367,7 @@ public sealed class ProdutoAcabadoPaleteInt012ContratoTests
         foreach (decimal taraFisica in new[] { 0m, 1.000m, 7.500m })
         {
             ResultadoPreviewProdutoAcabadoPalete preview = new ProdutoAcabadoPaletePayloadBuilder()
-                .MontarPreview(palete, ResultadoTaraFisicaEmbalagem.Resolvida(taraFisica));
+                .MontarPreview(palete, TaraFisica(taraFisica));
 
             Assert.True(preview.Sucesso, preview.Mensagem);
             Assert.Equal(palete.PesoLiquidoKg, preview.Payload!.NetWeight);
@@ -350,7 +423,7 @@ public sealed class ProdutoAcabadoPaleteInt012ContratoTests
 
         // Tara fisica tao grande que TARE >= NET viola a ordem exigida ⇒ bloqueia.
         ResultadoPreviewProdutoAcabadoPalete violada = new ProdutoAcabadoPaletePayloadBuilder()
-            .MontarPreview(PaletePiloto1(), ResultadoTaraFisicaEmbalagem.Resolvida(100.000m));
+            .MontarPreview(PaletePiloto1(), TaraFisica(100.000m));
         Assert.False(violada.Sucesso);
         Assert.Null(violada.Payload);
     }
@@ -370,13 +443,14 @@ public sealed class ProdutoAcabadoPaleteInt012ContratoTests
             new() { SapClient = MandanteQ, Centro = CentroQ, MaterialEmbalagem = "PALLET02", PesoKg = 1.000m, Unidade = "KG" }
         ]).Cenario);
 
-        // Mandante diferente: o arquivo copiado para outro ambiente NAO autoriza a composicao.
+        // Mandante diferente na IDENTIDADE VALIDADA: o mapeamento de 110 nao e selecionado.
         Assert.Equal(CenarioTaraFisicaEmbalagem.NaoConfigurada, ResolverPiloto(
-            MapeamentoAprovado(), mandante: "100").Cenario);
+            MapeamentoAprovado(), IdentidadeComMandante("100")).Cenario);
 
-        // Mandante ativo ausente ⇒ fail-closed.
-        Assert.Equal(CenarioTaraFisicaEmbalagem.NaoConfigurada, ResolverPiloto(
-            MapeamentoAprovado(), mandante: "   ").Cenario);
+        // GATE 126X: sem identidade comprovada ⇒ fail-closed, independentemente do mapeamento.
+        Assert.Equal(CenarioTaraFisicaEmbalagem.NaoConfigurada,
+            ResolvedorTaraFisicaEmbalagemPalete.Resolver(
+                MapeamentoAprovado(), null, CentroQ, MaterialPalete).Cenario);
     }
 
     [Fact] // T11: configuracao invalida ou ambigua bloqueia ANTES de qualquer POST
@@ -428,10 +502,232 @@ public sealed class ProdutoAcabadoPaleteInt012ContratoTests
         ResultadoTaraFisicaEmbalagem tara = ResolvedorTaraFisicaEmbalagemPalete.Resolver(
         [
             new() { SapClient = " 110 ", Centro = " 3007 ", MaterialEmbalagem = " pallet01 ", PesoKg = 1.000m, Unidade = " kg " }
-        ], " 110 ", " 3007 ", " PALLET01 ");
+        ], IdentidadeQ(), " 3007 ", " PALLET01 ");
 
         Assert.True(tara.Disponivel);
         Assert.Equal(1.000m, tara.PesoKg);
+    }
+
+    // ========================================================================================
+    // GATE 126X: a tara fisica so resolve com IDENTIDADE QAS110 comprovada (perfil Q da
+    // configuracao carregada + destino SAP Q validado). Mandante 110, isolado, NAO autoriza.
+    // ========================================================================================
+
+    [Fact] // 126X-T1: QAS110 valido + 110 + 3007 + PALLET01 + 1.000 KG => 29.800 / 28.700 / 1.100
+    public void X1_Qas110Valido_ProduzOutboundAprovado()
+    {
+        ConfiguracaoSap cfg = ConfigQValida(MapeamentoAprovado());
+        ResultadoIdentidadeQas110 ident = ValidadorIdentidadeQas110.Resolver(cfg);
+        Assert.True(ident.Confirmada, ident.Mensagem);
+        Assert.Equal(MandanteQ, ident.Identidade!.SapClient);
+        Assert.Equal(ValidadorAmbienteQ.SapHostEsperado, ident.Identidade.HostSap);
+        Assert.Equal(ValidadorAmbienteQ.SapPortaEsperada, ident.Identidade.PortaSap);
+
+        ResultadoTaraFisicaEmbalagem tara = ResolvedorTaraFisicaEmbalagemPalete.Resolver(
+            cfg.TarasFisicasEmbalagemPalete, ident.Identidade, CentroQ, MaterialPalete);
+        Assert.True(tara.Disponivel);
+        Assert.Equal(1.000m, tara.PesoKg);
+
+        ResultadoPreviewProdutoAcabadoPalete preview =
+            new ProdutoAcabadoPaletePayloadBuilder().MontarPreview(PaletePiloto1(), tara);
+        Assert.True(preview.Sucesso, preview.Mensagem);
+        Assert.Equal(29.800m, preview.Payload!.GrossWeight);
+        Assert.Equal(28.700m, preview.Payload.NetWeight);
+        Assert.Equal(1.100m, preview.Payload.TareWeight);
+        Assert.Equal("KG", preview.Payload.WeightUnit);
+    }
+
+    [Fact] // 126X-T2: DS com mandante 110 e o MESMO bloco de tara => BLOQUEADO (defeito do 126W)
+    public void X2_DsComMandante110_EMesmoBlocoDeTara_Bloqueado()
+    {
+        ConfiguracaoSap ds = ConfigDsMandante110(MapeamentoAprovado());
+
+        ResultadoIdentidadeQas110 ident = ValidadorIdentidadeQas110.Resolver(ds);
+        Assert.False(ident.Confirmada);
+        Assert.Equal(CenarioIdentidadeQas110.DestinoNaoQ, ident.Cenario);
+        Assert.Null(ident.Identidade);
+
+        // Mesmo mandante (110) e mesmo mapeamento: a tara NAO resolve.
+        ResultadoTaraFisicaEmbalagem tara = ResolvedorTaraFisicaEmbalagemPalete.Resolver(
+            ds.TarasFisicasEmbalagemPalete, ident.Identidade, CentroQ, MaterialPalete);
+        Assert.False(tara.Disponivel);
+        Assert.Null(tara.PesoKg);
+
+        ResultadoPreviewProdutoAcabadoPalete preview =
+            new ProdutoAcabadoPaletePayloadBuilder().MontarPreview(PaletePiloto1(), tara);
+        Assert.False(preview.Sucesso);
+        Assert.Null(preview.Payload);
+    }
+
+    [Fact] // 126X-T3: destino nao validado (URL/allowlist/sap-client fora do contrato) => BLOQUEADO
+    public void X3_DestinoNaoValidado_Bloqueado()
+    {
+        // allowlist vazia
+        Assert.Equal(CenarioIdentidadeQas110.DestinoNaoQ, ValidadorIdentidadeQas110.Resolver(new ConfiguracaoSap
+        {
+            PerfilLocalQ = true,
+            BaseUrl = UrlQ("API_MATERIAL_DOCUMENT_SRV"),
+            SapClient = MandanteQ,
+            HostsPermitidos = []
+        }).Cenario);
+
+        // porta divergente
+        Assert.Equal(CenarioIdentidadeQas110.DestinoNaoQ, ValidadorIdentidadeQas110.Resolver(new ConfiguracaoSap
+        {
+            PerfilLocalQ = true,
+            BaseUrl = $"https://{ValidadorAmbienteQ.SapHostEsperado}:8443/sap/opu/odata/sap/API_MATERIAL_DOCUMENT_SRV/",
+            SapClient = MandanteQ,
+            HostsPermitidos = [ValidadorAmbienteQ.SapHostEsperado]
+        }).Cenario);
+
+        // sap-client invalido
+        Assert.Equal(CenarioIdentidadeQas110.DestinoNaoQ, ValidadorIdentidadeQas110.Resolver(new ConfiguracaoSap
+        {
+            PerfilLocalQ = true,
+            BaseUrl = UrlQ("API_MATERIAL_DOCUMENT_SRV"),
+            SapClient = "11",
+            HostsPermitidos = [ValidadorAmbienteQ.SapHostEsperado]
+        }).Cenario);
+
+        // configuracao ausente
+        Assert.Equal(CenarioIdentidadeQas110.ConfiguracaoAusente,
+            ValidadorIdentidadeQas110.Resolver(null).Cenario);
+    }
+
+    [Fact] // 126X-T4: perfil Q declarado + destino SAP DS => BLOQUEADO (perfil nao basta)
+    public void X4_PerfilQComDestinoDs_Bloqueado()
+    {
+        ConfiguracaoSap cfg = ConfigDsMandante110();
+        Assert.True(cfg.PerfilLocalQ); // o perfil ESTA declarado Q
+        ResultadoIdentidadeQas110 ident = ValidadorIdentidadeQas110.Resolver(cfg);
+        Assert.False(ident.Confirmada);
+        Assert.Equal(CenarioIdentidadeQas110.DestinoNaoQ, ident.Cenario);
+    }
+
+    [Fact] // 126X-T5: destino Q porem SEM perfil reconhecido pelo contrato real => BLOQUEADO
+    public void X5_DestinoQSemPerfilComprovado_Bloqueado()
+    {
+        ConfiguracaoSap cfg = new()
+        {
+            PerfilLocalQ = false, // nao reconhecido na carga
+            BaseUrl = UrlQ("API_PURCHASEORDER_SRV"),
+            MaterialDocumentBaseUrl = UrlQ("API_MATERIAL_DOCUMENT_SRV"),
+            SapClient = MandanteQ,
+            HostsPermitidos = [ValidadorAmbienteQ.SapHostEsperado],
+            TarasFisicasEmbalagemPalete = MapeamentoAprovado()
+        };
+
+        ResultadoIdentidadeQas110 ident = ValidadorIdentidadeQas110.Resolver(cfg);
+        Assert.False(ident.Confirmada);
+        Assert.Equal(CenarioIdentidadeQas110.PerfilNaoQ, ident.Cenario);
+
+        ResultadoTaraFisicaEmbalagem tara = ResolvedorTaraFisicaEmbalagemPalete.Resolver(
+            cfg.TarasFisicasEmbalagemPalete, ident.Identidade, CentroQ, MaterialPalete);
+        Assert.False(tara.Disponivel);
+    }
+
+    [Fact] // 126X-T5b: perfil Q NAO vem de texto livre — o leitor o deriva do arquivo real
+    public void X5b_PerfilLocalQ_NaoEhDeclaracaoLivre_EhDerivadoDoArquivo()
+    {
+        string arquivo = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".json");
+        try
+        {
+            // Sem a secao "ambiente": o leitor NAO concede perfil Q.
+            File.WriteAllText(arquivo, "{ \"sap\": { \"sap_client\": \"110\" } }");
+            Assert.False(LeitorConfiguracaoSap.Carregar(arquivo, _ => null).PerfilLocalQ);
+
+            // Com a secao "ambiente" reconhecida: concede.
+            File.WriteAllText(arquivo, "{ \"ambiente\": { \"perfil\": \"Q\" }, \"sap\": { \"sap_client\": \"110\" } }");
+            ConfiguracaoSap comPerfil = LeitorConfiguracaoSap.Carregar(
+                arquivo,
+                _ => null,
+                null,
+                PerfilAmbienteLocal.CarregarDoArquivo(arquivo));
+            Assert.True(comPerfil.PerfilLocalQ);
+        }
+        finally
+        {
+            if (File.Exists(arquivo)) { File.Delete(arquivo); }
+        }
+    }
+
+    [Fact] // 126X-T6: configuracao de tara ausente/invalida => BLOQUEADO mesmo com identidade valida
+    public void X6_TaraAusenteOuInvalida_BloqueiaMesmoComIdentidadeValida()
+    {
+        IdentidadeAmbienteQas110 ident = IdentidadeQ();
+
+        Assert.Equal(CenarioTaraFisicaEmbalagem.NaoConfigurada,
+            ResolvedorTaraFisicaEmbalagemPalete.Resolver([], ident, CentroQ, MaterialPalete).Cenario);
+        Assert.Equal(CenarioTaraFisicaEmbalagem.NaoConfigurada,
+            ResolvedorTaraFisicaEmbalagemPalete.Resolver(null, ident, CentroQ, MaterialPalete).Cenario);
+        Assert.Equal(CenarioTaraFisicaEmbalagem.Invalida, ResolvedorTaraFisicaEmbalagemPalete.Resolver(
+        [
+            new() { SapClient = MandanteQ, Centro = CentroQ, MaterialEmbalagem = MaterialPalete, PesoKg = -1m, Unidade = "KG" }
+        ], ident, CentroQ, MaterialPalete).Cenario);
+    }
+
+    [Fact] // 126X-T7/T8: repeticao do preview nao acumula e os pesos locais nao sofrem mutacao
+    public void X7_PreviewRepetido_SemDuplaContagem_ESemMutacaoLocal()
+    {
+        ProdutoAcabadoPalete palete = PaletePiloto1();
+        ProdutoAcabadoPaletePayloadBuilder builder = new();
+        ConfiguracaoSap cfg = ConfigQValida(MapeamentoAprovado());
+
+        for (int i = 0; i < 3; i++)
+        {
+            ResultadoIdentidadeQas110 ident = ValidadorIdentidadeQas110.Resolver(cfg);
+            ResultadoTaraFisicaEmbalagem tara = ResolvedorTaraFisicaEmbalagemPalete.Resolver(
+                cfg.TarasFisicasEmbalagemPalete, ident.Identidade, CentroQ, MaterialPalete);
+            ResultadoPreviewProdutoAcabadoPalete preview = builder.MontarPreview(palete, tara);
+
+            Assert.True(preview.Sucesso, preview.Mensagem);
+            Assert.Equal(29.800m, preview.Payload!.GrossWeight); // nunca 30.800
+            Assert.Equal(1.100m, preview.Payload.TareWeight);    // nunca 2.100
+            Assert.Equal(28.700m, preview.Payload.NetWeight);
+        }
+
+        Assert.Equal(28.800m, palete.PesoBrutoKg);
+        Assert.Equal(28.700m, palete.PesoLiquidoKg);
+        Assert.Equal(0.100m, palete.TaraKg);
+    }
+
+    [Fact] // 126X-T10: nao ha caminho que produza tara aplicavel sem identidade comprovada
+    public void X10_SemIdentidade_NaoExisteCaminhoParaTaraAplicavel()
+    {
+        // A fabrica do resultado POSITIVO exige a identidade; nula ⇒ Invalida, nunca Disponivel.
+        ResultadoTaraFisicaEmbalagem forjada = ResultadoTaraFisicaEmbalagem.Resolvida(null, 1.000m);
+        Assert.False(forjada.Disponivel);
+        Assert.Equal(CenarioTaraFisicaEmbalagem.Invalida, forjada.Cenario);
+        Assert.Null(forjada.PesoKg);
+
+        // E o builder recusa qualquer resultado nao-disponivel, sem payload.
+        ResultadoPreviewProdutoAcabadoPalete preview =
+            new ProdutoAcabadoPaletePayloadBuilder().MontarPreview(PaletePiloto1(), forjada);
+        Assert.False(preview.Sucesso);
+        Assert.Null(preview.Payload);
+
+        // O tipo de identidade nao possui construtor nem fabrica PUBLICA.
+        Assert.Empty(typeof(IdentidadeAmbienteQas110).GetConstructors());
+        Assert.Empty(typeof(IdentidadeAmbienteQas110)
+            .GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+            .Where(m => m.ReturnType == typeof(IdentidadeAmbienteQas110)));
+    }
+
+    [Fact] // 126X: rota CPI presente porem fora da propria allowlist => BLOQUEADO (consistencia 046-K)
+    public void X_RotaCpiForaDaAllowlist_Bloqueado()
+    {
+        ResultadoIdentidadeQas110 ident = ValidadorIdentidadeQas110.Resolver(new ConfiguracaoSap
+        {
+            PerfilLocalQ = true,
+            BaseUrl = UrlQ("API_MATERIAL_DOCUMENT_SRV"),
+            SapClient = MandanteQ,
+            HostsPermitidos = [ValidadorAmbienteQ.SapHostEsperado],
+            PalletInt012BaseUrl = "https://cpi.intruso.test/http/QS4_110/x",
+            PalletInt012HostsPermitidos = ["cpi.autorizado.test"]
+        });
+
+        Assert.False(ident.Confirmada);
+        Assert.Equal(CenarioIdentidadeQas110.RotaCpiInconsistente, ident.Cenario);
     }
 
     private static ConfiguracaoSap ConfigCpi(bool comCredencialCpi, bool writeHabilitado) => new()

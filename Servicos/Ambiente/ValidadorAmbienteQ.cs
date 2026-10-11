@@ -87,28 +87,13 @@ public static class ValidadorAmbienteQ
 
     public static ResultadoValidacaoAmbienteQ ValidarSap(ConfiguracaoSap configuracao)
     {
-        foreach (string url in ObterUrlsSap(configuracao))
+        // GATE 126X: o bloco de DESTINO (URLs efetivas + allowlist + sap-client) foi EXTRAIDO para
+        // ValidarDestinoSapQ, sem alteracao de comportamento, para que outros consumidores possam exigir
+        // exatamente o MESMO contrato de destino sem duplicar o validador de inicializacao.
+        ResultadoValidacaoAmbienteQ destino = ValidarDestinoSapQ(configuracao);
+        if (!destino.Valido)
         {
-            if (!ValidarUriSap(url, out string mensagem))
-            {
-                return ResultadoValidacaoAmbienteQ.Bloqueado(mensagem);
-            }
-        }
-
-        bool allowlistQ = configuracao.HostsPermitidos.Any(host =>
-            string.Equals(host, SapHostEsperado, StringComparison.OrdinalIgnoreCase));
-        bool allowlistDs = configuracao.HostsPermitidos.Any(host =>
-            string.Equals(host, "vhfufds4ci.sap.fugacouros.com.br", StringComparison.OrdinalIgnoreCase));
-
-        if (!allowlistQ || allowlistDs)
-        {
-            return ResultadoValidacaoAmbienteQ.Bloqueado("Ambiente Q bloqueado: allowlist SAP deve conter somente o host Q autorizado.");
-        }
-
-        string sapClient = configuracao.SapClient.Trim();
-        if (sapClient.Length != 3 || !sapClient.All(char.IsDigit))
-        {
-            return ResultadoValidacaoAmbienteQ.Bloqueado("Ambiente Q bloqueado: sap-client Q dedicado ausente ou invalido.");
+            return destino;
         }
 
         // GATES 112D / 113E / 122C — modos de escrita ADMITIDOS no startup do Q, e SOMENTE eles.
@@ -138,6 +123,54 @@ public static class ValidadorAmbienteQ
 
         return ValidarModoEscritaAdmitido(configuracao);
     }
+
+    /// <summary>
+    /// GATE 126X: contrato de DESTINO SAP do ambiente Q, extraido de <see cref="ValidarSap"/> sem mudanca de
+    /// comportamento. Exige, cumulativamente:
+    /// <list type="number">
+    /// <item>toda URL SAP EFETIVA em https, host <see cref="SapHostEsperado"/> e porta <see cref="SapPortaEsperada"/>;</item>
+    /// <item>allowlist contendo o host Q e NAO contendo o host DS;</item>
+    /// <item>sap-client presente com exatamente 3 digitos.</item>
+    /// </list>
+    /// Comparacao de host e por IGUALDADE do host da URI (nunca substring/Contains), o que separa
+    /// materialmente o destino Q do destino DS, ainda que ambos usem o mandante 110.
+    /// </summary>
+    public static ResultadoValidacaoAmbienteQ ValidarDestinoSapQ(ConfiguracaoSap configuracao)
+    {
+        ArgumentNullException.ThrowIfNull(configuracao);
+
+        foreach (string url in ObterUrlsSap(configuracao))
+        {
+            if (!ValidarUriSap(url, out string mensagem))
+            {
+                return ResultadoValidacaoAmbienteQ.Bloqueado(mensagem);
+            }
+        }
+
+        bool allowlistQ = configuracao.HostsPermitidos.Any(host =>
+            string.Equals(host, SapHostEsperado, StringComparison.OrdinalIgnoreCase));
+        bool allowlistDs = configuracao.HostsPermitidos.Any(host =>
+            string.Equals(host, SapHostDesenvolvimento, StringComparison.OrdinalIgnoreCase));
+
+        if (!allowlistQ || allowlistDs)
+        {
+            return ResultadoValidacaoAmbienteQ.Bloqueado("Ambiente Q bloqueado: allowlist SAP deve conter somente o host Q autorizado.");
+        }
+
+        string sapClient = configuracao.SapClient.Trim();
+        if (sapClient.Length != 3 || !sapClient.All(char.IsDigit))
+        {
+            return ResultadoValidacaoAmbienteQ.Bloqueado("Ambiente Q bloqueado: sap-client Q dedicado ausente ou invalido.");
+        }
+
+        return ResultadoValidacaoAmbienteQ.Ok();
+    }
+
+    /// <summary>
+    /// GATE 126X: host SAP de DESENVOLVIMENTO/DS, nomeado para que a exclusao deixe de ser literal solto.
+    /// Destino distinto do Q mesmo compartilhando o mandante 110.
+    /// </summary>
+    public const string SapHostDesenvolvimento = "vhfufds4ci.sap.fugacouros.com.br";
 
     public static ResultadoValidacaoAmbienteQ ValidarBanco(ConfiguracaoBancoPostgreSql configuracao)
     {

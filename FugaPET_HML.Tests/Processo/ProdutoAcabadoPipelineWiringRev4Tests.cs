@@ -3,6 +3,7 @@ using FugaPET_HML.AcessoDados.Repositorio;
 using FugaPET_HML.Controle.Processo;
 using FugaPET_HML.Modelo.IntegracaoSap;
 using FugaPET_HML.Modelo.Processo;
+using FugaPET_HML.Servicos.Ambiente;
 using FugaPET_HML.Servicos.IntegracaoSap;
 using FugaPET_HML.Servicos.Operacao;
 using FugaPET_HML.Tela.Processo;
@@ -732,6 +733,9 @@ public sealed class ProdutoAcabadoPipelineWiringRev4Tests
             PalletInt012Usuario = "u",
             PalletInt012Senha = "p",
             SapClient = "110",
+            PerfilLocalQ = true,
+            BaseUrl = UrlSapQ(),
+            HostsPermitidos = [ValidadorAmbienteQ.SapHostEsperado],
             TarasFisicasEmbalagemPalete = TarasFisicasTeste()
         };
         ProdutoAcabadoController controller = new(new ProductionOrderSapFakeServico(OrdemSapValida()), configuracaoSap: cfg, pipelineStore: new ProdutoAcabadoPipelineStoreMemoria());
@@ -753,6 +757,9 @@ public sealed class ProdutoAcabadoPipelineWiringRev4Tests
             configuracaoSap: new ConfiguracaoSap
             {
                 SapClient = "110",
+                PerfilLocalQ = true,
+                BaseUrl = UrlSapQ(),
+                HostsPermitidos = [ValidadorAmbienteQ.SapHostEsperado],
                 TarasFisicasEmbalagemPalete = TarasFisicasTeste()
             },
             pipelineStore: store,
@@ -794,6 +801,13 @@ public sealed class ProdutoAcabadoPipelineWiringRev4Tests
             Deposito = "PA01",
             PesoBrutoKg = 10m, PesoLiquidoKg = 9m, TaraKg = 1m
         };
+
+    /// <summary>
+    /// GATE 126X: campos que fazem a configuracao satisfazer a IDENTIDADE QAS110 (perfil Q reconhecido na
+    /// carga + destino SAP Q validado por host/porta/allowlist). Aplicados aos fixtures de palete.
+    /// </summary>
+    private static string UrlSapQ()
+        => $"https://{ValidadorAmbienteQ.SapHostEsperado}:{ValidadorAmbienteQ.SapPortaEsperada}/sap/opu/odata/sap/API_MATERIAL_DOCUMENT_SRV/";
 
     /// <summary>GATE 126V: mapeamento de tara fisica da embalagem para os cenarios de palete deste arquivo.</summary>
     private static IReadOnlyList<TaraFisicaEmbalagemConfigurada> TarasFisicasTeste() =>

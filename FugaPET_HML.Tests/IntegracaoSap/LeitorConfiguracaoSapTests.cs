@@ -366,7 +366,7 @@ public sealed class LeitorConfiguracaoSapTests : IDisposable
 
         // E resolve para o valor aprovado do piloto.
         Modelo.IntegracaoSap.ResultadoTaraFisicaEmbalagem tara = ResolvedorTaraFisicaEmbalagemPalete.Resolver(
-            configuracao.TarasFisicasEmbalagemPalete, configuracao.SapClient, "3007", "PALLET01");
+            configuracao.TarasFisicasEmbalagemPalete, IdentidadeQasDeTeste(configuracao.SapClient), "3007", "PALLET01");
         Assert.True(tara.Disponivel);
         Assert.Equal(1.000m, tara.PesoKg);
     }
@@ -380,7 +380,7 @@ public sealed class LeitorConfiguracaoSapTests : IDisposable
 
         Assert.Empty(configuracao.TarasFisicasEmbalagemPalete);
         Modelo.IntegracaoSap.ResultadoTaraFisicaEmbalagem tara = ResolvedorTaraFisicaEmbalagemPalete.Resolver(
-            configuracao.TarasFisicasEmbalagemPalete, "110", "3007", "PALLET01");
+            configuracao.TarasFisicasEmbalagemPalete, IdentidadeQasDeTeste("110"), "3007", "PALLET01");
         Assert.False(tara.Disponivel);
         Assert.Null(tara.PesoKg);
     }
@@ -405,6 +405,24 @@ public sealed class LeitorConfiguracaoSapTests : IDisposable
             Assert.Single(configuracao.TarasFisicasEmbalagemPalete);
         Assert.Equal("OK", mapa.MaterialEmbalagem);
         Assert.Equal(2.500m, mapa.PesoKg);
+    }
+
+    /// <summary>
+    /// GATE 126X: identidade QAS110 emitida pelo validador de PRODUCAO, com destino Q real. Usada aqui
+    /// apenas para exercitar o BINDING do arquivo; o isolamento em si tem testes proprios no contrato.
+    /// </summary>
+    private static Modelo.Ambiente.IdentidadeAmbienteQas110 IdentidadeQasDeTeste(string sapClient)
+    {
+        Modelo.Ambiente.ResultadoIdentidadeQas110 ident = Servicos.Ambiente.ValidadorIdentidadeQas110.Resolver(
+            new ConfiguracaoSap
+            {
+                PerfilLocalQ = true,
+                BaseUrl = $"https://{Servicos.Ambiente.ValidadorAmbienteQ.SapHostEsperado}:{Servicos.Ambiente.ValidadorAmbienteQ.SapPortaEsperada}/sap/opu/odata/sap/API_MATERIAL_DOCUMENT_SRV/",
+                SapClient = sapClient,
+                HostsPermitidos = [Servicos.Ambiente.ValidadorAmbienteQ.SapHostEsperado]
+            });
+        Assert.True(ident.Confirmada, ident.Mensagem);
+        return ident.Identidade!;
     }
 
     private void GravarConfiguracaoComTarasFisicas(string jsonTaras)

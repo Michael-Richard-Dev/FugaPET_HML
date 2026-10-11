@@ -1,3 +1,5 @@
+using FugaPET_HML.Modelo.Ambiente;
+
 namespace FugaPET_HML.Modelo.IntegracaoSap;
 
 /// <summary>
@@ -67,8 +69,17 @@ public sealed class ResultadoTaraFisicaEmbalagem
     /// <summary>True SOMENTE com cenario Disponivel E peso materialmente presente.</summary>
     public bool Disponivel => Cenario == CenarioTaraFisicaEmbalagem.Disponivel && PesoKg.HasValue;
 
-    public static ResultadoTaraFisicaEmbalagem Resolvida(decimal pesoKg)
-        => new(CenarioTaraFisicaEmbalagem.Disponivel, pesoKg, string.Empty);
+    /// <summary>
+    /// GATE 126X: um resultado POSITIVO so pode ser emitido com a identidade QAS110 COMPROVADA. Sem ela
+    /// nao existe caminho — publico ou interno — para produzir uma tara aplicavel, o que impede contornar
+    /// o guard construindo o resultado diretamente. Identidade nula ⇒ Invalida (fail-closed).
+    /// </summary>
+    public static ResultadoTaraFisicaEmbalagem Resolvida(
+        IdentidadeAmbienteQas110? identidadeQas110,
+        decimal pesoKg)
+        => identidadeQas110 is null
+            ? Invalida("tara fisica sem identidade QAS110 comprovada: resultado positivo nao e emissivel.")
+            : new(CenarioTaraFisicaEmbalagem.Disponivel, pesoKg, string.Empty);
 
     public static ResultadoTaraFisicaEmbalagem NaoConfigurada(string mensagem)
         => new(CenarioTaraFisicaEmbalagem.NaoConfigurada, null, mensagem);

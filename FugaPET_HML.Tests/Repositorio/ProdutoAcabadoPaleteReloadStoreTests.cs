@@ -1,6 +1,8 @@
 using FugaPET_HML.AcessoDados.Repositorio;
+using FugaPET_HML.Modelo.Ambiente;
 using FugaPET_HML.Modelo.IntegracaoSap;
 using FugaPET_HML.Modelo.Processo;
+using FugaPET_HML.Servicos.Ambiente;
 using FugaPET_HML.Servicos.IntegracaoSap;
 using FugaPET_HML.Servicos.Operacao;
 
@@ -67,7 +69,7 @@ public sealed class ProdutoAcabadoPaleteReloadStoreTests
         Assert.Equal("300014352", caixa.HandlingUnitExternalId);
 
         // O preview não pode mais reprovar por "precisa estar CONFIRMADA_SAP".
-        ResultadoPreviewProdutoAcabadoPalete preview = new ProdutoAcabadoPaletePayloadBuilder().MontarPreview(palete, ResultadoTaraFisicaEmbalagem.Resolvida(1m));
+        ResultadoPreviewProdutoAcabadoPalete preview = new ProdutoAcabadoPaletePayloadBuilder().MontarPreview(palete, TaraFisicaDeTeste(1m));
         Assert.True(preview.Sucesso, preview.Mensagem);
         Assert.DoesNotContain("CONFIRMADA_SAP", preview.Mensagem, StringComparison.Ordinal);
     }
@@ -84,7 +86,7 @@ public sealed class ProdutoAcabadoPaleteReloadStoreTests
         ProdutoAcabadoPalete palete = Assert.Single(await store.LerPaletesLocaisPorOrdemAsync("1002024", null));
         Assert.Equal(StatusIntegracaoCaixa.ErroSap, palete.Caixas[0].StatusIntegracao);
 
-        ResultadoPreviewProdutoAcabadoPalete preview = new ProdutoAcabadoPaletePayloadBuilder().MontarPreview(palete, ResultadoTaraFisicaEmbalagem.Resolvida(1m));
+        ResultadoPreviewProdutoAcabadoPalete preview = new ProdutoAcabadoPaletePayloadBuilder().MontarPreview(palete, TaraFisicaDeTeste(1m));
         Assert.False(preview.Sucesso);
         Assert.Contains("CONFIRMADA_SAP", preview.Mensagem, StringComparison.Ordinal);
     }
@@ -110,7 +112,7 @@ public sealed class ProdutoAcabadoPaleteReloadStoreTests
         ]);
         ProdutoAcabadoPipelinePostgresStore store = new(exec);
         ProdutoAcabadoPaletePayloadBuilder builder = new();
-        ResultadoTaraFisicaEmbalagem tara = ResultadoTaraFisicaEmbalagem.Resolvida(1.000m);
+        ResultadoTaraFisicaEmbalagem tara = TaraFisicaDeTeste(1.000m);
 
         // Primeiro ciclo: le do banco e monta o payload.
         ProdutoAcabadoPalete primeiro = Assert.Single(await store.LerPaletesLocaisPorOrdemAsync("1000283", null));
@@ -283,6 +285,23 @@ public sealed class ProdutoAcabadoPaleteReloadStoreTests
 
         Assert.Empty(await store.LerPaletesLocaisPorTerminalAsync("   "));
         Assert.Null(exec.UltimoTerminal); // nem chegou a consultar
+    }
+
+    /// <summary>
+    /// GATE 126X: tara resolvida com IDENTIDADE QAS110 obtida pelo validador de PRODUCAO a partir de uma
+    /// configuracao Q-valida. Nao existe fabrica de identidade falsa.
+    /// </summary>
+    private static ResultadoTaraFisicaEmbalagem TaraFisicaDeTeste(decimal pesoKg)
+    {
+        ResultadoIdentidadeQas110 ident = ValidadorIdentidadeQas110.Resolver(new ConfiguracaoSap
+        {
+            PerfilLocalQ = true,
+            BaseUrl = $"https://{ValidadorAmbienteQ.SapHostEsperado}:{ValidadorAmbienteQ.SapPortaEsperada}/sap/opu/odata/sap/API_MATERIAL_DOCUMENT_SRV/",
+            SapClient = "110",
+            HostsPermitidos = [ValidadorAmbienteQ.SapHostEsperado]
+        });
+        Assert.True(ident.Confirmada, ident.Mensagem);
+        return ResultadoTaraFisicaEmbalagem.Resolvida(ident.Identidade, pesoKg);
     }
 
     private static Linha045 LinhaComposicao(

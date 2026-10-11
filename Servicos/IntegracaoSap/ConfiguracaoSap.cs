@@ -332,6 +332,15 @@ public sealed class ConfiguracaoSap
     public bool PackagingHabilitado { get; init; }
 
     /// <summary>
+    /// GATE 126X: true SOMENTE quando o perfil local REALMENTE lido do arquivo de configuracao foi
+    /// reconhecido como Q (<c>PerfilAmbienteLocal.EhQ</c>, GATE 120G). Gravada por
+    /// <c>LeitorConfiguracaoSap</c> no momento da carga; nao e texto livre nem variavel de ambiente.
+    /// Sozinha NAO autoriza nada: a identidade QAS110 exige tambem o destino SAP Q validado
+    /// (ver <c>ValidadorIdentidadeQas110</c>). Padrao false (fail-closed).
+    /// </summary>
+    public bool PerfilLocalQ { get; init; }
+
+    /// <summary>
     /// GATE 126V: mapeamento operacional da tara FISICA do material de embalagem do palete, por
     /// mandante + centro + material. Origem EXCLUSIVA: configuracao.sap.json, secao "sap" /
     /// "taras_fisicas_embalagem_palete". Nunca vem de hu_palete, nunca de constante no codigo.

@@ -315,6 +315,9 @@ public static class LeitorConfiguracaoSap
             // GATE 126V: SOMENTE arquivo. Nao ha variavel de ambiente para a tara fisica — ela e dado
             // operacional versionavel por instalacao, nao capability, e nao deve persistir em User/Machine.
             TarasFisicasEmbalagemPalete = tarasFisicasEmbalagemPaleteArquivo,
+            // GATE 126X: registra, NA PROPRIA configuracao carregada, se o perfil local lido do arquivo foi
+            // reconhecido como Q. E a mesma variavel que o 120G ja usava para conceder os defaults Q.
+            PerfilLocalQ = perfilQ,
             // GATE 046-K: credenciais CPI/INT012 EXCLUSIVAMENTE por ambiente (nunca arquivo/JSON), sem fallback SAP.
             PalletInt012Usuario = ObterSomenteAmbiente(obterVariavelAmbiente, VariavelAmbientePalletInt012Usuario),
             PalletInt012Senha = ObterSomenteAmbiente(obterVariavelAmbiente, VariavelAmbientePalletInt012Senha),
