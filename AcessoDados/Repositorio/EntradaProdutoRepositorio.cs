@@ -1072,6 +1072,7 @@ public sealed class EntradaProdutoRepositorio : RepositorioBase
                    item.centro,
                    item.deposito,
                    item.unidade,
+                   item.quantidade_prevista,
                    lote.numero_lote,
                    lote.data_fabricacao,
                    lote.data_vencimento,
@@ -1094,6 +1095,7 @@ public sealed class EntradaProdutoRepositorio : RepositorioBase
                AND item.status_item IN ('FINALIZADO_LOCAL', 'ERRO_SAP')
              GROUP BY lancamento.numero_pedido, item.numero_item,
                       item.material, item.centro, item.deposito, item.unidade,
+                      item.quantidade_prevista,
                       pesagem.codigo_entrada_produto_lote,
                       lote.numero_lote, lote.data_fabricacao, lote.data_vencimento
             HAVING COALESCE(SUM(pesagem.peso_liquido_kg) FILTER (
@@ -1120,10 +1122,13 @@ public sealed class EntradaProdutoRepositorio : RepositorioBase
                 Centro = leitor.IsDBNull(5) ? null : leitor.GetString(5),
                 Deposito = leitor.IsDBNull(6) ? null : leitor.GetString(6),
                 Unidade = leitor.IsDBNull(7) ? null : leitor.GetString(7),
-                NumeroLote = leitor.IsDBNull(8) ? null : leitor.GetString(8),
-                DataFabricacao = leitor.IsDBNull(9) ? null : leitor.GetDateTime(9),
-                DataValidade = leitor.IsDBNull(10) ? null : leitor.GetDateTime(10),
-                CodigoEntradaProdutoLote = leitor.IsDBNull(11) ? 0L : leitor.GetInt64(11)
+                // GATE R2: quantidade INTEGRAL do item do pedido (OrderQuantity). NULL permanece NULL
+                // (tri-state) — desconhecida bloqueia o caminho ROH a jusante, nunca vira zero.
+                QuantidadePedidoItem = leitor.IsDBNull(8) ? null : leitor.GetDecimal(8),
+                NumeroLote = leitor.IsDBNull(9) ? null : leitor.GetString(9),
+                DataFabricacao = leitor.IsDBNull(10) ? null : leitor.GetDateTime(10),
+                DataValidade = leitor.IsDBNull(11) ? null : leitor.GetDateTime(11),
+                CodigoEntradaProdutoLote = leitor.IsDBNull(12) ? 0L : leitor.GetInt64(12)
             });
         }
 
@@ -1243,6 +1248,7 @@ public sealed class EntradaProdutoRepositorio : RepositorioBase
                    item.centro,
                    item.deposito,
                    item.unidade,
+                   item.quantidade_prevista,
                    lote.numero_lote,
                    lote.data_fabricacao,
                    lote.data_vencimento,
@@ -1265,6 +1271,7 @@ public sealed class EntradaProdutoRepositorio : RepositorioBase
                AND item.status_item IN ('FINALIZADO_LOCAL', 'ERRO_SAP')
              GROUP BY lancamento.numero_pedido, item.numero_item,
                       item.material, item.centro, item.deposito, item.unidade,
+                      item.quantidade_prevista,
                       pesagem.codigo_entrada_produto_lote,
                       lote.numero_lote, lote.data_fabricacao, lote.data_vencimento
             HAVING COALESCE(SUM(pesagem.peso_liquido_kg) FILTER (
@@ -1291,10 +1298,13 @@ public sealed class EntradaProdutoRepositorio : RepositorioBase
                 Centro = leitor.IsDBNull(5) ? null : leitor.GetString(5),
                 Deposito = leitor.IsDBNull(6) ? null : leitor.GetString(6),
                 Unidade = leitor.IsDBNull(7) ? null : leitor.GetString(7),
-                NumeroLote = leitor.IsDBNull(8) ? null : leitor.GetString(8),
-                DataFabricacao = leitor.IsDBNull(9) ? null : leitor.GetFieldValue<DateTime>(9),
-                DataValidade = leitor.IsDBNull(10) ? null : leitor.GetFieldValue<DateTime>(10),
-                CodigoEntradaProdutoLote = leitor.IsDBNull(11) ? 0L : leitor.GetInt64(11)
+                // GATE R2: quantidade INTEGRAL do item do pedido (OrderQuantity). NULL permanece NULL
+                // (tri-state) — desconhecida bloqueia o caminho ROH a jusante, nunca vira zero.
+                QuantidadePedidoItem = leitor.IsDBNull(8) ? null : leitor.GetDecimal(8),
+                NumeroLote = leitor.IsDBNull(9) ? null : leitor.GetString(9),
+                DataFabricacao = leitor.IsDBNull(10) ? null : leitor.GetFieldValue<DateTime>(10),
+                DataValidade = leitor.IsDBNull(11) ? null : leitor.GetFieldValue<DateTime>(11),
+                CodigoEntradaProdutoLote = leitor.IsDBNull(12) ? 0L : leitor.GetInt64(12)
             });
         }
 

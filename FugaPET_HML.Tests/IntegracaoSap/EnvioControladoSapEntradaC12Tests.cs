@@ -442,9 +442,14 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
         EntradaProdutoItemEnvioSap loteA = Item("10", numeroLote: "L-A", pesoLiquido: 3m) with { CodigoEntradaProdutoLote = 101 };
         EntradaProdutoItemEnvioSap loteB = Item("10", numeroLote: "L-B", pesoLiquido: 5m) with { CodigoEntradaProdutoLote = 202 };
 
+        // GATE R2: material HIBE (Químico) ⇒ caminho LEGADO preservado (quantidade = peso consolidado,
+        // sem campos ZZ1). O teste continua provando a consolidação do CASO B, agora com a classificação
+        // explícita — a classificação indeterminada passou a bloquear por contrato.
         ResultadoPreparacaoPayloadEntrada preparo = await PreparadorPayloadMaterialDocumentEntrada.PrepararAsync(
             99, "4500000010", [loteA, loteB],
             (mat, ce, ct) => Task.FromResult<ProdutoCentroSapMestre?>(Mestre(mat, ce, false)),
+            (mat, ct) => Task.FromResult<ProdutoSapMestre?>(
+                new ProdutoSapMestre { CodigoProduto = mat, TipoMaterialSap = "HIBE", Consultado = true }),
             CancellationToken.None);
 
         Assert.Null(preparo.Bloqueio);
@@ -1196,7 +1201,11 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
             diagnosticarIntegracaoSap: _ => Task.FromResult(new DiagnosticoProntidaoIntegracaoSap(
                 AmbienteOperacional: true, IntegracaoAtiva: true, SapConfigurado: true,
                 EscritaSapHabilitada: true, MaterialDocumentConfigurado: true, MotivoBloqueio: null)),
-            atualizarStatusAposEnvioSap: (_, _, _, _, _) => Task.FromResult(ResultadoOperacao.Ok()));
+            atualizarStatusAposEnvioSap: (_, _, _, _, _) => Task.FromResult(ResultadoOperacao.Ok()),
+            // GATE R2: HIBE ⇒ caminho LEGADO preservado nestes testes de reserva/snapshot (096D/§15).
+            consultarProdutoMestreSap: (material, _) => Task.FromResult<ProdutoSapMestre?>(
+                new ProdutoSapMestre { CodigoProduto = material, TipoMaterialSap = "HIBE", Consultado = true }),
+            existeRecebimentoConfirmadoItemPedido: (_, _, _, _) => Task.FromResult<bool?>(false));
 
     [Fact] // T01 — FINALIZADO_LOCAL, snapshot estável ⇒ writer 1, sem "estado mudou".
     public async Task T01_FinalizadoLocal_SnapshotEstavel_Despacha()
@@ -1343,7 +1352,12 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
             Task<ResultadoOperacao>>? atualizarStatus = null,
         Func<string, string, CancellationToken, Task<ProdutoCentroSapMestre?>>? consultarProdutoCentro = null,
         Func<string, CancellationToken, Task<long?>>? recuperarLancamento = null,
-        Func<long, CancellationToken, Task<IReadOnlyList<EntradaProdutoItemEnvioSap>>>? carregarItensProvider = null)
+        Func<long, CancellationToken, Task<IReadOnlyList<EntradaProdutoItemEnvioSap>>>? carregarItensProvider = null,
+        // GATE R2: por padrão os testes existentes usam material HIBE (Químico) ⇒ caminho LEGADO
+        // preservado (QuantityInEntryUnit = peso líquido, sem campos ZZ1). Os testes do novo contrato
+        // injetam ROH explicitamente. Classificação indeterminada passou a BLOQUEAR por contrato.
+        string tipoMaterialSap = "HIBE",
+        Func<string, string, long, CancellationToken, Task<bool?>>? existeRecebimentoConfirmado = null)
         => new(
             new IntegracaoEntradaSapServico(pedido, materialDoc),
             new EntradaProdutoServico(null!, null!, null!, null, new AutorizacaoCentroDepositoEntrada([], []), null),
@@ -1374,7 +1388,16 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
                         ? null
                         : "Integração SAP inativa.")),
             atualizarStatusAposEnvioSap: atualizarStatus
-                ?? ((_, _, _, _, _) => Task.FromResult(ResultadoOperacao.Ok())));
+                ?? ((_, _, _, _, _) => Task.FromResult(ResultadoOperacao.Ok())),
+            consultarProdutoMestreSap: (material, _) => Task.FromResult<ProdutoSapMestre?>(
+                new ProdutoSapMestre
+                {
+                    CodigoProduto = material,
+                    TipoMaterialSap = tipoMaterialSap,
+                    Consultado = true
+                }),
+            existeRecebimentoConfirmadoItemPedido: existeRecebimentoConfirmado
+                ?? ((_, _, _, _) => Task.FromResult<bool?>(false)));
 
     private static void DefinirSessao(bool comEnviarSap)
     {
@@ -1405,7 +1428,10 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
         DateTime? dataFabricacao = null,
         DateTime? dataValidade = null,
         decimal pesoLiquido = 8m,
-        decimal pesoBruto = 10m)
+        decimal pesoBruto = 10m,
+        // GATE R2: quantidade INTEGRAL do item do pedido. Default preenchido para que os cenarios ROH
+        // possam ser montados; os testes legados (HIBE) nao a utilizam.
+        decimal? quantidadePedido = 1000m)
         => new()
         {
             NumeroPedido = "4500000010",
@@ -1416,6 +1442,7 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
             Centro = "3007",
             Deposito = "PP01",
             Unidade = unidade,
+            QuantidadePedidoItem = quantidadePedido,
             NumeroLote = numeroLote,
             CodigoEntradaProdutoLote = 0L,
             // Datas civis validas por padrao (fabricacao no passado, validade no futuro), como um lote real.
@@ -1427,6 +1454,74 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
     private static Task<ProdutoCentroSapMestre?> ProdutoCentroBatchManaged(string material, string centro, CancellationToken ct)
         => Task.FromResult<ProdutoCentroSapMestre?>(
             new ProdutoCentroSapMestre { Material = material, Centro = centro, IsBatchManagementRequired = true, Consultado = true });
+
+    // ======================================================================
+    // GATE R2 — duplicidade de recebimento (P5) e idempotencia (T10), nivel Controller.
+    // ======================================================================
+
+    [Fact] // T10/P5: sem evidencia de ausencia de recebimento anterior ⇒ BLOQUEIA, ZERO POST.
+    public async Task R2_ItemRoh_SemEvidenciaDeDuplicidade_BloqueiaSemPost()
+    {
+        DefinirSessao(comEnviarSap: true);
+        FakeMaterialDocumentSapServico materialDoc = new();
+        EntradaProdutoController controller = CriarController(
+            new FakePedidoCompraSapServico { EscritaHabilitada = true },
+            materialDoc,
+            ehHomologacao: true,
+            itens: [Item(pesoLiquido: 296.5m, pesoBruto: 300m, quantidadePedido: 1000m)],
+            tipoMaterialSap: "ROH",
+            existeRecebimentoConfirmado: (_, _, _, _) => Task.FromResult<bool?>(null));
+
+        ResultadoEnvioSapEntrada r = await controller.EnviarPesoEntradaParaSapHomologacaoAsync(99);
+
+        Assert.Equal(CenarioEnvioSapEntrada.DadosIncompletos, r.Cenario);
+        Assert.Equal(0, materialDoc.Chamadas);
+        Assert.Contains("recebimento confirmado", r.Mensagem ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact] // T10/P5: item do pedido JA recebido ⇒ BLOQUEIA, ZERO POST (nao lanca a quantidade de novo).
+    public async Task R2_ItemRoh_JaRecebido_BloqueiaSemPost()
+    {
+        DefinirSessao(comEnviarSap: true);
+        FakeMaterialDocumentSapServico materialDoc = new();
+        EntradaProdutoController controller = CriarController(
+            new FakePedidoCompraSapServico { EscritaHabilitada = true },
+            materialDoc,
+            ehHomologacao: true,
+            itens: [Item(pesoLiquido: 296.5m, pesoBruto: 300m, quantidadePedido: 1000m)],
+            tipoMaterialSap: "ROH",
+            existeRecebimentoConfirmado: (_, _, _, _) => Task.FromResult<bool?>(true));
+
+        ResultadoEnvioSapEntrada r = await controller.EnviarPesoEntradaParaSapHomologacaoAsync(99);
+
+        Assert.Equal(CenarioEnvioSapEntrada.DadosIncompletos, r.Cenario);
+        Assert.Equal(0, materialDoc.Chamadas);
+        Assert.Contains("duplicidade", r.Mensagem ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact] // T1 ponta a ponta: sem recebimento anterior ⇒ POST com 1000.000 no padrao e 296.500 no ZZ1.
+    public async Task R2_ItemRoh_SemRecebimentoAnterior_EnviaQuantidadeDoPedidoComZz1()
+    {
+        DefinirSessao(comEnviarSap: true);
+        FakeMaterialDocumentSapServico materialDoc = new();
+        EntradaProdutoController controller = CriarController(
+            new FakePedidoCompraSapServico { EscritaHabilitada = true },
+            materialDoc,
+            ehHomologacao: true,
+            itens: [Item(pesoLiquido: 296.5m, pesoBruto: 300m, quantidadePedido: 1000m)],
+            tipoMaterialSap: "ROH",
+            existeRecebimentoConfirmado: (_, _, _, _) => Task.FromResult<bool?>(false));
+
+        ResultadoEnvioSapEntrada r = await controller.EnviarPesoEntradaParaSapHomologacaoAsync(99);
+
+        Assert.Equal(CenarioEnvioSapEntrada.Enviado, r.Cenario);
+        Assert.Equal(1, materialDoc.Chamadas);
+        MaterialDocumentSapItemRequest item = Assert.Single(materialDoc.UltimaRequisicao!.Itens);
+        Assert.Equal("1000.000", item.QuantityInEntryUnit);
+        Assert.Equal("KG", item.EntryUnit);
+        Assert.Equal("296.500", item.Zz1PesoEntradaMmi);
+        Assert.Equal("KG", item.Zz1PesoEntradaMmiu);
+    }
 
     private static ProdutoCentroSapMestre Mestre(string material, string centro, bool? batch, bool consultado = true)
         => new() { Material = material, Centro = centro, IsBatchManagementRequired = batch, Consultado = consultado };

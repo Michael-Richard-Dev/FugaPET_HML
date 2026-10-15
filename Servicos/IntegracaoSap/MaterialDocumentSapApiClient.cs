@@ -201,6 +201,11 @@ public sealed class MaterialDocumentSapApiClient
             AdicionarDataSePreenchida(itemJson, "ManufactureDate", item.ManufactureDate);
             AdicionarDataSePreenchida(itemJson, "ShelfLifeExpirationDate", item.ShelfLifeExpirationDate);
             AdicionarSePreenchido(itemJson, "MaterialDocumentItemText", item.MaterialDocumentItemText);
+            // GATE R2: campos customizados do peso de entrada (Materia-Prima/ROH). O JSON e montado por
+            // ALLOWLIST EXPLICITA — sem estas duas linhas os campos nao viajariam, mesmo existindo no DTO.
+            // Omitidos quando nulos/vazios (AdicionarSePreenchido), preservando o payload legado.
+            AdicionarSePreenchido(itemJson, "ZZ1_PESO_ENTRADA_MMI", item.Zz1PesoEntradaMmi);
+            AdicionarSePreenchido(itemJson, "ZZ1_PESO_ENTRADA_MMIU", item.Zz1PesoEntradaMmiu);
 
             itens.Add(itemJson);
         }

@@ -149,9 +149,13 @@ public sealed class EntradaSeparacaoModo241Tests
     public void ContratoSap101_Persistencia_ExcluirPesagem_Inalterados()
     {
         string controller = File.ReadAllText(Path.Combine(RaizProjeto(), "Controle", "Processo", "EntradaProdutoController.cs"));
-        // TEST_17: payload 101 preservado.
+        // TEST_17: payload 101 preservado. GATE R2: EntryUnit passou a vir da alocação; o literal "KG"
+        // migrou para EntradaProdutoAlocacao101.UnidadeSuportada, única unidade admitida no incremento.
         Assert.Contains("GoodsMovementRefDocType = \"B\"", controller, StringComparison.Ordinal);
-        Assert.Contains("EntryUnit = \"KG\"", controller, StringComparison.Ordinal);
+        Assert.Contains("EntryUnit = alocacao.UnidadePadrao", controller, StringComparison.Ordinal);
+        string alocacao = File.ReadAllText(Path.Combine(
+            RaizProjeto(), "Modelo", "Entrada", "EntradaProdutoAlocacao101.cs"));
+        Assert.Contains("UnidadeSuportada = \"KG\"", alocacao, StringComparison.Ordinal);
         // TEST_18: consulta compartilhada parametrizada por modo (mesma Form/controller/persistência).
         Assert.Contains("EnriquecerEClassificarItensAsync(", controller, StringComparison.Ordinal);
         // TEST_19: safe-delete de pesagem preservado (arquivo congelado do gate 067).
@@ -337,9 +341,11 @@ public sealed class EntradaSeparacaoModo241Tests
         Assert.Contains("PedidoTemItensDoModo = false", controller, StringComparison.Ordinal);
         // 23.1 e payload preservados.
         Assert.Contains("ValidadorLiberacaoPedidoCompra.Validar(cabecalhoSap)", controller, StringComparison.Ordinal);
-        Assert.Contains("QuantityInEntryUnit = FormatarQuantidade(item.PesoLiquidoKg)", controller, StringComparison.Ordinal);
+        // GATE R2: o campo padrão passou a vir da alocação (quantidade do Pedido de Compra no caminho ROH);
+        // EntryUnit também vem da alocação, validada contra KG. GoodsMovementRefDocType segue literal.
+        Assert.Contains("QuantityInEntryUnit = alocacao.QuantidadePadrao", controller, StringComparison.Ordinal);
+        Assert.Contains("EntryUnit = alocacao.UnidadePadrao", controller, StringComparison.Ordinal);
         Assert.Contains("GoodsMovementRefDocType = \"B\"", controller, StringComparison.Ordinal);
-        Assert.Contains("EntryUnit = \"KG\"", controller, StringComparison.Ordinal);
     }
 
     private static string RaizProjeto()

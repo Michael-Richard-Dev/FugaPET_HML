@@ -42,6 +42,9 @@ public sealed class EntradaProdutoController
     // Seam de leitura A_ProductPlant (IsBatchManagementRequired por material × centro): produção delega à
     // fábrica; testes injetam um stub. Somente leitura; a Form/o controller nunca falam direto com HTTP.
     private readonly Func<string, string, CancellationToken, Task<ProdutoCentroSapMestre?>> _consultarProdutoCentroSap;
+    // GATE R2: ProductType do material (classificacao ROH/HIBE) e evidencia de recebimento ja confirmado.
+    private readonly Func<string, CancellationToken, Task<ProdutoSapMestre?>> _consultarProdutoMestreSap;
+    private readonly Func<string, string, long, CancellationToken, Task<bool?>> _existeRecebimentoConfirmadoItemPedido;
     private readonly Func<long, CancellationToken, Task<string?>> _obterStatusLancamento;
     // 12G-D: reidratação — localiza o lançamento local elegível por pedido (read-only). Seam p/ teste.
     private readonly Func<string, CancellationToken, Task<long?>> _recuperarLancamentoLocalPorPedido;
@@ -103,7 +106,10 @@ public sealed class EntradaProdutoController
             Task<ResultadoOperacao>>? atualizarStatusAposEnvioSap = null,
         EntradaProdutoLotesOrquestrador? lotesOrquestrador = null,
         IRuntimeSapWriteCapabilityService? capability = null,
-        Func<long, CancellationToken, Task<Modelo.Entrada.ResultadoExclusaoPesagem>>? excluirPesagemLocal = null)
+        Func<long, CancellationToken, Task<Modelo.Entrada.ResultadoExclusaoPesagem>>? excluirPesagemLocal = null,
+        // GATE R2: acrescentados NO FIM da lista para nao deslocar nenhum argumento posicional existente.
+        Func<string, CancellationToken, Task<ProdutoSapMestre?>>? consultarProdutoMestreSap = null,
+        Func<string, string, long, CancellationToken, Task<bool?>>? existeRecebimentoConfirmadoItemPedido = null)
     {
         Sap = sap ?? throw new ArgumentNullException(nameof(sap));
         EntradaProduto = entradaProdutoServico ?? throw new ArgumentNullException(nameof(entradaProdutoServico));
@@ -119,6 +125,16 @@ public sealed class EntradaProdutoController
         _consultarProdutoCentroSap = consultarProdutoCentroSap
             ?? ((material, centro, cancellationToken) =>
                 FabricaProductPlantSapServico.Criar().ObterProdutoCentroAsync(material, centro, cancellationToken));
+        // GATE R2: ProductType do material (A_Product) — reuso do servico/fabrica JA existentes, sem DDL.
+        _consultarProdutoMestreSap = consultarProdutoMestreSap
+            ?? ((material, cancellationToken) =>
+                FabricaProductMasterSapServico.Criar().ObterProdutoAsync(material, cancellationToken));
+        // GATE R2 (P5): evidencia de recebimento ja confirmado para o MESMO item do pedido. TRI-STATE:
+        // true = ja houve (bloqueia), false = nao houve (libera), null = DESCONHECIDO (bloqueia).
+        // O mecanismo atual NAO garante essa deteccao entre lancamentos distintos; por isso o padrao de
+        // producao e null (desconhecido) e o caminho ROH permanece BLOQUEADO ate a HERA prover a fonte.
+        _existeRecebimentoConfirmadoItemPedido = existeRecebimentoConfirmadoItemPedido
+            ?? ((_, _, _, _) => Task.FromResult<bool?>(null));
         _obterStatusLancamento = obterStatusLancamento
             ?? ((codigoLancamento, cancellationToken) =>
                 EntradaProduto.ObterStatusLancamentoAsync(codigoLancamento, cancellationToken));
@@ -418,7 +434,8 @@ public sealed class EntradaProdutoController
         string numeroPedido = itens[0].NumeroPedido.Trim();
         ResultadoPreparacaoPayloadEntrada preparacao =
             await PreparadorPayloadMaterialDocumentEntrada.PrepararAsync(
-                codigoLancamento, numeroPedido, itens, _consultarProdutoCentroSap, cancellationToken);
+                codigoLancamento, numeroPedido, itens, _consultarProdutoCentroSap,
+                _consultarProdutoMestreSap, cancellationToken);
         if (preparacao.Bloqueio is not null)
         {
             Sap.RegistrarDiagnostico(
@@ -427,6 +444,25 @@ public sealed class EntradaProdutoController
         }
 
         IReadOnlyList<EntradaProdutoPosicaoMaterialDocument> posicoes = preparacao.Posicoes!;
+
+        // GATE R2 (P5): a quantidade INTEGRAL do pedido só pode ser contabilizada UMA vez por item. Antes
+        // da reserva/POST, exige evidência de que não há recebimento já confirmado para o mesmo item.
+        // Desconhecido ⇒ BLOQUEIA (fail-closed). Vale só para posições ROH; Químicos não são afetados.
+        ResultadoEnvioSapEntrada? bloqueioDuplicidade =
+            await ValidarDuplicidadeRecebimentoItemPedidoAsync(
+                codigoLancamento, numeroPedido, posicoes, itens.Count, cancellationToken);
+        if (bloqueioDuplicidade is not null)
+        {
+            return bloqueioDuplicidade;
+        }
+
+        // GATE R2 (P7): coerência do PAYLOAD montado (cultura, escala e semântica dos dois campos).
+        ResultadoEnvioSapEntrada? bloqueioPayload =
+            ValidarCoerenciaPayload101(codigoLancamento, posicoes, itens, itens.Count);
+        if (bloqueioPayload is not null)
+        {
+            return bloqueioPayload;
+        }
 
         // Tarefa Entrada 23.2 (Ajuste 5): coerência quantidade SAP × peso líquido ANTES da reserva/POST.
         ResultadoEnvioSapEntrada? bloqueioQuantidade = ValidarCoerenciaQuantidadeSap(codigoLancamento, itens);
@@ -760,11 +796,224 @@ public sealed class EntradaProdutoController
         return null;
     }
 
+    /// <summary>
+    /// GATE R2 (P5): impede que a quantidade integral do pedido seja contabilizada mais de uma vez para o
+    /// mesmo PurchaseOrderItem em recebimentos distintos. Aplica-se SOMENTE a posições ROH (as que carregam
+    /// os campos ZZ1). Evidência tri-state: true ⇒ já houve recebimento confirmado (bloqueia);
+    /// false ⇒ não houve (libera); null ⇒ DESCONHECIDO (bloqueia, nunca presume ausência).
+    /// </summary>
+    private async Task<ResultadoEnvioSapEntrada?> ValidarDuplicidadeRecebimentoItemPedidoAsync(
+        long codigoLancamento,
+        string numeroPedido,
+        IReadOnlyList<EntradaProdutoPosicaoMaterialDocument> posicoes,
+        int total,
+        CancellationToken cancellationToken)
+    {
+        IEnumerable<string> itensComQuantidadeDoPedido = posicoes
+            .Where(p => !string.IsNullOrWhiteSpace(p.Item.Zz1PesoEntradaMmi))
+            .Select(p => (p.Item.PurchaseOrderItem ?? string.Empty).Trim())
+            .Where(item => item.Length > 0)
+            .Distinct(StringComparer.Ordinal);
+
+        foreach (string itemPedido in itensComQuantidadeDoPedido)
+        {
+            bool? jaRecebido;
+            try
+            {
+                jaRecebido = await _existeRecebimentoConfirmadoItemPedido(
+                    numeroPedido, itemPedido, codigoLancamento, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                Sap.RegistrarDiagnostico(
+                    $"Envio SAP bloqueado (lancamento {codigoLancamento}): falha ao verificar duplicidade de "
+                    + $"recebimento do item {itemPedido}.{Environment.NewLine}{ex}");
+                jaRecebido = null;
+            }
+
+            if (jaRecebido is null)
+            {
+                Sap.RegistrarDiagnostico(
+                    $"Envio SAP BLOQUEADO (lancamento {codigoLancamento}): item {itemPedido} usaria a "
+                    + "quantidade integral do pedido, porem nao ha evidencia local de ausencia de recebimento "
+                    + "ja confirmado para o mesmo item. Controle de duplicidade indisponivel.");
+                return new ResultadoEnvioSapEntrada
+                {
+                    Cenario = CenarioEnvioSapEntrada.DadosIncompletos,
+                    Total = total,
+                    Mensagem = $"Item {itemPedido}: não foi possível comprovar que este item do pedido ainda "
+                        + "não teve recebimento confirmado. Como o movimento 101 lançaria a quantidade "
+                        + "integral do pedido, o envio foi bloqueado para evitar contabilização em duplicidade."
+                };
+            }
+
+            if (jaRecebido == true)
+            {
+                Sap.RegistrarDiagnostico(
+                    $"Envio SAP BLOQUEADO (lancamento {codigoLancamento}): item {itemPedido} ja possui "
+                    + "recebimento confirmado; a quantidade integral do pedido nao sera lancada novamente.");
+                return new ResultadoEnvioSapEntrada
+                {
+                    Cenario = CenarioEnvioSapEntrada.DadosIncompletos,
+                    Total = total,
+                    Mensagem = $"Item {itemPedido} já possui recebimento confirmado no SAP. "
+                        + "Envio bloqueado para não lançar a quantidade do pedido em duplicidade."
+                };
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// GATE R2 (P6/P7): coerência do PAYLOAD já montado. NÃO exige mais igualdade entre
+    /// QuantityInEntryUnit e o peso líquido — os dois campos passaram a ter semânticas distintas.
+    /// Valida, por posição: parse invariante dos dois campos; no caminho ROH, quantidade padrão igual à
+    /// quantidade do pedido e ZZ1 igual ao peso líquido da POSIÇÃO; par ZZ1 tudo-ou-nada; e, por item do
+    /// pedido, a soma dos ZZ1 igual à soma dos pesos líquidos (antiduplicação estrutural).
+    /// </summary>
+    private ResultadoEnvioSapEntrada? ValidarCoerenciaPayload101(
+        long codigoLancamento,
+        IReadOnlyList<EntradaProdutoPosicaoMaterialDocument> posicoes,
+        IReadOnlyList<EntradaProdutoItemEnvioSap> itens,
+        int total)
+    {
+        foreach (EntradaProdutoPosicaoMaterialDocument posicao in posicoes)
+        {
+            MaterialDocumentSapItemRequest item = posicao.Item;
+            string itemPedido = (item.PurchaseOrderItem ?? string.Empty).Trim();
+
+            if (!decimal.TryParse(
+                    item.QuantityInEntryUnit,
+                    System.Globalization.NumberStyles.Number,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out decimal quantidadePadrao)
+                || quantidadePadrao <= 0m)
+            {
+                return BloqueioPayload(codigoLancamento, total,
+                    $"Item {itemPedido}: quantidade do movimento 101 inválida ou não positiva.");
+            }
+
+            bool temPeso = !string.IsNullOrWhiteSpace(item.Zz1PesoEntradaMmi);
+            bool temUnidadePeso = !string.IsNullOrWhiteSpace(item.Zz1PesoEntradaMmiu);
+            if (temPeso != temUnidadePeso)
+            {
+                return BloqueioPayload(codigoLancamento, total,
+                    $"Item {itemPedido}: campos de peso de entrada incompletos (valor e unidade são "
+                    + "obrigatórios juntos).");
+            }
+
+            if (!temPeso)
+            {
+                continue; // Químicos e demais tipos: caminho legado, nada mais a validar aqui.
+            }
+
+            if (!string.Equals(item.Zz1PesoEntradaMmiu, EntradaProdutoAlocacao101.UnidadeSuportada, StringComparison.Ordinal))
+            {
+                return BloqueioPayload(codigoLancamento, total,
+                    $"Item {itemPedido}: unidade do peso de entrada diferente de "
+                    + $"{EntradaProdutoAlocacao101.UnidadeSuportada}.");
+            }
+
+            if (!string.Equals(item.EntryUnit, EntradaProdutoAlocacao101.UnidadeSuportada, StringComparison.Ordinal))
+            {
+                return BloqueioPayload(codigoLancamento, total,
+                    $"Item {itemPedido}: unidade da quantidade diferente de "
+                    + $"{EntradaProdutoAlocacao101.UnidadeSuportada}.");
+            }
+
+            if (!decimal.TryParse(
+                    item.Zz1PesoEntradaMmi,
+                    System.Globalization.NumberStyles.Number,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out decimal pesoPayload)
+                || pesoPayload <= 0m)
+            {
+                return BloqueioPayload(codigoLancamento, total,
+                    $"Item {itemPedido}: peso de entrada inválido ou não positivo.");
+            }
+
+            // O peso da POSIÇÃO é a soma dos lotes locais que a compõem: 1 lote no CASO A, N lotes
+            // consolidados no CASO B. Nunca um total do item nem do documento.
+            decimal pesoPosicao = SomarPesoLiquidoDosLotes(itens, posicao.CodigosLotesLocais, pesoPayload);
+
+            if (!EntradaProdutoQuantidadeSap.QuantidadeCoerente(pesoPayload, pesoPosicao))
+            {
+                return BloqueioPayload(codigoLancamento, total,
+                    $"Item {itemPedido}: peso de entrada {item.Zz1PesoEntradaMmi} divergente do peso líquido "
+                    + $"da posição {FormatarQuantidade(pesoPosicao)} KG.");
+            }
+
+            decimal quantidadeEsperada = itens
+                .Where(i => string.Equals(NormalizarItemSap(i.NumeroItem), itemPedido, StringComparison.Ordinal))
+                .Select(i => i.QuantidadePedidoItem)
+                .FirstOrDefault(q => q.HasValue) ?? 0m;
+
+            if (quantidadeEsperada <= 0m
+                || !EntradaProdutoQuantidadeSap.QuantidadeCoerente(quantidadePadrao, quantidadeEsperada))
+            {
+                return BloqueioPayload(codigoLancamento, total,
+                    $"Item {itemPedido}: quantidade do movimento 101 {item.QuantityInEntryUnit} divergente da "
+                    + "quantidade do item do Pedido de Compra.");
+            }
+        }
+
+        // Antiduplicação estrutural: por item do pedido, a soma dos ZZ1 das posições tem de reproduzir a
+        // soma dos pesos líquidos daquele item — nunca um total repetido.
+        foreach (IGrouping<string, EntradaProdutoPosicaoMaterialDocument> grupo in posicoes
+            .Where(p => !string.IsNullOrWhiteSpace(p.Item.Zz1PesoEntradaMmi))
+            .GroupBy(p => (p.Item.PurchaseOrderItem ?? string.Empty).Trim(), StringComparer.Ordinal))
+        {
+            decimal somaPayload = grupo.Sum(p => decimal.Parse(
+                p.Item.Zz1PesoEntradaMmi!, System.Globalization.CultureInfo.InvariantCulture));
+            decimal somaLocal = itens
+                .Where(i => string.Equals(NormalizarItemSap(i.NumeroItem), grupo.Key, StringComparison.Ordinal))
+                .Sum(i => i.PesoLiquidoKg);
+
+            if (!EntradaProdutoQuantidadeSap.QuantidadeCoerente(somaPayload, somaLocal))
+            {
+                return BloqueioPayload(codigoLancamento, total,
+                    $"Item {grupo.Key}: soma dos pesos de entrada do payload divergente do peso líquido "
+                    + "apurado do item. Envio bloqueado (possível duplicação).");
+            }
+        }
+
+        return null;
+    }
+
+    private static decimal SomarPesoLiquidoDosLotes(
+        IReadOnlyList<EntradaProdutoItemEnvioSap> itens,
+        IReadOnlyList<long> codigosLotes,
+        decimal padrao)
+    {
+        decimal soma = itens
+            .Where(i => codigosLotes.Contains(i.CodigoEntradaProdutoLote))
+            .Sum(i => i.PesoLiquidoKg);
+        return soma > 0m ? soma : padrao;
+    }
+
+    private ResultadoEnvioSapEntrada BloqueioPayload(long codigoLancamento, int total, string mensagem)
+    {
+        Sap.RegistrarDiagnostico($"Envio SAP BLOQUEADO (lancamento {codigoLancamento}): {mensagem}");
+        return new ResultadoEnvioSapEntrada
+        {
+            Cenario = CenarioEnvioSapEntrada.DadosIncompletos,
+            Total = total,
+            Mensagem = mensagem
+        };
+    }
+
     // Monta UMA posicao (item) do documento de material 101 a partir de um lote/representante. comLote
     // controla Batch/ManufactureDate/ShelfLifeExpirationDate (material ADMINISTRADO por lote no centro).
     // Os literais do movimento 101 (101/B/EntryUnit KG/QuantityInEntryUnit) vivem AQUI, no controller.
+    /// <summary>
+    /// GATE R2: a alocacao decide o par (campo padrao x campos customizados).
+    /// ROH ...... QuantityInEntryUnit = quantidade INTEGRAL do item do Pedido de Compra, na unidade do
+    ///            pedido (somente KG neste incremento); ZZ1_PESO_ENTRADA_MMI/MMIU = peso liquido pesado.
+    /// Demais ... comportamento LEGADO (quantidade = peso liquido), SEM campos customizados.
+    /// </summary>
     internal static MaterialDocumentSapItemRequest MontarItemMaterialDocument(
-        string numeroPedido, EntradaProdutoItemEnvioSap item, bool comLote)
+        string numeroPedido, EntradaProdutoItemEnvioSap item, bool comLote, ResultadoAlocacao101 alocacao)
         => new()
         {
             Material = item.Material!.Trim(),
@@ -772,8 +1021,10 @@ public sealed class EntradaProdutoController
             StorageLocation = item.Deposito!.Trim(),
             GoodsMovementType = "101",
             GoodsMovementRefDocType = "B", // referencia = Pedido de Compra (exigido pelo SAP no 101)
-            QuantityInEntryUnit = FormatarQuantidade(item.PesoLiquidoKg),
-            EntryUnit = "KG",
+            QuantityInEntryUnit = alocacao.QuantidadePadrao,
+            EntryUnit = alocacao.UnidadePadrao,
+            Zz1PesoEntradaMmi = alocacao.PesoLiquidoCustomizado,
+            Zz1PesoEntradaMmiu = alocacao.UnidadePesoCustomizado,
             PurchaseOrder = numeroPedido,
             PurchaseOrderItem = NormalizarItemSap(item.NumeroItem),
             // Batch/datas SOMENTE quando o material e administrado por lote no centro (A_ProductPlant).
