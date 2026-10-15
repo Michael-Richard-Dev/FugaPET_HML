@@ -553,6 +553,21 @@ public sealed class EntradaProdutoController
             };
         }
 
+        // GATE R3: releitura FRESCA do item do Pedido de Compra no SAP, APÓS a reserva e ANTES do POST.
+        // Compara quantidade e unidade ATUAIS com as que compuseram o payload. Divergência,
+        // indisponibilidade, identificação ambígua ou falha de consulta ⇒ ABORTA sem POST e LIBERA a
+        // reserva pela compensação existente. Só executa quando há posição ROH (HIBE não consulta o SAP).
+        ResultadoEnvioSapEntrada? bloqueioFrescor = await ValidarQuantidadePedidoFrescaAsync(
+            codigoLancamento, numeroPedido, posicoes, itens.Count, cancellationToken);
+        if (bloqueioFrescor is not null)
+        {
+            await _liberarReservaAposAbort(codigoLancamento, statusAnteriorReserva, CancellationToken.None);
+            Sap.RegistrarDiagnostico(
+                $"Envio SAP abortado (lancamento {codigoLancamento}): {bloqueioFrescor.Mensagem} "
+                + "ZERO POST; reserva liberada.");
+            return bloqueioFrescor;
+        }
+
         // Um UNICO documento de material por lancamento (movimento 101), com as posicoes ja preparadas
         // (uma por lote quando administrado por lote; consolidada quando nao administrado).
         MaterialDocumentSapRequest requisicao =
@@ -866,6 +881,129 @@ public sealed class EntradaProdutoController
     }
 
     /// <summary>
+    /// GATE R3: valida a quantidade e a unidade do item do Pedido de Compra contra uma leitura FRESCA do
+    /// SAP, reutilizando o contrato já existente <c>ObterCabecalhoSapParaValidacaoAsync</c> (que consulta
+    /// A_PurchaseOrder direto, com a navegação de itens, sem cache local).
+    /// <para>
+    /// Aplica-se SOMENTE às posições ROH — as que carregam os campos ZZ1 e portanto lançam a quantidade
+    /// integral do pedido. Fluxos HIBE/legado não disparam nenhuma consulta SAP adicional.
+    /// </para>
+    /// FAIL-CLOSED: cabeçalho nulo, exceção, item não encontrado, item duplicado (ambíguo), quantidade
+    /// ausente, unidade divergente ou quantidade divergente ⇒ bloqueio. Nunca presume o valor do SAP.
+    /// </summary>
+    private async Task<ResultadoEnvioSapEntrada?> ValidarQuantidadePedidoFrescaAsync(
+        long codigoLancamento,
+        string numeroPedido,
+        IReadOnlyList<EntradaProdutoPosicaoMaterialDocument> posicoes,
+        int total,
+        CancellationToken cancellationToken)
+    {
+        MaterialDocumentSapItemRequest[] posicoesRoh = [.. posicoes
+            .Select(p => p.Item)
+            .Where(i => !string.IsNullOrWhiteSpace(i.Zz1PesoEntradaMmi))];
+
+        if (posicoesRoh.Length == 0)
+        {
+            return null; // Nenhuma posição usa a quantidade do pedido: nada a revalidar, nenhuma consulta.
+        }
+
+        PedidoCompraSap? pedidoFresco;
+        try
+        {
+            pedidoFresco = await Sap.ObterCabecalhoSapParaValidacaoAsync(numeroPedido, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Sap.RegistrarDiagnostico(
+                $"Envio SAP: falha ao reconsultar o pedido {numeroPedido} para revalidar a quantidade."
+                + $"{Environment.NewLine}{ex}");
+            return BloqueioFrescor(total,
+                "Não foi possível reconsultar a quantidade do item no Pedido de Compra antes do envio. "
+                + "Envio bloqueado.");
+        }
+
+        if (pedidoFresco is null || pedidoFresco.Itens.Count == 0)
+        {
+            return BloqueioFrescor(total,
+                $"O Pedido de Compra {numeroPedido} não retornou itens na reconsulta ao SAP. Envio bloqueado.");
+        }
+
+        foreach (MaterialDocumentSapItemRequest posicao in posicoesRoh)
+        {
+            string itemPedido = (posicao.PurchaseOrderItem ?? string.Empty).Trim();
+
+            PedidoCompraSapItem[] correspondentes = [.. pedidoFresco.Itens
+                .Where(i => string.Equals(
+                    NormalizarItemSap(i.NumeroItem), itemPedido, StringComparison.Ordinal))];
+
+            if (correspondentes.Length == 0)
+            {
+                return BloqueioFrescor(total,
+                    $"Item {itemPedido} não foi localizado na reconsulta do Pedido de Compra {numeroPedido}. "
+                    + "Envio bloqueado.");
+            }
+
+            if (correspondentes.Length > 1)
+            {
+                return BloqueioFrescor(total,
+                    $"Item {itemPedido} retornou {correspondentes.Length} ocorrências na reconsulta do Pedido "
+                    + "de Compra (identificação ambígua). Envio bloqueado.");
+            }
+
+            PedidoCompraSapItem itemSap = correspondentes[0];
+
+            if (itemSap.Quantidade is not decimal quantidadeSap)
+            {
+                return BloqueioFrescor(total,
+                    $"Item {itemPedido}: o SAP não informou a quantidade do pedido na reconsulta. "
+                    + "Envio bloqueado.");
+            }
+
+            string unidadeSap = (itemSap.UnidadeMedida ?? string.Empty).Trim().ToUpperInvariant();
+            if (!string.Equals(unidadeSap, (posicao.EntryUnit ?? string.Empty).Trim(), StringComparison.Ordinal))
+            {
+                return BloqueioFrescor(total,
+                    $"Item {itemPedido}: unidade da quantidade divergente entre o payload "
+                    + $"({posicao.EntryUnit}) e o SAP ({(unidadeSap.Length == 0 ? "não informada" : unidadeSap)}). "
+                    + "Envio bloqueado.");
+            }
+
+            if (!decimal.TryParse(
+                    posicao.QuantityInEntryUnit,
+                    System.Globalization.NumberStyles.Number,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out decimal quantidadePayload))
+            {
+                return BloqueioFrescor(total,
+                    $"Item {itemPedido}: quantidade do payload ilegível na revalidação. Envio bloqueado.");
+            }
+
+            if (!EntradaProdutoQuantidadeSap.QuantidadeCoerente(quantidadePayload, quantidadeSap))
+            {
+                Sap.RegistrarDiagnostico(
+                    $"Envio SAP BLOQUEADO (lancamento {codigoLancamento}): item {itemPedido} com quantidade "
+                    + $"do pedido OBSOLETA. Payload {posicao.QuantityInEntryUnit}; SAP atual "
+                    + $"{EntradaProdutoAlocacao101.FormatarDecimalContratoSap(quantidadeSap)}.");
+                return BloqueioFrescor(total,
+                    $"Item {itemPedido}: a quantidade do Pedido de Compra mudou no SAP "
+                    + $"({EntradaProdutoAlocacao101.FormatarDecimalContratoSap(quantidadeSap)} "
+                    + $"{unidadeSap}) e não corresponde à usada no envio ({posicao.QuantityInEntryUnit}). "
+                    + "Atualize os dados do pedido antes de enviar. Envio bloqueado.");
+            }
+        }
+
+        return null;
+    }
+
+    private static ResultadoEnvioSapEntrada BloqueioFrescor(int total, string mensagem)
+        => new()
+        {
+            Cenario = CenarioEnvioSapEntrada.DadosIncompletos,
+            Total = total,
+            Mensagem = mensagem
+        };
+
+    /// <summary>
     /// GATE R2 (P6/P7): coerência do PAYLOAD já montado. NÃO exige mais igualdade entre
     /// QuantityInEntryUnit e o peso líquido — os dois campos passaram a ter semânticas distintas.
     /// Valida, por posição: parse invariante dos dois campos; no caminho ROH, quantidade padrão igual à
@@ -1047,28 +1185,66 @@ public sealed class EntradaProdutoController
             return false;
         }
 
-        static Dictionary<string, decimal> PorItem(IReadOnlyList<EntradaProdutoItemEnvioSap> itens)
+        // GATE R3: o snapshot deixou de comparar SOMENTE item -> soma do peso. Agora inclui a IDENTIDADE
+        // (pedido, item, material) e os dados DOCUMENTAIS que alimentam o campo padrão do 101
+        // (QuantidadePedidoItem e a unidade). Sem isso, uma quantidade do pedido OBSOLETA passaria pela
+        // revalidação pós-reserva apenas porque o peso não mudou.
+        static Dictionary<string, AssinaturaItemElegivel> PorItem(IReadOnlyList<EntradaProdutoItemEnvioSap> itens)
             => itens
-                .GroupBy(i => i.NumeroItem.Trim())
-                .ToDictionary(g => g.Key, g => g.Sum(x => x.PesoLiquidoKg));
+                .GroupBy(i => NormalizarItemSap(i.NumeroItem))
+                .ToDictionary(
+                    g => g.Key,
+                    g => new AssinaturaItemElegivel(
+                        Pedido: Normalizar(g.Select(x => x.NumeroPedido)),
+                        Material: Normalizar(g.Select(x => x.Material)),
+                        Unidade: Normalizar(g.Select(x => x.Unidade)).ToUpperInvariant(),
+                        QuantidadePedido: Unica(g.Select(x => x.QuantidadePedidoItem)),
+                        SomaPesoLiquido: g.Sum(x => x.PesoLiquidoKg)));
 
-        Dictionary<string, decimal> a = PorItem(antes);
-        Dictionary<string, decimal> b = PorItem(depois);
+        Dictionary<string, AssinaturaItemElegivel> a = PorItem(antes);
+        Dictionary<string, AssinaturaItemElegivel> b = PorItem(depois);
         if (a.Count != b.Count)
         {
             return false;
         }
 
-        foreach (KeyValuePair<string, decimal> par in a)
+        foreach (KeyValuePair<string, AssinaturaItemElegivel> par in a)
         {
-            if (!b.TryGetValue(par.Key, out decimal peso) || peso != par.Value)
+            if (!b.TryGetValue(par.Key, out AssinaturaItemElegivel? assinatura) || assinatura != par.Value)
             {
                 return false;
             }
         }
 
         return true;
+
+        static string Normalizar(IEnumerable<string?> valores)
+        {
+            string[] distintos = [.. valores
+                .Select(v => (v ?? string.Empty).Trim())
+                .Distinct(StringComparer.Ordinal)];
+            // Divergência DENTRO do mesmo item (ex.: dois materiais) é, por si, snapshot inconsistente:
+            // devolve um marcador que nunca casa, em vez de escolher um dos valores.
+            return distintos.Length == 1 ? distintos[0] : "\u0000DIVERGENTE";
+        }
+
+        static decimal? Unica(IEnumerable<decimal?> valores)
+        {
+            decimal?[] distintos = [.. valores.Distinct()];
+            return distintos.Length == 1 ? distintos[0] : decimal.MinValue;
+        }
     }
+
+    /// <summary>
+    /// GATE R3: assinatura comparável de um item elegível entre o snapshot do payload e a recarga
+    /// pós-reserva. Record ⇒ igualdade estrutural por valor, incluindo os campos documentais.
+    /// </summary>
+    private sealed record AssinaturaItemElegivel(
+        string Pedido,
+        string Material,
+        string Unidade,
+        decimal? QuantidadePedido,
+        decimal SomaPesoLiquido);
 
     private static MaterialDocumentSapRequest MontarRequisicaoMaterialDocument(
         string numeroPedido,
