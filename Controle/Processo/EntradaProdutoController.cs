@@ -131,10 +131,13 @@ public sealed class EntradaProdutoController
                 FabricaProductMasterSapServico.Criar().ObterProdutoAsync(material, cancellationToken));
         // GATE R2 (P5): evidencia de recebimento ja confirmado para o MESMO item do pedido. TRI-STATE:
         // true = ja houve (bloqueia), false = nao houve (libera), null = DESCONHECIDO (bloqueia).
-        // O mecanismo atual NAO garante essa deteccao entre lancamentos distintos; por isso o padrao de
-        // producao e null (desconhecido) e o caminho ROH permanece BLOQUEADO ate a HERA prover a fonte.
+        // GATE R5: o seam passou a ser atendido pelo provider OPERACIONAL, que compoe tres evidencias
+        // (exclusividade duravel por pedido+item, recebimentos locais e historico 101/102 no SAP) e
+        // delega a decisao ao motor puro. As fontes ainda nao aprovadas resolvem como INDISPONIVEIS,
+        // portanto o comportamento efetivo permanece BLOQUEANDO — agora com cenario NOMEADO em
+        // diagnostico, em vez de um null anonimo.
         _existeRecebimentoConfirmadoItemPedido = existeRecebimentoConfirmadoItemPedido
-            ?? ((_, _, _, _) => Task.FromResult<bool?>(null));
+            ?? CriarProvedorP5Padrao(Sap.RegistrarDiagnostico).ExisteRecebimentoConfirmadoAsync;
         _obterStatusLancamento = obterStatusLancamento
             ?? ((codigoLancamento, cancellationToken) =>
                 EntradaProduto.ObterStatusLancamentoAsync(codigoLancamento, cancellationToken));
@@ -916,6 +919,16 @@ public sealed class EntradaProdutoController
 
         return null;
     }
+
+    /// <summary>
+    /// GATE R5: provider P5 padrão de produção. As três fontes de evidência resolvem como INDISPONÍVEIS
+    /// enquanto não houver (a) a estrutura durável de exclusividade por pedido+item, (b) a consulta local
+    /// aprovada e (c) o contrato confirmado de leitura de A_MaterialDocumentItem. Com qualquer uma
+    /// indisponível, o P5 BLOQUEIA — fail-closed por construção, nunca liberação por omissão.
+    /// </summary>
+    private static Servicos.Entrada.ProvedorEvidenciaRecebimentoItemPedido CriarProvedorP5Padrao(
+        Action<string> registrarDiagnostico)
+        => new(registrarDiagnostico: registrarDiagnostico);
 
     /// <summary>
     /// GATE R3B: desfecho da compensação da reserva num abort pré-POST. Nunca declara liberação fictícia:
