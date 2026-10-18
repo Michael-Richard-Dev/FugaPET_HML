@@ -42,20 +42,27 @@ public sealed class ProvedorEvidenciaRecebimentoItemPedido
         long codigoLancamento,
         CancellationToken cancellationToken = default)
     {
-        ResultadoExclusividadeItemPedido exclusividade = await ObterAsync(
-            () => _exclusividade.TentarObterAsync(numeroPedido, numeroItemPedido, codigoLancamento, cancellationToken),
-            ex => ResultadoExclusividadeItemPedido.Indisponivel(
-                "falha ao obter exclusividade duravel (" + ex.GetType().Name + ")"));
+        // GATE R6: a DISPONIBILIDADE declarada pela fonte e verificada ANTES de aceitar qualquer
+        // evidencia favoravel. Uma fonte que se declara indisponivel NAO pode produzir evidencia
+        // favoravel; se isso ocorrer, prevalece o BLOQUEIO e a inconsistencia e nomeada.
+        ResultadoExclusividadeItemPedido exclusividade = NormalizarExclusividade(
+            _exclusividade.Disponivel,
+            await ObterAsync(
+                () => _exclusividade.TentarObterAsync(numeroPedido, numeroItemPedido, codigoLancamento, cancellationToken),
+                ex => ResultadoExclusividadeItemPedido.Indisponivel(
+                    "falha ao obter exclusividade duravel (" + ex.GetType().Name + ")")));
 
         ResultadoRecebimentoLocal local = await ObterAsync(
             () => _local.ConsultarAsync(numeroPedido, numeroItemPedido, codigoLancamento, cancellationToken),
             ex => ResultadoRecebimentoLocal.Indisponivel(
                 "falha na consulta local (" + ex.GetType().Name + ")"));
 
-        ResultadoHistoricoMaterialSap historico = await ObterAsync(
-            () => _historico.ConsultarPorPedidoItemAsync(numeroPedido, numeroItemPedido, cancellationToken),
-            ex => ResultadoHistoricoMaterialSap.Falha(
-                "falha na consulta do historico SAP (" + ex.GetType().Name + ")"));
+        ResultadoHistoricoMaterialSap historico = NormalizarHistorico(
+            _historico.Disponivel,
+            await ObterAsync(
+                () => _historico.ConsultarPorPedidoItemAsync(numeroPedido, numeroItemPedido, cancellationToken),
+                ex => ResultadoHistoricoMaterialSap.Falha(
+                    "falha na consulta do historico SAP (" + ex.GetType().Name + ")")));
 
         ResultadoEvidenciaRecebimento resultado =
             AvaliadorEvidenciaRecebimentoItemPedido.Avaliar(exclusividade, local, historico);
@@ -81,6 +88,46 @@ public sealed class ProvedorEvidenciaRecebimentoItemPedido
         CancellationToken cancellationToken = default)
         => (await AvaliarAsync(numeroPedido, numeroItemPedido, codigoLancamento, cancellationToken))
             .ComoTriState();
+
+    /// <summary>
+    /// GATE R6: fonte de exclusividade que se declara INDISPONIVEL nunca autoriza. Um resultado
+    /// "Obtida" vindo de fonte indisponivel e INCONSISTENCIA ⇒ bloqueia, nomeando o conflito.
+    /// </summary>
+    internal static ResultadoExclusividadeItemPedido NormalizarExclusividade(
+        bool disponivel, ResultadoExclusividadeItemPedido resultado)
+    {
+        if (disponivel)
+        {
+            return resultado;
+        }
+
+        return resultado.Cenario == CenarioExclusividadeItemPedido.Obtida
+            ? ResultadoExclusividadeItemPedido.Indisponivel(
+                "INCONSISTENCIA: a fonte de exclusividade declara indisponibilidade e ainda assim "
+                + "devolveu exclusividade obtida. Prevalece o bloqueio")
+            : ResultadoExclusividadeItemPedido.Indisponivel(
+                "fonte de exclusividade indisponivel: " + resultado.Motivo);
+    }
+
+    /// <summary>
+    /// GATE R6: historico que se declara INDISPONIVEL nunca produz evidencia favoravel. Um resultado
+    /// "Lido" vindo de fonte indisponivel e INCONSISTENCIA ⇒ bloqueia, nomeando o conflito.
+    /// </summary>
+    internal static ResultadoHistoricoMaterialSap NormalizarHistorico(
+        bool disponivel, ResultadoHistoricoMaterialSap resultado)
+    {
+        if (disponivel)
+        {
+            return resultado;
+        }
+
+        return resultado.Cenario == CenarioHistoricoMaterialSap.Lido
+            ? ResultadoHistoricoMaterialSap.Indisponivel(
+                "INCONSISTENCIA: a fonte de historico declara indisponibilidade e ainda assim devolveu "
+                + "leitura concluida. Prevalece o bloqueio")
+            : ResultadoHistoricoMaterialSap.Indisponivel(
+                "fonte de historico indisponivel: " + resultado.Motivo);
+    }
 
     private static async Task<T> ObterAsync<T>(Func<Task<T>> consulta, Func<Exception, T> emFalha)
     {

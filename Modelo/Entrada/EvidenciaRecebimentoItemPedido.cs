@@ -125,12 +125,19 @@ public sealed record ResultadoHistoricoMaterialSap(
     int Movimentos102,
     bool PaginacaoCompleta,
     bool AbrangenciaComprovada,
-    string Motivo)
+    string Motivo,
+    // GATE R6: true quando ha documento sem identidade/tipo, ou estorno 102 SEM vinculo documental
+    // comprovado. Correspondencia de estorno NUNCA e presumida ⇒ incerteza bloqueia.
+    bool TemDocumentoIncerto = false)
 {
     public static ResultadoHistoricoMaterialSap Lido(
-        int documentos101, int movimentos102, bool paginacaoCompleta, bool abrangenciaComprovada)
+        int documentos101,
+        int movimentos102,
+        bool paginacaoCompleta,
+        bool abrangenciaComprovada,
+        bool temDocumentoIncerto = false)
         => new(CenarioHistoricoMaterialSap.Lido, documentos101, movimentos102,
-            paginacaoCompleta, abrangenciaComprovada, string.Empty);
+            paginacaoCompleta, abrangenciaComprovada, string.Empty, temDocumentoIncerto);
 
     public static ResultadoHistoricoMaterialSap Falha(string motivo)
         => new(CenarioHistoricoMaterialSap.FalhaConsulta, 0, 0, false, false, motivo);

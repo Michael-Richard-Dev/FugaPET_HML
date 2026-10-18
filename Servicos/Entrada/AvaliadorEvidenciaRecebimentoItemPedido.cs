@@ -71,6 +71,17 @@ public static class AvaliadorEvidenciaRecebimentoItemPedido
                 + "(paginação interrompida). Envio bloqueado.");
         }
 
+        // GATE R6: documento sem identidade/tipo, ou estorno 102 SEM vinculo documental, torna o
+        // historico NAO conclusivo. A correspondencia de estorno nunca e presumida.
+        if (historico.TemDocumentoIncerto)
+        {
+            return ResultadoEvidenciaRecebimento.Bloqueado(
+                CenarioEvidenciaRecebimento.ResultadoRemotoIndeterminado,
+                "O histórico do item contém documento sem identificação documental completa (ou estorno "
+                + "sem vínculo comprovado ao documento estornado). Correspondência de estorno não é "
+                + "presumida; reconciliação necessária e envio bloqueado.");
+        }
+
         if (historico.Documentos101 < 0 || historico.Movimentos102 < 0)
         {
             return ResultadoEvidenciaRecebimento.Bloqueado(
