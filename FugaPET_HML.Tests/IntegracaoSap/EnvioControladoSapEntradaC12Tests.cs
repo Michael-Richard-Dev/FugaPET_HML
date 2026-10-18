@@ -1673,6 +1673,169 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
         Assert.Contains("SomaPesoLiquido: g.Sum(x => x.PesoLiquidoKg)", controller, StringComparison.Ordinal);
     }
 
+    // ======================================================================
+    // GATE R3B — fronteira de CANCELAMENTO/TIMEOUT da reconsulta fresca, apos a
+    // reserva e antes do POST. Antes, a excecao escapava e deixava o lancamento
+    // preso em ENVIADO_SAP sem compensacao.
+    // ======================================================================
+
+    [Fact] // R3B central: cancelamento SOLICITADO durante a reconsulta ⇒ compensa, ZERO POST, e o
+           // cancelamento continua sendo cancelamento (semantica original preservada).
+    public async Task R3B_FreshSapReadCancelled_CompensatesReservationWithoutPost()
+    {
+        DefinirSessao(comEnviarSap: true);
+        FakeMaterialDocumentSapServico materialDoc = new();
+        List<(long Codigo, string Status)> restauracoes = [];
+        using CancellationTokenSource cts = new();
+
+        FakePedidoCompraSapServico pedido = new()
+        {
+            EscritaHabilitada = true,
+            ItensFrescos = [ItemFresco("10", 1000.000m, "KG")],
+            // O cancelamento acontece EXATAMENTE durante a reconsulta: a reserva ja foi adquirida e a
+            // recarga pos-reserva ja passou.
+            AcaoNaReconsulta = () =>
+            {
+                cts.Cancel();
+                throw new OperationCanceledException(cts.Token);
+            }
+        };
+
+        EntradaProdutoController controller = CriarController(
+            pedido, materialDoc, ehHomologacao: true,
+            itens: [Item(pesoLiquido: 296.5m, pesoBruto: 300m, quantidadePedido: 1000.000m)],
+            tipoMaterialSap: "ROH",
+            existeRecebimentoConfirmado: (_, _, _, _) => Task.FromResult<bool?>(false),
+            liberarReserva: (id, st, token) =>
+            {
+                // A compensacao NUNCA reutiliza o token cancelado.
+                Assert.False(token.IsCancellationRequested);
+                restauracoes.Add((id, st));
+                return Task.FromResult(true);
+            });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => controller.EnviarPesoEntradaParaSapHomologacaoAsync(99, cts.Token));
+
+        Assert.Equal(0, materialDoc.Chamadas);                  // SAP_POST = 0
+        Assert.Equal(1, pedido.ReconsultasCabecalho);
+        Assert.Single(restauracoes);                            // compensacao EXECUTADA, uma unica vez
+        Assert.Equal((99L, "FINALIZADO_LOCAL"), restauracoes[0]); // StatusAnterior preservado
+    }
+
+    [Fact] // R3B: TIMEOUT da consulta (TaskCanceledException sem cancelamento do chamador) ⇒ abort LOCAL
+           // pre-POST com compensacao, sem virar cancelamento nem erro remoto.
+    public async Task R3B_FreshSapReadTimeout_CompensatesAndBlocksWithoutPost()
+    {
+        DefinirSessao(comEnviarSap: true);
+        FakeMaterialDocumentSapServico materialDoc = new();
+        List<(long Codigo, string Status)> restauracoes = [];
+
+        FakePedidoCompraSapServico pedido = new()
+        {
+            EscritaHabilitada = true,
+            ItensFrescos = [ItemFresco("10", 1000.000m, "KG")],
+            AcaoNaReconsulta = () => throw new TaskCanceledException(
+                "timeout simulado", new TimeoutException("tempo esgotado"))
+        };
+
+        EntradaProdutoController controller = CriarController(
+            pedido, materialDoc, ehHomologacao: true,
+            itens: [Item(pesoLiquido: 296.5m, pesoBruto: 300m, quantidadePedido: 1000.000m)],
+            tipoMaterialSap: "ROH",
+            existeRecebimentoConfirmado: (_, _, _, _) => Task.FromResult<bool?>(false),
+            liberarReserva: (id, st, _) => { restauracoes.Add((id, st)); return Task.FromResult(true); });
+
+        ResultadoEnvioSapEntrada r = await controller.EnviarPesoEntradaParaSapHomologacaoAsync(99);
+
+        Assert.Equal(CenarioEnvioSapEntrada.DadosIncompletos, r.Cenario);
+        Assert.Equal(0, materialDoc.Chamadas);
+        Assert.Contains("timeout", r.Mensagem ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.Single(restauracoes);
+        Assert.Equal((99L, "FINALIZADO_LOCAL"), restauracoes[0]);
+    }
+
+    [Fact] // R3B (H): compensacao NAO comprovada ⇒ declara estado INCERTO; nunca liberacao ficticia.
+    public async Task R3B_CompensacaoNaoComprovada_DeclaraReservaIncerta()
+    {
+        DefinirSessao(comEnviarSap: true);
+        FakeMaterialDocumentSapServico materialDoc = new();
+
+        FakePedidoCompraSapServico pedido = new()
+        {
+            EscritaHabilitada = true,
+            ItensFrescos = [ItemFresco("10", 1000.000m, "KG")],
+            AcaoNaReconsulta = () => throw new TaskCanceledException(
+                "timeout simulado", new TimeoutException("tempo esgotado"))
+        };
+
+        EntradaProdutoController controller = CriarController(
+            pedido, materialDoc, ehHomologacao: true,
+            itens: [Item(pesoLiquido: 296.5m, pesoBruto: 300m, quantidadePedido: 1000.000m)],
+            tipoMaterialSap: "ROH",
+            existeRecebimentoConfirmado: (_, _, _, _) => Task.FromResult<bool?>(false),
+            // Transicao concorrente legitima OU reserva presa: o contrato nao distingue, logo declara incerteza.
+            liberarReserva: (_, _, _) => Task.FromResult(false));
+
+        ResultadoEnvioSapEntrada r = await controller.EnviarPesoEntradaParaSapHomologacaoAsync(99);
+
+        Assert.Equal(CenarioEnvioSapEntrada.DadosIncompletos, r.Cenario);
+        Assert.Equal(0, materialDoc.Chamadas);
+        Assert.Contains("não foi possível confirmar a liberação da reserva",
+            r.Mensagem ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact] // R3B (H): compensacao que LANCA tambem resulta em estado INCERTO, sem mascarar o abort.
+    public async Task R3B_CompensacaoQueFalha_DeclaraReservaIncerta()
+    {
+        DefinirSessao(comEnviarSap: true);
+        FakeMaterialDocumentSapServico materialDoc = new();
+
+        FakePedidoCompraSapServico pedido = new()
+        {
+            EscritaHabilitada = true,
+            ItensFrescos = [ItemFresco("10", 1000.000m, "KG")],
+            AcaoNaReconsulta = () => throw new TaskCanceledException(
+                "timeout simulado", new TimeoutException("tempo esgotado"))
+        };
+
+        EntradaProdutoController controller = CriarController(
+            pedido, materialDoc, ehHomologacao: true,
+            itens: [Item(pesoLiquido: 296.5m, pesoBruto: 300m, quantidadePedido: 1000.000m)],
+            tipoMaterialSap: "ROH",
+            existeRecebimentoConfirmado: (_, _, _, _) => Task.FromResult<bool?>(false),
+            liberarReserva: (_, _, _) => throw new InvalidOperationException("falha na compensacao"));
+
+        ResultadoEnvioSapEntrada r = await controller.EnviarPesoEntradaParaSapHomologacaoAsync(99);
+
+        Assert.Equal(CenarioEnvioSapEntrada.DadosIncompletos, r.Cenario);
+        Assert.Equal(0, materialDoc.Chamadas);
+        Assert.Contains("falhou", r.Mensagem ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact] // R3B: fluxo HIBE nao reconsulta, logo nao existe essa fronteira de cancelamento para ele.
+    public async Task R3B_FluxoHibe_NaoAtravessaFronteiraDeCancelamento()
+    {
+        DefinirSessao(comEnviarSap: true);
+        FakeMaterialDocumentSapServico materialDoc = new();
+        FakePedidoCompraSapServico pedido = new()
+        {
+            EscritaHabilitada = true,
+            AcaoNaReconsulta = () => throw new OperationCanceledException("nao deve ser invocado")
+        };
+
+        EntradaProdutoController controller = CriarController(
+            pedido, materialDoc, ehHomologacao: true,
+            itens: [Item(pesoLiquido: 8m, pesoBruto: 10m)],
+            tipoMaterialSap: "HIBE");
+
+        ResultadoEnvioSapEntrada r = await controller.EnviarPesoEntradaParaSapHomologacaoAsync(99);
+
+        Assert.Equal(CenarioEnvioSapEntrada.Enviado, r.Cenario);
+        Assert.Equal(1, materialDoc.Chamadas);
+        Assert.Equal(0, pedido.ReconsultasCabecalho);
+    }
+
     private static PedidoCompraSapItem ItemFresco(string numeroItem, decimal? quantidade, string unidade)
         => new()
         {
@@ -1783,6 +1946,9 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
 
         public int ReconsultasCabecalho { get; private set; }
 
+        /// <summary>GATE R3B: hook executado no inicio da reconsulta (permite cancelar/estourar timeout).</summary>
+        public Action? AcaoNaReconsulta { get; init; }
+
         public bool EhSimulado => false;
         public bool SapConfigurado => Configurado;
         public bool EscritaSapHabilitada => EscritaHabilitada;
@@ -1801,6 +1967,7 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
         public Task<PedidoCompraSap?> ObterCabecalhoSapParaValidacaoAsync(string numeroPedido, CancellationToken cancellationToken = default)
         {
             ReconsultasCabecalho++;
+            AcaoNaReconsulta?.Invoke();
             if (FalharReconsulta)
             {
                 throw new InvalidOperationException("falha simulada na reconsulta do pedido");

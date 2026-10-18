@@ -557,8 +557,45 @@ public sealed class EntradaProdutoController
         // Compara quantidade e unidade ATUAIS com as que compuseram o payload. Divergência,
         // indisponibilidade, identificação ambígua ou falha de consulta ⇒ ABORTA sem POST e LIBERA a
         // reserva pela compensação existente. Só executa quando há posição ROH (HIBE não consulta o SAP).
-        ResultadoEnvioSapEntrada? bloqueioFrescor = await ValidarQuantidadePedidoFrescaAsync(
-            codigoLancamento, numeroPedido, posicoes, itens.Count, cancellationToken);
+        ResultadoEnvioSapEntrada? bloqueioFrescor;
+        try
+        {
+            bloqueioFrescor = await ValidarQuantidadePedidoFrescaAsync(
+                codigoLancamento, numeroPedido, posicoes, itens.Count, cancellationToken);
+        }
+        catch (OperationCanceledException ex)
+        {
+            // GATE R3B: cancelamento/timeout da reconsulta APÓS a reserva e ANTES do POST. Antes, a exceção
+            // escapava e deixava o lançamento preso em ENVIADO_SAP sem compensação. A compensação usa
+            // SEMPRE CancellationToken.None (o token cancelado nunca é reutilizado) e o StatusAnterior
+            // EFETIVAMENTE consumido pela reserva. ZERO POST nos dois casos.
+            bool cancelamentoSolicitado = cancellationToken.IsCancellationRequested;
+            string natureza = cancelamentoSolicitado
+                ? "cancelamento solicitado"
+                : ex is TaskCanceledException { InnerException: TimeoutException }
+                    ? "timeout da consulta ao Pedido de Compra"
+                    : "consulta ao Pedido de Compra interrompida sem cancelamento solicitado";
+
+            CompensacaoReserva compensacao = await CompensarReservaAposAbortPrePostAsync(
+                codigoLancamento, statusAnteriorReserva, natureza);
+
+            if (cancelamentoSolicitado)
+            {
+                // Semântica original PRESERVADA: cancelamento continua sendo cancelamento — nunca vira
+                // confirmação nem falha SAP. A compensação já foi tentada acima.
+                throw;
+            }
+
+            // Timeout/interrupção sem cancelamento do chamador é ABORT LOCAL pré-POST, não erro remoto.
+            return new ResultadoEnvioSapEntrada
+            {
+                Cenario = CenarioEnvioSapEntrada.DadosIncompletos,
+                Total = itens.Count,
+                Mensagem = "Não foi possível reconsultar a quantidade do item no Pedido de Compra "
+                    + $"({natureza}). Envio bloqueado antes do SAP. {compensacao.MensagemParaOperador}"
+            };
+        }
+
         if (bloqueioFrescor is not null)
         {
             await _liberarReservaAposAbort(codigoLancamento, statusAnteriorReserva, CancellationToken.None);
@@ -878,6 +915,61 @@ public sealed class EntradaProdutoController
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// GATE R3B: desfecho da compensação da reserva num abort pré-POST. Nunca declara liberação fictícia:
+    /// quando a compensação não é comprovada, o estado da reserva fica explicitamente INCERTO.
+    /// </summary>
+    private readonly record struct CompensacaoReserva(bool Comprovada, string MensagemParaOperador);
+
+    /// <summary>
+    /// GATE R3B: compensa a reserva num abort pré-POST, UMA única vez, reutilizando
+    /// <c>_liberarReservaAposAbort</c> — que preserva as verificações de propriedade/estado (só restaura a
+    /// partir de ENVIADO_SAP e só para FINALIZADO_LOCAL/ERRO_SAP), de modo que uma transição concorrente
+    /// legítima NÃO é sobrescrita.
+    /// <para>
+    /// Usa SEMPRE <see cref="CancellationToken.None"/>: o token cancelado do chamador nunca é reutilizado,
+    /// senão a própria compensação abortaria. Falha ou não-comprovação ⇒ estado INCERTO declarado, nunca
+    /// liberação fictícia.
+    /// </para>
+    /// </summary>
+    private async Task<CompensacaoReserva> CompensarReservaAposAbortPrePostAsync(
+        long codigoLancamento,
+        string statusAnteriorReserva,
+        string natureza)
+    {
+        try
+        {
+            bool liberada = await _liberarReservaAposAbort(
+                codigoLancamento, statusAnteriorReserva, CancellationToken.None);
+
+            if (liberada)
+            {
+                Sap.RegistrarDiagnostico(
+                    $"Envio SAP abortado (lancamento {codigoLancamento}): {natureza}. ZERO POST; reserva "
+                    + $"liberada para {statusAnteriorReserva}.");
+                return new CompensacaoReserva(true, string.Empty);
+            }
+
+            // Não liberou: pode ser transição concorrente legítima OU reserva ainda presa. Não afirmamos
+            // qual — declaramos a incerteza.
+            Sap.RegistrarDiagnostico(
+                $"Envio SAP abortado (lancamento {codigoLancamento}): {natureza}. ZERO POST; compensacao da "
+                + "reserva NAO comprovada (nenhuma linha restaurada). Estado da reserva INCERTO.");
+            return new CompensacaoReserva(false,
+                "Atenção: não foi possível confirmar a liberação da reserva deste lançamento; "
+                + "verifique o status antes de tentar novamente.");
+        }
+        catch (Exception ex)
+        {
+            Sap.RegistrarDiagnostico(
+                $"Envio SAP abortado (lancamento {codigoLancamento}): {natureza}. ZERO POST; a compensacao "
+                + $"da reserva FALHOU. Estado da reserva INCERTO.{Environment.NewLine}{ex}");
+            return new CompensacaoReserva(false,
+                "Atenção: a liberação da reserva deste lançamento falhou; "
+                + "verifique o status antes de tentar novamente.");
+        }
     }
 
     /// <summary>
