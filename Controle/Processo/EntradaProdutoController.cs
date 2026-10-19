@@ -537,22 +537,31 @@ public sealed class EntradaProdutoController
         }
         catch (Exception ex)
         {
-            await _liberarReservaAposAbort(codigoLancamento, statusAnteriorReserva, CancellationToken.None);
+            CompensacaoReserva compensacao = await CompensarReservaAposAbortPrePostAsync(
+                codigoLancamento, statusAnteriorReserva, "falha na recarga pós-reserva");
             Sap.RegistrarDiagnostico(
-                $"Envio SAP abortado (lancamento {codigoLancamento}): recarga pós-reserva falhou; reserva liberada.{Environment.NewLine}{ex}");
-            return new ResultadoEnvioSapEntrada { Cenario = CenarioEnvioSapEntrada.Falha, Total = itens.Count };
+                $"Envio SAP abortado (lancamento {codigoLancamento}): recarga pós-reserva falhou. {compensacao.MensagemParaOperador}");
+            if (ex is OperationCanceledException && cancellationToken.IsCancellationRequested)
+                throw;
+            return new ResultadoEnvioSapEntrada
+            {
+                Cenario = CenarioEnvioSapEntrada.Falha,
+                Total = itens.Count,
+                Mensagem = $"Envio bloqueado antes do SAP. {compensacao.MensagemParaOperador}"
+            };
         }
 
         if (!ItensElegiveisIguais(itens, itensRevalidados))
         {
-            await _liberarReservaAposAbort(codigoLancamento, statusAnteriorReserva, CancellationToken.None);
+            CompensacaoReserva compensacao = await CompensarReservaAposAbortPrePostAsync(
+                codigoLancamento, statusAnteriorReserva, "snapshot pós-reserva alterado");
             Sap.RegistrarDiagnostico(
-                $"Envio SAP abortado (lancamento {codigoLancamento}): itens elegíveis mudaram entre reserva e POST (payload stale). ZERO POST; reserva liberada.");
+                $"Envio SAP abortado (lancamento {codigoLancamento}): snapshot alterado. ZERO POST. {compensacao.MensagemParaOperador}");
             return new ResultadoEnvioSapEntrada
             {
                 Cenario = CenarioEnvioSapEntrada.Falha,
                 Total = itensRevalidados.Count,
-                Mensagem = "O envio foi abortado porque o estado do lançamento mudou. Atualize os dados antes de tentar novamente."
+                Mensagem = $"O envio foi abortado porque o estado do lançamento mudou. {compensacao.MensagemParaOperador}"
             };
         }
 
@@ -601,11 +610,17 @@ public sealed class EntradaProdutoController
 
         if (bloqueioFrescor is not null)
         {
-            await _liberarReservaAposAbort(codigoLancamento, statusAnteriorReserva, CancellationToken.None);
+            CompensacaoReserva compensacao = await CompensarReservaAposAbortPrePostAsync(
+                codigoLancamento, statusAnteriorReserva, "bloqueio na reconsulta fresca");
             Sap.RegistrarDiagnostico(
                 $"Envio SAP abortado (lancamento {codigoLancamento}): {bloqueioFrescor.Mensagem} "
-                + "ZERO POST; reserva liberada.");
-            return bloqueioFrescor;
+                + $"ZERO POST. {compensacao.MensagemParaOperador}");
+            return new ResultadoEnvioSapEntrada
+            {
+                Cenario = bloqueioFrescor.Cenario,
+                Total = bloqueioFrescor.Total,
+                Mensagem = $"{bloqueioFrescor.Mensagem} {compensacao.MensagemParaOperador}"
+            };
         }
 
         // Um UNICO documento de material por lancamento (movimento 101), com as posicoes ja preparadas

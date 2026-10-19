@@ -1,7 +1,7 @@
 namespace FugaPET_HML.Servicos.Entrada.P5;
 
 internal sealed class CoordenadorP5R7(IBackendP5 backend, IFonteProvaP5 fonte, HomologacaoP5 homologacao,
-    Func<EscopoP5, CancellationToken, Task<RetornoHttpP5>> dispatch, TimeProvider? relogio = null)
+    Func<ClaimP5, CancellationToken, Task<RetornoHttpP5>> dispatch, TimeProvider? relogio = null)
 {
     private readonly TimeProvider _relogio = relogio ?? TimeProvider.System;
 
@@ -11,8 +11,11 @@ internal sealed class CoordenadorP5R7(IBackendP5 backend, IFonteProvaP5 fonte, H
             return new(EstadoP5.Bloqueado, false, "P5_DEPENDENCIAS_NAO_HOMOLOGADAS");
         if (!backend.ResultadoLegadoAtomicoDisponivel)
             return new(EstadoP5.Bloqueado, false, "P5_ATOMICIDADE_LEGADA_INDISPONIVEL");
+        if (!backend.ReservaLegadaCoordenadaDisponivel)
+            return new(EstadoP5.Bloqueado, false, "P5_RESERVA_LEGADA_NAO_COORDENADA");
 
-        ClaimP5 claim;
+        ClaimP5? claim = null;
+        bool fronteiraSolicitada = false;
         ProvaSapP5? prova;
         try
         {
@@ -28,12 +31,23 @@ internal sealed class CoordenadorP5R7(IBackendP5 backend, IFonteProvaP5 fonte, H
             if (!claim.Valido || claim.Escopo != escopo || !claim.Consumir())
                 return new(EstadoP5.Bloqueado, false, "P5_CLAIM_INVALIDO");
             if (!prova.Valida(escopo.Chave, _relogio.GetUtcNow(), homologacao.EvidenciaMaxAge))
-                return new(EstadoP5.Reservado, true, "P5_PROVA_EXPIROU_RECOVERY_PRE_HTTP");
+                return await CompensarPreHttpAsync(claim);
+            cancellationToken.ThrowIfCancellationRequested();
+            fronteiraSolicitada = true;
             await backend.MarcarEnvioCommitAsync(claim, cancellationToken);
+            if (await backend.ConfirmarEnvioDuravelAsync(claim, cancellationToken) != EstadoP5.EnvioIniciado)
+                return new(EstadoP5.Indeterminado, false, "P5_ENVIO_DURAVEL_NAO_COMPROVADO_SEM_POST");
         }
-        catch (OperationCanceledException) { throw; }
+        catch (OperationCanceledException)
+        {
+            if (claim is not null && !fronteiraSolicitada)
+                await CompensarPreHttpAsync(claim);
+            throw;
+        }
         catch (Exception)
         {
+            if (claim is not null && !fronteiraSolicitada)
+                return await CompensarPreHttpAsync(claim);
             return new(EstadoP5.Bloqueado, false, "P5_RESERVA_OU_COMMIT_NAO_COMPROVADO");
         }
 
@@ -44,7 +58,7 @@ internal sealed class CoordenadorP5R7(IBackendP5 backend, IFonteProvaP5 fonte, H
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            retorno = await dispatch(escopo, cancellationToken);
+            retorno = await dispatch(claim, cancellationToken);
         }
         catch (Exception)
         {
@@ -62,6 +76,21 @@ internal sealed class CoordenadorP5R7(IBackendP5 backend, IFonteProvaP5 fonte, H
             return new(EstadoP5.Indeterminado, false, "P5_RESULTADO_LOCAL_NAO_COMPROVADO_SEM_RETRY");
         }
     }
+
+    private async Task<ResultadoFluxoP5> CompensarPreHttpAsync(ClaimP5 claim)
+    {
+        try
+        {
+            bool comprovada = await backend.CancelarReservaPreHttpCommitAsync(claim, CancellationToken.None);
+            return comprovada
+                ? new(EstadoP5.CanceladoSemEnvio, true, "P5_CANCELAMENTO_PRE_HTTP_COMPROVADO")
+                : new(EstadoP5.Reservado, false, "P5_COMPENSACAO_PRE_HTTP_NAO_COMPROVADA");
+        }
+        catch (Exception)
+        {
+            return new(EstadoP5.Reservado, false, "P5_COMPENSACAO_PRE_HTTP_NAO_COMPROVADA");
+        }
+    }
 }
 
 internal sealed class RecoveryP5R7(IBackendP5 backend, IFonteProvaP5 fonte, HomologacaoP5 homologacao,
@@ -76,6 +105,8 @@ internal sealed class RecoveryP5R7(IBackendP5 backend, IFonteProvaP5 fonte, Homo
             return new(EstadoP5.Bloqueado, false, "P5_RECOVERY_NAO_HOMOLOGADO");
         if (!backend.ResultadoLegadoAtomicoDisponivel)
             return new(EstadoP5.Bloqueado, false, "P5_RECOVERY_ATOMICIDADE_LEGADA_INDISPONIVEL");
+        if (!backend.RecoveryR6BAprovado)
+            return new(EstadoP5.Bloqueado, false, "P5_RECOVERY_R6B_NAO_APROVADO");
         EstadoP5? fechamentoEsperado = null;
         try
         {

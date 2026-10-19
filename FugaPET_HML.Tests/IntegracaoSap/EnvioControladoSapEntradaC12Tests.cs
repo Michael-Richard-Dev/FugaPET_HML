@@ -1836,6 +1836,41 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
         Assert.Equal(0, pedido.ReconsultasCabecalho);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RevalidacaoCanceladaCompensaSemMascararCancelamento(bool falhaCompensacao)
+    {
+        DefinirSessao(comEnviarSap: true);
+        FakeMaterialDocumentSapServico materialDoc = new();
+        using CancellationTokenSource cts = new();
+        int cargas = 0;
+        int compensacoes = 0;
+        EntradaProdutoController controller = CriarController(
+            new FakePedidoCompraSapServico { EscritaHabilitada = true }, materialDoc, true, [Item()],
+            carregarItensProvider: (_, _) =>
+            {
+                if (++cargas == 3)
+                {
+                    cts.Cancel();
+                    throw new OperationCanceledException(cts.Token);
+                }
+                return Task.FromResult<IReadOnlyList<EntradaProdutoItemEnvioSap>>([Item()]);
+            },
+            liberarReserva: (_, status, token) =>
+            {
+                Assert.Equal("FINALIZADO_LOCAL", status);
+                Assert.False(token.IsCancellationRequested);
+                compensacoes++;
+                if (falhaCompensacao) throw new InvalidOperationException("OFFLINE");
+                return Task.FromResult(true);
+            });
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            controller.EnviarPesoEntradaParaSapHomologacaoAsync(99, cts.Token));
+        Assert.Equal(1, compensacoes);
+        Assert.Equal(0, materialDoc.Chamadas);
+    }
+
     private static PedidoCompraSapItem ItemFresco(string numeroItem, decimal? quantidade, string unidade)
         => new()
         {

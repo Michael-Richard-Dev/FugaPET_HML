@@ -91,6 +91,12 @@ public sealed class EntradaMpP5R7BackendTests
         Assert.Equal(CenarioRecebimentoLocal.Indisponivel, (await d2.ConsultarAsync("123", "10", 900)).Cenario);
         EntradaMpP5BackendRepositorio repo = new(factory, d2, Simulacao);
         Assert.False(((IBackendP5)repo).ResultadoLegadoAtomicoDisponivel);
+        Assert.False(((IBackendP5)repo).ReservaLegadaCoordenadaDisponivel);
+        Assert.False(((IBackendP5)repo).RecoveryR6BAprovado);
+        ClaimP5 claim = new(Escopo, 1, Guid.NewGuid(), Guid.NewGuid());
+        Assert.Equal(EstadoP5.Bloqueado,
+            await ((IBackendP5)repo).ConfirmarEnvioDuravelAsync(claim, default));
+        Assert.False(await ((IBackendP5)repo).CancelarReservaPreHttpCommitAsync(claim, default));
         Assert.False(BloqueioP5R7.MutacoesHomologadas);
         await Assert.ThrowsAsync<InvalidOperationException>(() => repo.ReservarAsync(Escopo, Prova(), default));
         Assert.Equal(0, factory.Tentativas);
@@ -354,6 +360,102 @@ public sealed class EntradaMpP5R7BackendTests
         Dictionary<string, object?> recovery = RecoveryRow(); recovery["p5_local_decision"] = decisao;
         Assert.NotEqual(CenarioRecebimentoLocal.SemRegistro, EntradaMpP5D2Repositorio.Classificar([Local()], [recovery]).Cenario);
     }
+    [Fact]
+    public async Task ReservaSemCoordenacaoLegadaNaoMutaNemDespacha()
+    {
+        FakeBackend backend = new() { ReservaLegadaCoordenadaDisponivel = false };
+        Source fonte = new();
+        ResultadoFluxoP5 resultado = await new CoordenadorP5R7(backend, fonte, Simulacao,
+            (_, _) => throw new Exception("DISPATCH_FORBIDDEN")).ExecutarAsync(Escopo);
+        Assert.Equal(EstadoP5.Bloqueado, resultado.Estado);
+        Assert.Empty(backend.Eventos);
+        Assert.Equal(0, fonte.Consultas);
+    }
+
+    [Theory]
+    [InlineData(EstadoP5.Reservado)]
+    [InlineData(EstadoP5.Bloqueado)]
+    [InlineData(EstadoP5.Indeterminado)]
+    public async Task SemConfirmacaoDuravelNaoDespachaNemCompensaCommitPossivel(object estado)
+    {
+        FakeBackend backend = new() { ConfirmacaoDuravel = (EstadoP5)estado };
+        int dispatches = 0;
+        ResultadoFluxoP5 resultado = await new CoordenadorP5R7(backend, new Source(), Simulacao,
+            (_, _) => { dispatches++; return Task.FromResult(new RetornoHttpP5(null, null, false)); }).ExecutarAsync(Escopo);
+        Assert.Equal(0, dispatches);
+        Assert.False(resultado.Persistido);
+        Assert.Equal(0, backend.Compensacoes);
+        await new CoordenadorP5R7(backend, new Source(), Simulacao,
+            (_, _) => { dispatches++; return Task.FromResult(new RetornoHttpP5(null, null, false)); }).ExecutarAsync(Escopo);
+        Assert.Equal(0, dispatches);
+    }
+
+    [Fact]
+    public async Task CancelamentoAntesDeMarcarEnvioCompensaComTokenIndependente()
+    {
+        using CancellationTokenSource cancelamento = new();
+        FakeBackend backend = new() { DepoisReserva = cancelamento.Cancel };
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            new CoordenadorP5R7(backend, new Source(), Simulacao,
+                (_, _) => throw new Exception("DISPATCH_FORBIDDEN")).ExecutarAsync(Escopo, cancelamento.Token));
+        Assert.Equal(1, backend.Compensacoes);
+        Assert.Equal(EstadoP5.CanceladoSemEnvio, backend.Estado);
+        Assert.DoesNotContain("COMMIT_ENVIO", backend.Eventos);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ProvaExpiradaAposReservaCompensaOuPreservaIncerteza(bool compensa)
+    {
+        AdjustableClock clock = new();
+        FakeBackend backend = new()
+        {
+            DepoisReserva = () => clock.Agora = DateTimeOffset.UtcNow.AddHours(1),
+            CompensacaoDisponivel = compensa
+        };
+        ResultadoFluxoP5 resultado = await new CoordenadorP5R7(backend, new Source(), Simulacao,
+            (_, _) => throw new Exception("DISPATCH_FORBIDDEN"), clock).ExecutarAsync(Escopo);
+        Assert.Equal(1, backend.Compensacoes);
+        Assert.Equal(compensa ? EstadoP5.CanceladoSemEnvio : EstadoP5.Reservado, resultado.Estado);
+        Assert.Equal(compensa, resultado.Persistido);
+        Assert.DoesNotContain("COMMIT_ENVIO", backend.Eventos);
+    }
+
+    [Fact]
+    public async Task RecoverySemR6BNaoLiberaResultadoNegativo()
+    {
+        FakeBackend backend = new() { RecoveryR6BAprovado = false, Estado = EstadoP5.Indeterminado };
+        Source fonte = new();
+        ResultadoFluxoP5 resultado = await new RecoveryP5R7(backend, fonte, Simulacao)
+            .ReconciliarAsync(Escopo, 1, backend.Correlacao);
+        Assert.Equal(EstadoP5.Bloqueado, resultado.Estado);
+        Assert.Equal(EstadoP5.Indeterminado, backend.Estado);
+        Assert.Equal(0, fonte.Consultas);
+        Assert.Empty(backend.Eventos);
+    }
+
+    [Fact]
+    public async Task DispatchRecebeIdentidadeDaMesmaTentativaAposConfirmacaoDuravel()
+    {
+        FakeBackend backend = new();
+        int dispatches = 0;
+        ResultadoFluxoP5 resultado = await new CoordenadorP5R7(backend, new Source(), Simulacao,
+            (claim, _) =>
+            {
+                Assert.Equal(1, backend.ConfirmacoesDuraveis);
+                Assert.Equal(Escopo, claim.Escopo);
+                Assert.Equal(1, claim.Tentativa);
+                Assert.Equal(backend.Correlacao, claim.Correlacao);
+                Assert.Equal(backend.ClaimToken, claim.Token);
+                Assert.DoesNotContain(claim.Token.ToString(), claim.ToString());
+                dispatches++;
+                return Task.FromResult(new RetornoHttpP5(201, new("DOC", "2026", "1"), true));
+            }).ExecutarAsync(Escopo);
+        Assert.Equal(1, dispatches);
+        Assert.Equal(EstadoP5.Confirmado, resultado.Estado);
+    }
+
     private sealed class Source : IFonteProvaP5
     {
         internal int Consultas;
@@ -375,6 +477,28 @@ public sealed class EntradaMpP5R7BackendTests
     }
     private sealed class FakeBackend : IBackendP5
     {
+        public bool ReservaLegadaCoordenadaDisponivel { get; init; } = true;
+        public bool RecoveryR6BAprovado { get; init; } = true;
+        internal EstadoP5 ConfirmacaoDuravel = EstadoP5.EnvioIniciado;
+        internal int ConfirmacoesDuraveis;
+        internal int Compensacoes;
+        internal bool CompensacaoDisponivel = true;
+        internal Action? DepoisReserva;
+        public Task<EstadoP5> ConfirmarEnvioDuravelAsync(ClaimP5 claim, CancellationToken cancellationToken)
+        {
+            Assert.Equal(1, claim.Tentativa);
+            Assert.Equal(Correlacao, claim.Correlacao);
+            Assert.Equal(ClaimToken, claim.Token);
+            ConfirmacoesDuraveis++;
+            return Task.FromResult(ConfirmacaoDuravel);
+        }
+        public Task<bool> CancelarReservaPreHttpCommitAsync(ClaimP5 claim, CancellationToken cancellationToken)
+        {
+            Assert.False(cancellationToken.IsCancellationRequested);
+            Compensacoes++;
+            if (CompensacaoDisponivel) Estado = EstadoP5.CanceladoSemEnvio;
+            return Task.FromResult(CompensacaoDisponivel);
+        }
         internal bool AtomicidadeDisponivel = true;
         public bool ResultadoLegadoAtomicoDisponivel => AtomicidadeDisponivel;
         private readonly object _lock = new();
@@ -394,6 +518,7 @@ public sealed class EntradaMpP5R7BackendTests
             {
                 if (Estado != EstadoP5.Bloqueado) throw new InvalidOperationException("EXISTING_ATTEMPT");
                 Estado = EstadoP5.Reservado; Eventos.Add("COMMIT_RESERVA");
+                DepoisReserva?.Invoke();
                 if (Falha == "RESERVA") throw new InvalidOperationException("COMMIT_UNKNOWN");
                 return Task.FromResult(new ClaimP5(escopo, 1, ClaimToken, Correlacao));
             }
