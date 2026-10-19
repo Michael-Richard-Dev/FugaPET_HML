@@ -90,6 +90,7 @@ public sealed class EntradaMpP5R7BackendTests
         EntradaMpP5D2Repositorio d2 = new(factory, new());
         Assert.Equal(CenarioRecebimentoLocal.Indisponivel, (await d2.ConsultarAsync("123", "10", 900)).Cenario);
         EntradaMpP5BackendRepositorio repo = new(factory, d2, Simulacao);
+        Assert.False(((IBackendP5)repo).ResultadoLegadoAtomicoDisponivel);
         Assert.False(BloqueioP5R7.MutacoesHomologadas);
         await Assert.ThrowsAsync<InvalidOperationException>(() => repo.ReservarAsync(Escopo, Prova(), default));
         Assert.Equal(0, factory.Tentativas);
@@ -311,6 +312,28 @@ public sealed class EntradaMpP5R7BackendTests
 
     private static ProvaSapP5 Prova() => new(Escopo.Chave, "REF_SYNTHETIC", "OFFLINE_FAKE",
         DateTimeOffset.UtcNow.AddSeconds(-1), DateTimeOffset.UtcNow.AddMinutes(1), true, true, 0, 0);
+
+    [Fact]
+    public async Task SemAtomicidadeLegadaBloqueiaAntesDeProvaReservaEDispatch()
+    {
+        FakeBackend backend = new() { AtomicidadeDisponivel = false };
+        Source fonte = new(); int dispatches = 0;
+        ResultadoFluxoP5 resultado = await new CoordenadorP5R7(backend, fonte, Simulacao,
+            (_, _) => { dispatches++; return Task.FromResult(new RetornoHttpP5(201, new("DOC", "2026", "1"), true)); }).ExecutarAsync(Escopo);
+        Assert.Equal(EstadoP5.Bloqueado, resultado.Estado);
+        Assert.Equal(0, fonte.Consultas); Assert.Equal(0, dispatches); Assert.Empty(backend.Eventos);
+    }
+
+    [Fact]
+    public async Task SemAtomicidadeLegadaRecoveryNaoMutaNemConsultaSap()
+    {
+        FakeBackend backend = new() { AtomicidadeDisponivel = false, Estado = EstadoP5.Indeterminado };
+        Source fonte = new();
+        ResultadoFluxoP5 resultado = await new RecoveryP5R7(backend, fonte, Simulacao).ReconciliarAsync(Escopo, 1, backend.Correlacao);
+        Assert.Equal(EstadoP5.Bloqueado, resultado.Estado);
+        Assert.Equal(EstadoP5.Indeterminado, backend.Estado);
+        Assert.Equal(0, fonte.Consultas); Assert.Empty(backend.Eventos);
+    }
     private static Dictionary<string, object?> Local() => new()
     {
         ["chave_valida"] = true, ["prova_negativa_sap"] = false, ["categoria_local_p5"] = "SEM_ENTRADA_LOCAL_NAO_PROVA_SAP",
@@ -321,6 +344,16 @@ public sealed class EntradaMpP5R7BackendTests
         ["chave_valida"] = true, ["prova_negativa_sap"] = false,
         ["p5_local_decision"] = "NULL_BLOCK_NEEDS_AUTHORITATIVE_SAP_PROOF_AND_ATOMIC_GUARD"
     };
+
+    [Theory]
+    [InlineData("NULL_BLOCK_NO_LOCAL_GUARD")]
+    [InlineData("NULL_BLOCK_PENDING_OR_UNKNOWN_REMOTE")]
+    [InlineData("NULL_BLOCK_OTHER_LOCAL_ATTEMPT")]
+    public void BootstrapAusenteOuTentativaPendentePermaneceBloqueado(string decisao)
+    {
+        Dictionary<string, object?> recovery = RecoveryRow(); recovery["p5_local_decision"] = decisao;
+        Assert.NotEqual(CenarioRecebimentoLocal.SemRegistro, EntradaMpP5D2Repositorio.Classificar([Local()], [recovery]).Cenario);
+    }
     private sealed class Source : IFonteProvaP5
     {
         internal int Consultas;
@@ -342,6 +375,8 @@ public sealed class EntradaMpP5R7BackendTests
     }
     private sealed class FakeBackend : IBackendP5
     {
+        internal bool AtomicidadeDisponivel = true;
+        public bool ResultadoLegadoAtomicoDisponivel => AtomicidadeDisponivel;
         private readonly object _lock = new();
         internal EstadoP5 Estado = EstadoP5.Bloqueado;
         internal readonly List<string> Eventos = [];

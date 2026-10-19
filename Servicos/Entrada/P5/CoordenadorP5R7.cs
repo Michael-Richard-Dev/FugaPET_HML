@@ -9,6 +9,8 @@ internal sealed class CoordenadorP5R7(IBackendP5 backend, IFonteProvaP5 fonte, H
     {
         if (!homologacao.Completa || !escopo.Valido)
             return new(EstadoP5.Bloqueado, false, "P5_DEPENDENCIAS_NAO_HOMOLOGADAS");
+        if (!backend.ResultadoLegadoAtomicoDisponivel)
+            return new(EstadoP5.Bloqueado, false, "P5_ATOMICIDADE_LEGADA_INDISPONIVEL");
 
         ClaimP5 claim;
         ProvaSapP5? prova;
@@ -72,6 +74,8 @@ internal sealed class RecoveryP5R7(IBackendP5 backend, IFonteProvaP5 fonte, Homo
     {
         if (!homologacao.Completa || !escopo.Valido || tentativa <= 0 || correlacao == Guid.Empty)
             return new(EstadoP5.Bloqueado, false, "P5_RECOVERY_NAO_HOMOLOGADO");
+        if (!backend.ResultadoLegadoAtomicoDisponivel)
+            return new(EstadoP5.Bloqueado, false, "P5_RECOVERY_ATOMICIDADE_LEGADA_INDISPONIVEL");
         EstadoP5? fechamentoEsperado = null;
         try
         {

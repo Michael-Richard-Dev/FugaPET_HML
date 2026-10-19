@@ -103,6 +103,7 @@ internal interface IFonteProvaP5
 
 internal interface IBackendP5
 {
+    bool ResultadoLegadoAtomicoDisponivel => false;
     Task<bool> D2SemImpedimentoAsync(EscopoP5 escopo, CancellationToken cancellationToken);
     Task<ClaimP5> ReservarAsync(EscopoP5 escopo, ProvaSapP5 prova, CancellationToken cancellationToken);
     Task MarcarEnvioCommitAsync(ClaimP5 claim, CancellationToken cancellationToken);
