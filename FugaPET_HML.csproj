@@ -138,6 +138,7 @@
   <ItemGroup>
     <!-- Permite que o projeto de testes exercite tipos internal (ex.: helpers de Tela.Comum). -->
     <InternalsVisibleTo Include="FugaPET_HML.Tests" />
+    <EmbeddedResource Include="Servicos\Entrada\P5\Contratos\*.sql" />
   </ItemGroup>
 
   <ItemGroup>

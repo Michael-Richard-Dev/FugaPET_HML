@@ -82,6 +82,8 @@ public sealed class MaterialDocumentSapApiClient
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(requisicao);
+        if (Entrada.P5.BloqueioP5R7.ExigeP5(requisicao))
+            return ResultadoMaterialDocumentSap.Falha(null, Entrada.P5.BloqueioP5R7.Mensagem);
         if (requisicao.Itens.Count == 0)
         {
             return Falha(EtapaPost, null, "Nenhum item elegivel para criar o documento de material.");

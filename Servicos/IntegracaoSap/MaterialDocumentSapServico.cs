@@ -61,6 +61,8 @@ public sealed class MaterialDocumentSapServico : IMaterialDocumentSapServico
         CancellationToken cancellationToken = default)
     {
         Guid correlationId = Guid.NewGuid();
+        if (Entrada.P5.BloqueioP5R7.ExigeP5(requisicao))
+            return ResultadoMaterialDocumentSap.Falha(null, Entrada.P5.BloqueioP5R7.Mensagem);
         Stopwatch cronometro = Stopwatch.StartNew();
 
         if (!_configuracaoSap.Configurado)
