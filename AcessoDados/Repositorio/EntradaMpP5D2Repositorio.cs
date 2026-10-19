@@ -89,7 +89,10 @@ internal sealed class EntradaMpP5D2Repositorio(IFabricaConexaoBanco fabrica, Hom
                 || !row.TryGetValue("categoria_local_p5", out object? category))
                 return ResultadoRecebimentoLocal.Indisponivel("P5_D2_CONTRATO_INVALIDO");
             if (category is "RECEBIMENTO_OU_DOCUMENTO_SAP_BLOCK")
-                return ResultadoRecebimentoLocal.Pendente("P5_D2_DOCUMENTO_EXIGE_RECONCILIACAO");
+                return new[] { "status_lancamento", "status_item", "status_lote" }
+                    .Any(campo => row.TryGetValue(campo, out object? status) && status is "CONFIRMADO_SAP")
+                    ? ResultadoRecebimentoLocal.Confirmado("P5_D2_RECEBIMENTO_LOCAL_CONFIRMADO")
+                    : ResultadoRecebimentoLocal.Pendente("P5_D2_DOCUMENTO_EXIGE_RECONCILIACAO");
             if (category is not ("SEM_ENTRADA_LOCAL_NAO_PROVA_SAP" or "PREPARACAO_LOCAL_CORRENTE_SEM_ENVIO"))
                 return ResultadoRecebimentoLocal.Pendente("P5_D2_HISTORICO_IMPEDITIVO");
             if (!row.TryGetValue("lancamentos_sem_item_no_pedido", out object? semItens) || !Equals(semItens, 0L)
@@ -112,6 +115,7 @@ internal sealed class EntradaMpP5D2Repositorio(IFabricaConexaoBanco fabrica, Hom
     private static bool MaterialECacheCoerentes(Dictionary<string, object?> row)
     {
         if (!row.TryGetValue("material_local", out object? material) || material is not string local
+            || string.IsNullOrWhiteSpace(local)
             || !row.TryGetValue("cache_itens", out object? cache) || cache is not string json)
             return false;
         try
@@ -120,7 +124,8 @@ internal sealed class EntradaMpP5D2Repositorio(IFabricaConexaoBanco fabrica, Hom
             JsonElement item = doc.RootElement.EnumerateArray().Single();
             if (item.GetProperty("material").GetString()?.Trim() != local.Trim()) return false;
             return row.TryGetValue("codigo_sap_pedido_compra_item", out object? fk)
-                && (fk is null || item.GetProperty("sap_item_id").GetInt64() == Convert.ToInt64(fk));
+                && fk is long codigo && codigo > 0
+                && item.GetProperty("sap_item_id").GetInt64() == codigo;
         }
         catch (Exception) { return false; }
     }

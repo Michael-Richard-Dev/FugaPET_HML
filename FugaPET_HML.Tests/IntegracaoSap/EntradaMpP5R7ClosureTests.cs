@@ -58,10 +58,12 @@ public sealed class EntradaMpP5R7ClosureTests
     {
         ClassificacaoEntradaMaterial classificacao = ClassificadorItemEntradaMaterial.ClassificarPorProductType("HIBE");
         ResultadoAlocacao101 alocacao = EntradaProdutoAlocacao101.Decidir(classificacao, null, "KG", 5.5m, "SYNTHETIC");
-        return EntradaProdutoController.MontarItemMaterialDocument("123", new EntradaProdutoItemEnvioSap
+        MaterialDocumentSapItemRequest item = EntradaProdutoController.MontarItemMaterialDocument("123", new EntradaProdutoItemEnvioSap
         {
             Material = "SYNTHETIC", Centro = "3007", Deposito = "PP01", Unidade = "KG", NumeroItem = "10"
         }, false, alocacao);
+        return FugaPET_HML.Servicos.Entrada.P5.ClassificacaoMaterialDocumentP5.Registrar(item,
+            new ProdutoSapMestre { CodigoProduto = "SYNTHETIC", TipoMaterialSap = "HIBE", Consultado = true });
     }
 
     private sealed class OfflineHandler : HttpMessageHandler

@@ -38,17 +38,29 @@ internal sealed class CoordenadorP5R7(IBackendP5 backend, IFonteProvaP5 fonte, H
             if (await backend.ConfirmarEnvioDuravelAsync(claim, cancellationToken) != EstadoP5.EnvioIniciado)
                 return new(EstadoP5.Indeterminado, false, "P5_ENVIO_DURAVEL_NAO_COMPROVADO_SEM_POST");
         }
+        catch (CommitP5IndeterminadoException ex)
+        {
+            if (!ex.Claim.Valido || ex.Claim.Escopo != escopo)
+                return new(EstadoP5.Indeterminado, false, "P5_COMMIT_IDENTIDADE_NAO_COMPROVADA");
+            ResultadoFluxoP5 observado = await ReconsultarSemDispatchAsync(ex.Claim);
+            cancellationToken.ThrowIfCancellationRequested();
+            return observado;
+        }
         catch (OperationCanceledException)
         {
             if (claim is not null && !fronteiraSolicitada)
                 await CompensarPreHttpAsync(claim);
+            else if (claim is not null)
+                await ReconsultarSemDispatchAsync(claim);
             throw;
         }
         catch (Exception)
         {
             if (claim is not null && !fronteiraSolicitada)
                 return await CompensarPreHttpAsync(claim);
-            return new(EstadoP5.Bloqueado, false, "P5_RESERVA_OU_COMMIT_NAO_COMPROVADO");
+            if (claim is not null)
+                return await ReconsultarSemDispatchAsync(claim);
+            return new(EstadoP5.Indeterminado, false, "P5_RESERVA_OU_COMMIT_NAO_COMPROVADO");
         }
 
         if (!prova.Valida(escopo.Chave, _relogio.GetUtcNow(), homologacao.EvidenciaMaxAge))
@@ -73,6 +85,10 @@ internal sealed class CoordenadorP5R7(IBackendP5 backend, IFonteProvaP5 fonte, H
         }
         catch (Exception)
         {
+            ResultadoFluxoP5 observado = await ReconsultarSemDispatchAsync(claim);
+            EstadoP5 esperado = retorno.Confirmado ? EstadoP5.Confirmado : EstadoP5.Indeterminado;
+            if (observado.Persistido && observado.Estado == esperado)
+                return observado;
             return new(EstadoP5.Indeterminado, false, "P5_RESULTADO_LOCAL_NAO_COMPROVADO_SEM_RETRY");
         }
     }
@@ -89,6 +105,21 @@ internal sealed class CoordenadorP5R7(IBackendP5 backend, IFonteProvaP5 fonte, H
         catch (Exception)
         {
             return new(EstadoP5.Reservado, false, "P5_COMPENSACAO_PRE_HTTP_NAO_COMPROVADA");
+        }
+    }
+
+    private async Task<ResultadoFluxoP5> ReconsultarSemDispatchAsync(ClaimP5 claim)
+    {
+        try
+        {
+            EstadoP5 observado = await backend.ConsultarEstadoAsync(
+                claim.Escopo, claim.Tentativa, claim.Correlacao, CancellationToken.None);
+            return new(observado == EstadoP5.Bloqueado ? EstadoP5.Indeterminado : observado,
+                observado != EstadoP5.Bloqueado, "P5_COMMIT_RECONSULTADO_SEM_POST_SEM_RETRY");
+        }
+        catch (Exception)
+        {
+            return new(EstadoP5.Indeterminado, false, "P5_COMMIT_INDETERMINADO_SEM_POST");
         }
     }
 }

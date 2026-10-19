@@ -456,6 +456,108 @@ public sealed class EntradaMpP5R7BackendTests
         Assert.Equal(EstadoP5.Confirmado, resultado.Estado);
     }
 
+    [Fact]
+    public void FkNulaNaoEquivaleAIdentidadeConfirmada()
+    {
+        Dictionary<string, object?> local = Local();
+        local["categoria_local_p5"] = "PREPARACAO_LOCAL_CORRENTE_SEM_ENVIO";
+        local["eh_lancamento_atual"] = true;
+        local["material_local"] = "SYNTHETIC";
+        local["cache_itens"] = "[{\"material\":\"SYNTHETIC\",\"sap_item_id\":1}]";
+        local["codigo_sap_pedido_compra_item"] = null;
+        Assert.NotEqual(CenarioRecebimentoLocal.SemRegistro,
+            EntradaMpP5D2Repositorio.Classificar([local], [RecoveryRow()]).Cenario);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ConfirmadoLocalDistingueDocumentoSemConfirmacao(bool confirmado)
+    {
+        Dictionary<string, object?> local = Local();
+        local["categoria_local_p5"] = "RECEBIMENTO_OU_DOCUMENTO_SAP_BLOCK";
+        local["status_item"] = confirmado ? "CONFIRMADO_SAP" : "ENVIADO_SAP";
+        Assert.Equal(confirmado ? CenarioRecebimentoLocal.Confirmado : CenarioRecebimentoLocal.Pendente,
+            EntradaMpP5D2Repositorio.Classificar([local], [RecoveryRow()]).Cenario);
+    }
+
+    [Theory]
+    [InlineData("RESERVA", EstadoP5.Reservado)]
+    [InlineData("APOS_ENVIO", EstadoP5.EnvioIniciado)]
+    [InlineData("ANTES_ENVIO", EstadoP5.Reservado)]
+    public async Task CommitIncertoReconsultaCorrelacaoSemRepetirDispatch(string falha, object esperado)
+    {
+        FakeBackend backend = new() { Falha = falha };
+        ResultadoFluxoP5 resultado = await new CoordenadorP5R7(backend, new Source(), Simulacao,
+            (_, _) => throw new Exception("DISPATCH_FORBIDDEN")).ExecutarAsync(Escopo);
+        Assert.Contains("READ_BACK", backend.Eventos);
+        Assert.Equal((EstadoP5)esperado, resultado.Estado);
+        Assert.Equal(0, backend.Compensacoes);
+    }
+
+    [Fact]
+    public async Task BackendUsaRelogioInjetadoNaReservaERecovery()
+    {
+        AdjustableClock clock = new() { Agora = new DateTimeOffset(2040, 1, 1, 0, 0, 0, TimeSpan.Zero) };
+        NeverConnect factory = new();
+        EntradaMpP5BackendRepositorio repo = new(factory, new(factory, Simulacao), Simulacao, clock);
+        ProvaSapP5 prova = Prova() with
+        {
+            ObtidaEm = clock.Agora.AddSeconds(-1), ValidaAte = clock.Agora.AddMinutes(1)
+        };
+        InvalidOperationException reserva = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            repo.ReservarAsync(Escopo, prova, default));
+        Assert.Equal("P5_BACKEND_NAO_HOMOLOGADO", reserva.Message);
+        RecoveryP5 recovery = new(Escopo, 1, Guid.NewGuid(), Guid.NewGuid(), 1,
+            EstadoP5.Indeterminado, clock.Agora.AddMinutes(-2));
+        InvalidOperationException reconciliacao = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            repo.FinalizarRecoveryCommitAsync(recovery, prova, default));
+        Assert.Equal("P5_BACKEND_NAO_HOMOLOGADO", reconciliacao.Message);
+        Assert.Equal(0, factory.Tentativas);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ResultadoCommitadoComRespostaPerdidaReconsultaSemReenvio(bool confirmado)
+    {
+        FakeBackend backend = new() { Falha = "RESULTADO_COMMIT" };
+        int dispatches = 0;
+        CoordenadorP5R7 coordenador = new(backend, new Source(), Simulacao, (_, _) =>
+        {
+            dispatches++;
+            return Task.FromResult(confirmado
+                ? new RetornoHttpP5(201, new("DOC", "2026", "1"), true)
+                : new RetornoHttpP5(null, null, false));
+        });
+        ResultadoFluxoP5 resultado = await coordenador.ExecutarAsync(Escopo);
+        await coordenador.ExecutarAsync(Escopo);
+        Assert.True(resultado.Persistido);
+        Assert.Equal(confirmado ? EstadoP5.Confirmado : EstadoP5.Indeterminado, resultado.Estado);
+        Assert.Equal(1, dispatches);
+        Assert.Contains("READ_BACK", backend.Eventos);
+    }
+
+    [Fact]
+    public async Task CancelamentoDaFronteiraReconsultaSemCompensarCommitPossivel()
+    {
+        using CancellationTokenSource cts = new();
+        FakeBackend backend = new()
+        {
+            DepoisCommitEnvio = () =>
+            {
+                cts.Cancel();
+                throw new OperationCanceledException(cts.Token);
+            }
+        };
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            new CoordenadorP5R7(backend, new Source(), Simulacao,
+                (_, _) => throw new Exception("DISPATCH_FORBIDDEN")).ExecutarAsync(Escopo, cts.Token));
+        Assert.Equal(EstadoP5.EnvioIniciado, backend.Estado);
+        Assert.Equal(0, backend.Compensacoes);
+        Assert.Contains("READ_BACK", backend.Eventos);
+    }
+
     private sealed class Source : IFonteProvaP5
     {
         internal int Consultas;
@@ -519,7 +621,8 @@ public sealed class EntradaMpP5R7BackendTests
                 if (Estado != EstadoP5.Bloqueado) throw new InvalidOperationException("EXISTING_ATTEMPT");
                 Estado = EstadoP5.Reservado; Eventos.Add("COMMIT_RESERVA");
                 DepoisReserva?.Invoke();
-                if (Falha == "RESERVA") throw new InvalidOperationException("COMMIT_UNKNOWN");
+                if (Falha == "RESERVA")
+                    throw new CommitP5IndeterminadoException(new ClaimP5(escopo, 1, ClaimToken, Correlacao));
                 return Task.FromResult(new ClaimP5(escopo, 1, ClaimToken, Correlacao));
             }
         }
@@ -540,6 +643,7 @@ public sealed class EntradaMpP5R7BackendTests
             {
                 if (Falha == "RESULTADO") throw new InvalidOperationException("LOCAL_FAILED");
                 Estado = retorno.Confirmado ? EstadoP5.Confirmado : EstadoP5.Indeterminado;
+                if (Falha == "RESULTADO_COMMIT") throw new InvalidOperationException("COMMIT_RESPONSE_LOST");
                 Eventos.Add("COMMIT_RESULTADO"); return Task.CompletedTask;
             }
         }
@@ -571,6 +675,13 @@ public sealed class EntradaMpP5R7BackendTests
             return Task.CompletedTask;
         }
         public Task<EstadoP5> ConsultarEstadoAsync(EscopoP5 escopo, long tentativa, Guid correlacao, CancellationToken cancellationToken)
-        { Eventos.Add("READ_BACK"); return Task.FromResult(Estado); }
+        {
+            Assert.Equal(Escopo, escopo);
+            Assert.Equal(1, tentativa);
+            Assert.Equal(Correlacao, correlacao);
+            Assert.False(cancellationToken.IsCancellationRequested);
+            Eventos.Add("READ_BACK");
+            return Task.FromResult(Estado);
+        }
     }
 }

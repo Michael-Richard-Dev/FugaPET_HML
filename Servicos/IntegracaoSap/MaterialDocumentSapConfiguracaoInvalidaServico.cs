@@ -17,5 +17,5 @@ internal sealed class MaterialDocumentSapConfiguracaoInvalidaServico : IMaterial
         string chaveNegocio,
         CancellationToken cancellationToken = default)
         => Task.FromResult(ResultadoMaterialDocumentSap.Falha(
-            null, ConfiguracaoSap.MensagemConfiguracaoInvalida));
+            null, ConfiguracaoSap.MensagemConfiguracaoInvalida) with { PostTentado = false });
 }

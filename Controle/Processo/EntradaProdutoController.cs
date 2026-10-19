@@ -490,6 +490,17 @@ public sealed class EntradaProdutoController
             };
         }
 
+        MaterialDocumentSapRequest requisicao =
+            MontarRequisicaoMaterialDocument(numeroPedido, codigoLancamento, posicoes);
+        string? bloqueioPolitica = Sap.ValidarPoliticaAntesReserva(requisicao);
+        if (bloqueioPolitica is not null)
+            return new ResultadoEnvioSapEntrada
+            {
+                Cenario = CenarioEnvioSapEntrada.DadosIncompletos,
+                Total = itens.Count,
+                Mensagem = bloqueioPolitica
+            };
+
         // Reserva/claim ATOMICO antes de montar o payload e antes do POST (concorrencia/idempotencia):
         // FINALIZADO_LOCAL/ERRO_SAP -> ENVIADO_SAP em um unico UPDATE condicional. Se 0 linhas, outro
         // envio ja reservou (ou o status mudou): aborta SEM POST.
@@ -625,8 +636,6 @@ public sealed class EntradaProdutoController
 
         // Um UNICO documento de material por lancamento (movimento 101), com as posicoes ja preparadas
         // (uma por lote quando administrado por lote; consolidada quando nao administrado).
-        MaterialDocumentSapRequest requisicao =
-            MontarRequisicaoMaterialDocument(numeroPedido, codigoLancamento, posicoes);
         string chaveNegocio = $"{numeroPedido}/{codigoLancamento}";
         RegistrarDiagnosticoEnvioKg(codigoLancamento, itens);
 
@@ -660,6 +669,30 @@ public sealed class EntradaProdutoController
 
         // O documento e atomico: ou cria com todos os itens, ou nenhum. O status local usa o
         // numero_item ORIGINAL do banco (ex.: "10"), nao a forma SAP de 5 digitos ("00010").
+        if (!resultadoSap.Sucesso && resultadoSap.PostTentado is false)
+        {
+            CompensacaoReserva compensacao = await CompensarReservaAposAbortPrePostAsync(
+                codigoLancamento, statusAnteriorReserva, "writer bloqueou antes do POST");
+            cancellationToken.ThrowIfCancellationRequested();
+            return new ResultadoEnvioSapEntrada
+            {
+                Cenario = CenarioEnvioSapEntrada.DadosIncompletos,
+                Total = itens.Count,
+                Mensagem = $"{resultadoSap.MensagemSanitizada} {compensacao.MensagemParaOperador}"
+            };
+        }
+        if (!resultadoSap.Sucesso && resultadoSap.StatusHttp is null or >= 500)
+        {
+            _capability.MarcarReconciliacao();
+            return new ResultadoEnvioSapEntrada
+            {
+                Cenario = CenarioEnvioSapEntrada.FalhaPersistenciaLocal,
+                Total = itens.Count,
+                StatusLocalAtualizado = false,
+                MensagemCritica = "Resultado remoto desconhecido. Reconciliação obrigatória; não reenviar.",
+                Mensagem = "SAP HML: resultado indeterminado; não reenviar sem reconciliação."
+            };
+        }
         bool sucesso = resultadoSap.Sucesso;
 
         // 2xx SEM MaterialDocument/MaterialDocumentYear (etapa PARSE_RESPOSTA): o SAP provavelmente

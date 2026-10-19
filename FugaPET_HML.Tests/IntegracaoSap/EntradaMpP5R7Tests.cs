@@ -50,7 +50,10 @@ public sealed class EntradaMpP5R7Tests
             dispatches++;
             return Task.FromResult(new ResultadoMaterialDocumentSap { Sucesso = true });
         });
-        MaterialDocumentSapRequest request = new() { Itens = [new() { PurchaseOrder = "1", PurchaseOrderItem = "00010" }] };
+        MaterialDocumentSapItemRequest item = new() { Material = "SYNTHETIC", PurchaseOrder = "1", PurchaseOrderItem = "00010" };
+        FugaPET_HML.Servicos.Entrada.P5.ClassificacaoMaterialDocumentP5.Registrar(item,
+            new ProdutoSapMestre { CodigoProduto = "SYNTHETIC", TipoMaterialSap = "HIBE", Consultado = true });
+        MaterialDocumentSapRequest request = new() { Itens = [item] };
         Assert.True((await writer.CriarDocumentoMaterial101Async(request, "1/1")).Sucesso);
         Assert.Equal(1, dispatches);
     }

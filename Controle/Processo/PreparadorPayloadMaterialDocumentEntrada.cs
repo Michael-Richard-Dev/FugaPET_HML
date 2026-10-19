@@ -36,6 +36,7 @@ internal static class PreparadorPayloadMaterialDocumentEntrada
         Dictionary<string, ProdutoCentroSapMestre?> cachePorMaterialCentro = new(StringComparer.Ordinal);
         // GATE R2: classificacao por ITEM via ProductType (A_Product), consultada UMA vez por material por
         // envio — mesmo padrao de cache ja usado para A_ProductPlant. Sem DDL e sem persistencia nova.
+        Dictionary<string, ProdutoSapMestre?> produtosPorMaterial = new(StringComparer.Ordinal);
         Dictionary<string, Modelo.Processo.ClassificacaoEntradaMaterial> cacheClassificacaoPorMaterial =
             new(StringComparer.Ordinal);
 
@@ -79,6 +80,7 @@ internal static class PreparadorPayloadMaterialDocumentEntrada
                     out Modelo.Processo.ClassificacaoEntradaMaterial classificacao))
             {
                 ProdutoSapMestre? produtoMestre = await consultarProdutoMestre(material, cancellationToken);
+                produtosPorMaterial[material] = produtoMestre;
                 classificacao = produtoMestre is { Consultado: true }
                     ? Modelo.Processo.ClassificadorItemEntradaMaterial.ClassificarPorProductType(
                         produtoMestre.TipoMaterialSap)
@@ -104,7 +106,9 @@ internal static class PreparadorPayloadMaterialDocumentEntrada
                     }
 
                     posicoes.Add(new EntradaProdutoPosicaoMaterialDocument(
-                        EntradaProdutoController.MontarItemMaterialDocument(numeroPedido, lote, comLote: true, alocacao),
+                        Servicos.Entrada.P5.ClassificacaoMaterialDocumentP5.Registrar(
+                            EntradaProdutoController.MontarItemMaterialDocument(numeroPedido, lote, comLote: true, alocacao),
+                            produtosPorMaterial[material]),
                         [lote.CodigoEntradaProdutoLote]));
                 }
             }
@@ -133,7 +137,9 @@ internal static class PreparadorPayloadMaterialDocumentEntrada
                     }
 
                     posicoes.Add(new EntradaProdutoPosicaoMaterialDocument(
-                        EntradaProdutoController.MontarItemMaterialDocument(numeroPedido, representante, comLote: false, alocacao),
+                        Servicos.Entrada.P5.ClassificacaoMaterialDocumentP5.Registrar(
+                            EntradaProdutoController.MontarItemMaterialDocument(numeroPedido, representante, comLote: false, alocacao),
+                            produtosPorMaterial[material]),
                         codigosLotes));
                 }
             }

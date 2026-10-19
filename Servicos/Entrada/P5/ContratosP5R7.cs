@@ -6,8 +6,8 @@ internal static class BloqueioP5R7
 {
     internal static bool MutacoesHomologadas => false;
     internal const string Mensagem = "P5 R7 bloqueado: dependências e segurança não homologadas.";
-    internal static bool ExigeP5(MaterialDocumentSapRequest request) => request.Itens.Any(item =>
-        !string.IsNullOrEmpty(item.Zz1PesoEntradaMmi) || !string.IsNullOrEmpty(item.Zz1PesoEntradaMmiu));
+    internal static bool ExigeP5(MaterialDocumentSapRequest request)
+        => request.Itens.Any(ClassificacaoMaterialDocumentP5.Bloqueia);
 }
 
 internal sealed record ChaveP5
@@ -95,6 +95,12 @@ internal sealed record RetornoHttpP5(int? Status, DocumentoP5? Documento, bool C
 }
 
 internal sealed record ResultadoFluxoP5(EstadoP5 Estado, bool Persistido, string Codigo);
+
+internal sealed class CommitP5IndeterminadoException(ClaimP5 claim) : Exception("P5_COMMIT_INDETERMINADO")
+{
+    internal ClaimP5 Claim { get; } = claim;
+    public override string ToString() => "P5_COMMIT_INDETERMINADO";
+}
 
 internal interface IFonteProvaP5
 {

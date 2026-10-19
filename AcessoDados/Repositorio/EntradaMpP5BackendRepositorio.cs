@@ -8,8 +8,9 @@ using NpgsqlTypes;
 namespace FugaPET_HML.AcessoDados.Repositorio;
 
 internal sealed class EntradaMpP5BackendRepositorio(IFabricaConexaoBanco fabricaBackend,
-    EntradaMpP5D2Repositorio d2, HomologacaoP5 homologacao) : IBackendP5
+    EntradaMpP5D2Repositorio d2, HomologacaoP5 homologacao, TimeProvider? relogio = null) : IBackendP5
 {
+    private readonly TimeProvider _relogio = relogio ?? TimeProvider.System;
     internal enum Operacao { Reservar, MarcarEnvio, Resultado, RecoveryAssumir, RecoveryFinalizar, RecoveryCancelar }
 
     internal static NpgsqlCommand CriarComando(Operacao operacao, NpgsqlConnection conexao,
@@ -56,9 +57,17 @@ internal sealed class EntradaMpP5BackendRepositorio(IFabricaConexaoBanco fabrica
                 retorno = interpretar(reader);
                 if (await reader.ReadAsync(cancellationToken)) throw new InvalidOperationException("P5_RETORNO_AMBIGUO");
             }
-            await tx.CommitAsync(cancellationToken);
+            try
+            {
+                await tx.CommitAsync(cancellationToken);
+            }
+            catch (Exception) when (retorno is ClaimP5)
+            {
+                throw new CommitP5IndeterminadoException((ClaimP5)(object)retorno!);
+            }
             return retorno;
         }
+        catch (CommitP5IndeterminadoException) { throw; }
         catch (OperationCanceledException) { throw; }
         catch (Exception)
         {
@@ -74,7 +83,7 @@ internal sealed class EntradaMpP5BackendRepositorio(IFabricaConexaoBanco fabrica
 
     public Task<ClaimP5> ReservarAsync(EscopoP5 escopo, ProvaSapP5 prova, CancellationToken cancellationToken)
     {
-        if (!escopo.Valido || !prova.Negativa || !prova.Valida(escopo.Chave, DateTimeOffset.UtcNow, homologacao.EvidenciaMaxAge))
+        if (!escopo.Valido || !prova.Negativa || !prova.Valida(escopo.Chave, _relogio.GetUtcNow(), homologacao.EvidenciaMaxAge))
             throw new InvalidOperationException("P5_PROVA_INVALIDA");
         return ExecutarCommitAsync(Operacao.Reservar,
             [Texto(escopo.Chave.Pedido), Texto(escopo.Chave.Item), Longo(escopo.Lancamento), Texto(escopo.Material),
@@ -116,7 +125,7 @@ internal sealed class EntradaMpP5BackendRepositorio(IFabricaConexaoBanco fabrica
     public async Task FinalizarRecoveryCommitAsync(RecoveryP5 recovery, ProvaSapP5 prova, CancellationToken cancellationToken)
     {
         if (!recovery.Valido || recovery.EnvioIniciadoEm is null
-            || !prova.Valida(recovery.Escopo.Chave, DateTimeOffset.UtcNow, homologacao.EvidenciaMaxAge, recovery.EnvioIniciadoEm)
+            || !prova.Valida(recovery.Escopo.Chave, _relogio.GetUtcNow(), homologacao.EvidenciaMaxAge, recovery.EnvioIniciadoEm)
             || (!prova.Negativa && !(prova.Movimentos > 0 && prova.Documento?.Valido == true)))
             throw new InvalidOperationException("P5_RECOVERY_PROVA_INVALIDA");
         string esperado = prova.Negativa ? "NAO_CONTABILIZADO_COMPROVADO" : "CONFIRMADO_SAP";
