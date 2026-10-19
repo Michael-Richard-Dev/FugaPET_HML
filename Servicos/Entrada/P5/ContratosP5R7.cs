@@ -43,13 +43,16 @@ internal sealed record HomologacaoP5(
 
 internal enum EstadoP5 { Bloqueado, Reservado, EnvioIniciado, Indeterminado, Confirmado, NaoContabilizado, CanceladoSemEnvio }
 
-internal sealed class ClaimP5(EscopoP5 escopo, long tentativa, Guid token, Guid correlacao)
+internal sealed class ClaimP5(EscopoP5 escopo, long tentativa, Guid token, Guid correlacao,
+    long geracaoRecovery = 0, long versaoGuarda = 0)
 {
     private int _utilizado;
     internal EscopoP5 Escopo { get; } = escopo;
     internal long Tentativa { get; } = tentativa;
     internal Guid Token { get; } = token;
     internal Guid Correlacao { get; } = correlacao;
+    internal long GeracaoRecovery { get; } = geracaoRecovery;
+    internal long VersaoGuarda { get; } = versaoGuarda;
     internal bool Valido => Escopo.Valido && Tentativa > 0 && Token != Guid.Empty && Correlacao != Guid.Empty;
     internal bool Consumir() => Interlocked.Exchange(ref _utilizado, 1) == 0;
     public override string ToString() => "P5_CLAIM_REDACTED";
@@ -109,6 +112,8 @@ internal interface IFonteProvaP5
 
 internal interface IBackendP5
 {
+    Task<EstadoP5> ConfirmarResultadoPersistidoAsync(ClaimP5 claim, RetornoHttpP5 retorno, CancellationToken cancellationToken)
+        => Task.FromResult(EstadoP5.Bloqueado);
     bool ResultadoLegadoAtomicoDisponivel => false;
     bool ReservaLegadaCoordenadaDisponivel => false;
     bool RecoveryR6BAprovado => false;

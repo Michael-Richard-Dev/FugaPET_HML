@@ -612,6 +612,7 @@ public sealed class EntradaMpP5R7BackendTests
         private long _geracao;
         private Guid _recoveryToken;
         internal bool LeaseExpirado;
+        private RetornoHttpP5? _resultadoPersistido;
         internal Action? DepoisCommitEnvio;
         public Task<bool> D2SemImpedimentoAsync(EscopoP5 escopo, CancellationToken cancellationToken) => Task.FromResult(true);
         public Task<ClaimP5> ReservarAsync(EscopoP5 escopo, ProvaSapP5 prova, CancellationToken cancellationToken)
@@ -643,8 +644,19 @@ public sealed class EntradaMpP5R7BackendTests
             {
                 if (Falha == "RESULTADO") throw new InvalidOperationException("LOCAL_FAILED");
                 Estado = retorno.Confirmado ? EstadoP5.Confirmado : EstadoP5.Indeterminado;
+                _resultadoPersistido = retorno;
                 if (Falha == "RESULTADO_COMMIT") throw new InvalidOperationException("COMMIT_RESPONSE_LOST");
                 Eventos.Add("COMMIT_RESULTADO"); return Task.CompletedTask;
+            }
+        }
+        public Task<EstadoP5> ConfirmarResultadoPersistidoAsync(ClaimP5 claim, RetornoHttpP5 retorno, CancellationToken cancellationToken)
+        {
+            lock (_lock)
+            {
+                Eventos.Add("READ_BACK");
+                return Task.FromResult(claim.Escopo == Escopo && claim.Tentativa == 1
+                    && claim.Token == ClaimToken && claim.Correlacao == Correlacao
+                    && _resultadoPersistido == retorno ? Estado : EstadoP5.Bloqueado);
             }
         }
         public Task<RecoveryP5> AssumirRecoveryCommitAsync(EscopoP5 escopo, long tentativa, Guid correlacao, CancellationToken cancellationToken)

@@ -85,10 +85,14 @@ internal sealed class CoordenadorP5R7(IBackendP5 backend, IFonteProvaP5 fonte, H
         }
         catch (Exception)
         {
-            ResultadoFluxoP5 observado = await ReconsultarSemDispatchAsync(claim);
             EstadoP5 esperado = retorno.Confirmado ? EstadoP5.Confirmado : EstadoP5.Indeterminado;
-            if (observado.Persistido && observado.Estado == esperado)
-                return observado;
+            try
+            {
+                EstadoP5 observado = await backend.ConfirmarResultadoPersistidoAsync(claim, retorno, CancellationToken.None);
+                if (observado == esperado)
+                    return new(observado, true, "P5_RESULTADO_RECONSULTADO_SEM_RETRY");
+            }
+            catch (Exception) { }
             return new(EstadoP5.Indeterminado, false, "P5_RESULTADO_LOCAL_NAO_COMPROVADO_SEM_RETRY");
         }
     }
