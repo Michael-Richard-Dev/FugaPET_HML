@@ -84,6 +84,7 @@ SELECT
     (li.lancamento_id IS NOT NULL AND li.lancamento_id=p.lancamento_atual) AS eh_lancamento_atual,
     (li.lancamento_id IS NOT NULL AND li.lancamento_id IS DISTINCT FROM p.lancamento_atual) AS eh_outro_lancamento,
     li.numero_item AS numero_item_local, li.material AS material_local,
+    li.codigo_sap_pedido_compra_item,
     li.status_lancamento, li.status_item,
     li.situacao_entrada_produto_lancamento, li.situacao_entrada_produto_item,
     li.iniciado_em, li.finalizado_em, li.lancamento_enviado_em,
