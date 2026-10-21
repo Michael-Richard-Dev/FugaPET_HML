@@ -121,18 +121,10 @@ public sealed class EntradaMpP5R8CAbiTests
     }
 
     [Fact]
-    public void VinculoTentativaTransportaClaimECorrelacaoExatosSemInventarParametroSql()
+    public void VinculoHistoricoDeOitoParametrosNaoConstituiAlternativaExecutavelRoh()
     {
-        ClaimP5 claim = Claim();
-        using NpgsqlCommand comando = ComandosEvidenciaProdutoSapR8C.VincularTentativa(Identidade, claim, Projecao());
-        Assert.Equal("SELECT * FROM homologacao.fn_p5_r8b_vincular_tentativa($1,$2,$3,$4,$5,$6,$7,$8)", comando.CommandText);
-        Assert.Equal(new[] { "p_pedido", "p_item", "p_lancamento", "p_tentativa", "p_claim", "p_correlacao", "p_vinculo_id", "p_versao_vinculo" }, comando.Parameters.Select(parametro => parametro.ParameterName));
-        Assert.Equal(claim.Tentativa, comando.Parameters[3].Value);
-        Assert.Equal(claim.Token, comando.Parameters[4].Value);
-        Assert.Equal(claim.Correlacao, comando.Parameters[5].Value);
-        Assert.Equal(201L, comando.Parameters[6].Value);
-        Assert.Equal(1L, comando.Parameters[7].Value);
-        Assert.Equal(NpgsqlDbType.Uuid, comando.Parameters[4].NpgsqlDbType);
+        Assert.Throws<InvalidOperationException>(() =>
+            ComandosEvidenciaProdutoSapR8C.VincularTentativa(Identidade, Claim(), Projecao()));
     }
 
     [Theory]
@@ -225,6 +217,12 @@ public sealed class EntradaMpP5R8CAbiTests
     [InlineData("tentativa")]
     public void ComandoConfereComAssinaturaDoZipGaiaImutavel(string operacao)
     {
+        if (operacao == "tentativa")
+        {
+            Assert.Throws<InvalidOperationException>(() =>
+                ComandosEvidenciaProdutoSapR8C.VincularTentativa(Identidade, Claim(), Projecao()));
+            return;
+        }
         string path = Environment.GetEnvironmentVariable("FUGAPET_R8C_SQL_PACKAGE")
             ?? throw new InvalidOperationException("Informe o ZIP SQL candidato offline para os testes ABI.");
         using FileStream arquivo = File.OpenRead(path);

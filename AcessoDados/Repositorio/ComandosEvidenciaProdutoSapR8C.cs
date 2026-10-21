@@ -45,16 +45,7 @@ internal static class ComandosEvidenciaProdutoSapR8C
 
     internal static NpgsqlCommand VincularTentativa(IdentidadeItemProdutoSapR8B identidade, ClaimP5 tentativa,
         ProjecaoClassificacaoSqlR8C classificacao)
-    {
-        Exigir(classificacao.Corresponde(identidade) && classificacao.ProductType == "ROH"
-            && tentativa.Valido && tentativa.Escopo == identidade.Escopo
-            && tentativa.VersaoGuarda > 0 && tentativa.GeracaoRecovery >= 0);
-        return Criar("fn_p5_r8b_vincular_tentativa", [.. Escopo(identidade.Escopo),
-            ("p_tentativa", NpgsqlDbType.Bigint, tentativa.Tentativa),
-            ("p_claim", NpgsqlDbType.Uuid, tentativa.Token), ("p_correlacao", NpgsqlDbType.Uuid, tentativa.Correlacao),
-            ("p_vinculo_id", NpgsqlDbType.Bigint, classificacao.VinculoId),
-            ("p_versao_vinculo", NpgsqlDbType.Bigint, classificacao.VersaoVinculo)]);
-    }
+        => throw new InvalidOperationException("P5_R8F_ENTRADA_DIRETA_R8B1_PROIBIDA");
 
     private static (string Nome, NpgsqlDbType Tipo, object? Valor)[] Escopo(EscopoP5 escopo) =>
         [("p_pedido", NpgsqlDbType.Text, escopo.Chave.Pedido), ("p_item", NpgsqlDbType.Text, escopo.Chave.Item),
