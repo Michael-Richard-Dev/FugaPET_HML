@@ -82,6 +82,21 @@ public sealed class MaterialDocumentSapApiClient
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(requisicao);
+        requisicao = requisicao with { Itens = requisicao.Itens.ToArray() };
+        bool postTentado = false;
+        ResultadoMaterialDocumentSap resultado = await CriarDocumentoMaterialCoreAsync(
+            requisicao, () => postTentado = true, cancellationToken);
+        return resultado with { PostTentado = postTentado };
+    }
+
+    private async Task<ResultadoMaterialDocumentSap> CriarDocumentoMaterialCoreAsync(
+        MaterialDocumentSapRequest requisicao,
+        Action marcarPostTentado,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(requisicao);
+        if (Entrada.P5.BloqueioP5R7.ExigeP5(requisicao))
+            return ResultadoMaterialDocumentSap.Falha(null, Entrada.P5.BloqueioP5R7.Mensagem);
         if (requisicao.Itens.Count == 0)
         {
             return Falha(EtapaPost, null, "Nenhum item elegivel para criar o documento de material.");
@@ -155,6 +170,7 @@ public sealed class MaterialDocumentSapApiClient
             HttpResponseMessage respostaPost;
             try
             {
+                marcarPostTentado();
                 respostaPost = await _httpClient.SendAsync(post, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

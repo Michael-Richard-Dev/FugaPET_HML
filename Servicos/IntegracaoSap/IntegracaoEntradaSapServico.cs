@@ -103,6 +103,9 @@ public sealed class IntegracaoEntradaSapServico
         CancellationToken cancellationToken = default)
         => _materialDocument.Value.CriarDocumentoMaterial101Async(requisicao, chaveNegocio, cancellationToken);
 
+    public string? ValidarPoliticaAntesReserva(MaterialDocumentSapRequest requisicao)
+        => _materialDocument.Value.ValidarPoliticaAntesReserva(requisicao);
+
     public Task RegistrarFalhaStatusLocalAposSapAsync(
         long codigoLancamento,
         string mensagem,

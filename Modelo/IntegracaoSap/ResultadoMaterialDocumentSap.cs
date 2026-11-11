@@ -8,6 +8,7 @@
 public sealed record ResultadoMaterialDocumentSap
 {
     public bool Sucesso { get; init; }
+    public bool? PostTentado { get; init; }
 
     /// <summary>Status HTTP da resposta SAP (null quando nao houve resposta HTTP: rede/TLS/timeout).</summary>
     public int? StatusHttp { get; init; }

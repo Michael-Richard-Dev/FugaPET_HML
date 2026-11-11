@@ -60,7 +60,11 @@ public sealed class MaterialDocumentSapServico : IMaterialDocumentSapServico
         string chaveNegocio,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(requisicao);
+        requisicao = requisicao with { Itens = requisicao.Itens.ToArray() };
         Guid correlationId = Guid.NewGuid();
+        if (Entrada.P5.BloqueioP5R7.ExigeP5(requisicao))
+            return ResultadoMaterialDocumentSap.Falha(null, Entrada.P5.BloqueioP5R7.Mensagem) with { PostTentado = false };
         Stopwatch cronometro = Stopwatch.StartNew();
 
         if (!_configuracaoSap.Configurado)
@@ -127,7 +131,7 @@ public sealed class MaterialDocumentSapServico : IMaterialDocumentSapServico
                 + MaterialDocumentSapApiClient.SanitizarExcecaoTecnica(
                     ex.InnerException ?? ex, SegredosSanitizacao());
             await RegistrarLogAsync(chaveNegocio, correlationId, cronometro, "ERRO", null, mensagem);
-            return ResultadoMaterialDocumentSap.Falha(null, mensagem);
+            return ResultadoMaterialDocumentSap.Falha(null, mensagem) with { PostTentado = false };
         }
         catch (Exception ex)
         {
@@ -155,7 +159,7 @@ public sealed class MaterialDocumentSapServico : IMaterialDocumentSapServico
         string mensagem)
     {
         await RegistrarLogAsync(chaveNegocio, correlationId, cronometro, "BLOQUEADO", null, mensagem);
-        return ResultadoMaterialDocumentSap.Falha(null, mensagem);
+        return ResultadoMaterialDocumentSap.Falha(null, mensagem) with { PostTentado = false };
     }
 
     private async Task RegistrarLogAsync(

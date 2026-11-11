@@ -24,6 +24,8 @@ internal sealed class MaterialDocumentSapGovernadoServico : IMaterialDocumentSap
     public bool EhSimulado => false;
 
     public bool MaterialDocumentConfigurado => _servicoInterno.MaterialDocumentConfigurado;
+    public string? ValidarPoliticaAntesReserva(MaterialDocumentSapRequest requisicao)
+        => _servicoInterno.ValidarPoliticaAntesReserva(requisicao);
 
     public async Task<ResultadoMaterialDocumentSap> CriarDocumentoMaterial101Async(
         MaterialDocumentSapRequest requisicao,
@@ -35,6 +37,6 @@ internal sealed class MaterialDocumentSapGovernadoServico : IMaterialDocumentSap
             cancellationToken);
         return validacao.Sucesso
             ? await _servicoInterno.CriarDocumentoMaterial101Async(requisicao, chaveNegocio, cancellationToken)
-            : ResultadoMaterialDocumentSap.Falha(null, validacao.Mensagem);
+            : ResultadoMaterialDocumentSap.Falha(null, validacao.Mensagem) with { PostTentado = false };
     }
 }

@@ -1336,7 +1336,7 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
 
     private static EntradaProdutoController CriarController(
         FakePedidoCompraSapServico pedido,
-        FakeMaterialDocumentSapServico materialDoc,
+        IMaterialDocumentSapServico materialDoc,
         bool ehHomologacao,
         IReadOnlyList<EntradaProdutoItemEnvioSap> itens,
         bool integracaoAtiva = true,
@@ -1359,7 +1359,8 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
         string tipoMaterialSap = "HIBE",
         Func<string, string, long, CancellationToken, Task<bool?>>? existeRecebimentoConfirmado = null,
         // GATE R3: permite observar a compensação da reserva nos bloqueios pós-reserva.
-        Func<long, string, CancellationToken, Task<bool>>? liberarReserva = null)
+        Func<long, string, CancellationToken, Task<bool>>? liberarReserva = null,
+        Action? aoReservar = null)
         => new(
             new IntegracaoEntradaSapServico(pedido, materialDoc),
             new EntradaProdutoServico(null!, null!, null!, null, new AutorizacaoCentroDepositoEntrada([], []), null),
@@ -1377,8 +1378,12 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
             consultarProdutoCentroSap: consultarProdutoCentro ?? ProdutoCentroBatchManaged,
             obterStatusLancamento: (_, _) => Task.FromResult<string?>(statusLancamento),
             recuperarLancamentoLocalPorPedido: recuperarLancamento,
-            reservarLancamentoParaEnvio: (_, _) => Task.FromResult(
-                new ResultadoReservaEnvioSap(reservaObtida, reservaObtida ? "FINALIZADO_LOCAL" : null)),
+            reservarLancamentoParaEnvio: (_, _) =>
+            {
+                aoReservar?.Invoke();
+                return Task.FromResult(new ResultadoReservaEnvioSap(
+                    reservaObtida, reservaObtida ? statusLancamento : null));
+            },
             diagnosticarIntegracaoSap: _ => Task.FromResult(
                 new DiagnosticoProntidaoIntegracaoSap(
                     AmbienteOperacional: true,
@@ -1836,6 +1841,41 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
         Assert.Equal(0, pedido.ReconsultasCabecalho);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RevalidacaoCanceladaCompensaSemMascararCancelamento(bool falhaCompensacao)
+    {
+        DefinirSessao(comEnviarSap: true);
+        FakeMaterialDocumentSapServico materialDoc = new();
+        using CancellationTokenSource cts = new();
+        int cargas = 0;
+        int compensacoes = 0;
+        EntradaProdutoController controller = CriarController(
+            new FakePedidoCompraSapServico { EscritaHabilitada = true }, materialDoc, true, [Item()],
+            carregarItensProvider: (_, _) =>
+            {
+                if (++cargas == 3)
+                {
+                    cts.Cancel();
+                    throw new OperationCanceledException(cts.Token);
+                }
+                return Task.FromResult<IReadOnlyList<EntradaProdutoItemEnvioSap>>([Item()]);
+            },
+            liberarReserva: (_, status, token) =>
+            {
+                Assert.Equal("FINALIZADO_LOCAL", status);
+                Assert.False(token.IsCancellationRequested);
+                compensacoes++;
+                if (falhaCompensacao) throw new InvalidOperationException("OFFLINE");
+                return Task.FromResult(true);
+            });
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            controller.EnviarPesoEntradaParaSapHomologacaoAsync(99, cts.Token));
+        Assert.Equal(1, compensacoes);
+        Assert.Equal(0, materialDoc.Chamadas);
+    }
+
     private static PedidoCompraSapItem ItemFresco(string numeroItem, decimal? quantidade, string unidade)
         => new()
         {
@@ -1880,8 +1920,111 @@ public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
         throw new DirectoryNotFoundException("Raiz do projeto FugaPET_HML nao encontrada.");
     }
 
+    [Theory]
+    [InlineData("ROH", false)]
+    [InlineData("HIBE", true)]
+    [InlineData("", false)]
+    [InlineData("DESCONHECIDO", false)]
+    public async Task R7B_PoliticaRealPrecedeReservaESomenteHibeSegue(string tipo, bool permite)
+    {
+        DefinirSessao(comEnviarSap: true);
+        int reservas = 0, dispatches = 0, atualizacoes = 0, compensacoes = 0;
+        MaterialDocumentSapServico writer = new(EntradaMpP5R7Tests.Config(), null, null,
+            dispatchHttp: (_, _) =>
+            {
+                dispatches++;
+                return Task.FromResult(new ResultadoMaterialDocumentSap
+                {
+                    Sucesso = true, StatusHttp = 201, MaterialDocument = "5000000001",
+                    MaterialDocumentYear = "2026"
+                });
+            });
+        EntradaProdutoController controller = CriarController(
+            new FakePedidoCompraSapServico { EscritaHabilitada = true }, writer, true, [Item()],
+            statusLancamento: "ERRO_SAP", tipoMaterialSap: tipo,
+            aoReservar: () => reservas++,
+            atualizarStatus: (_, _, _, _, _) =>
+            {
+                atualizacoes++;
+                return Task.FromResult(ResultadoOperacao.Ok());
+            },
+            liberarReserva: (_, _, _) =>
+            {
+                compensacoes++;
+                return Task.FromResult(true);
+            });
+        ResultadoEnvioSapEntrada resultado = await controller.EnviarPesoEntradaParaSapHomologacaoAsync(99);
+        Assert.Equal(permite ? 1 : 0, reservas);
+        Assert.Equal(permite ? 1 : 0, dispatches);
+        Assert.Equal(permite ? 1 : 0, atualizacoes);
+        Assert.Equal(0, compensacoes);
+        Assert.Equal(permite ? CenarioEnvioSapEntrada.Enviado : CenarioEnvioSapEntrada.DadosIncompletos,
+            resultado.Cenario);
+    }
+
+    [Fact]
+    public async Task R7B_WriterBloqueadoAntesHttpCompensaSemErroSap()
+    {
+        DefinirSessao(comEnviarSap: true);
+        int atualizacoes = 0, compensacoes = 0;
+        MaterialDocumentSapServico writer = new(new ConfiguracaoSap(), null, null);
+        EntradaProdutoController controller = CriarController(
+            new FakePedidoCompraSapServico { EscritaHabilitada = true }, writer, true, [Item()],
+            statusLancamento: "ERRO_SAP",
+            atualizarStatus: (_, _, _, _, _) =>
+            {
+                atualizacoes++;
+                return Task.FromResult(ResultadoOperacao.Ok());
+            },
+            liberarReserva: (_, statusAnterior, _) =>
+            {
+                Assert.Equal("ERRO_SAP", statusAnterior);
+                compensacoes++;
+                return Task.FromResult(true);
+            });
+        ResultadoEnvioSapEntrada result = await controller.EnviarPesoEntradaParaSapHomologacaoAsync(99);
+        Assert.Equal(0, atualizacoes);
+        Assert.Equal(1, compensacoes);
+        Assert.Equal(CenarioEnvioSapEntrada.DadosIncompletos, result.Cenario);
+    }
+
+    [Fact]
+    public async Task R7B_ResultadoRemotoDesconhecidoPreservaReservaSemAtualizarErro()
+    {
+        DefinirSessao(comEnviarSap: true);
+        int dispatches = 0, atualizacoes = 0, compensacoes = 0;
+        MaterialDocumentSapServico writer = new(EntradaMpP5R7Tests.Config(), null, null,
+            dispatchHttp: (_, _) =>
+            {
+                dispatches++;
+                throw new TimeoutException("OFFLINE");
+            });
+        EntradaProdutoController controller = CriarController(
+            new FakePedidoCompraSapServico { EscritaHabilitada = true }, writer, true, [Item()],
+            atualizarStatus: (_, _, _, _, _) =>
+            {
+                atualizacoes++;
+                return Task.FromResult(ResultadoOperacao.Ok());
+            },
+            liberarReserva: (_, _, _) =>
+            {
+                compensacoes++;
+                return Task.FromResult(true);
+            });
+        ResultadoEnvioSapEntrada result = await controller.EnviarPesoEntradaParaSapHomologacaoAsync(99);
+        Assert.Equal(1, dispatches);
+        Assert.Equal(0, atualizacoes);
+        Assert.Equal(0, compensacoes);
+        Assert.False(result.StatusLocalAtualizado);
+        Assert.Equal(CenarioEnvioSapEntrada.FalhaPersistenciaLocal, result.Cenario);
+    }
+
     private sealed class FakeMaterialDocumentSapServico : IMaterialDocumentSapServico
     {
+        public bool AplicarPoliticaReal { get; init; }
+        public string? ValidarPoliticaAntesReserva(MaterialDocumentSapRequest requisicao)
+            => AplicarPoliticaReal && FugaPET_HML.Servicos.Entrada.P5.BloqueioP5R7.ExigeP5(requisicao)
+                ? FugaPET_HML.Servicos.Entrada.P5.BloqueioP5R7.Mensagem : null;
         public bool Sucesso { get; init; } = true;
         public string MensagemFalha { get; init; } = "O SAP recusou a criacao do documento de material.";
 
