@@ -926,9 +926,44 @@ public sealed class EntradaProdutoController
     /// aprovada e (c) o contrato confirmado de leitura de A_MaterialDocumentItem. Com qualquer uma
     /// indisponível, o P5 BLOQUEIA — fail-closed por construção, nunca liberação por omissão.
     /// </summary>
+    /// <summary>
+    /// P5/056: as três fontes passam a ser as operacionais. A exclusividade vem da chave primária
+    /// por pedido+item (incremento 056); a evidência local, da consulta D2 aprovada; o histórico,
+    /// do serviço real de A_MaterialDocumentItem, envolvido pela atestação humana de abrangência.
+    /// <para>
+    /// Nenhuma delas libera por omissão: tabela ausente, banco desabilitado, consulta falha ou
+    /// atestação inexistente continuam resolvendo como INDISPONÍVEL, que bloqueia.
+    /// </para>
+    /// </summary>
     private static Servicos.Entrada.ProvedorEvidenciaRecebimentoItemPedido CriarProvedorP5Padrao(
         Action<string> registrarDiagnostico)
-        => new(registrarDiagnostico: registrarDiagnostico);
+    {
+        try
+        {
+            bool bancoHabilitado = AcessoDados.Banco.EstadoIntegracaoBanco.Habilitado;
+            var fabricaConexao = new AcessoDados.Banco.FabricaConexaoPostgreSql();
+
+            return new Servicos.Entrada.ProvedorEvidenciaRecebimentoItemPedido(
+                exclusividade: new Servicos.Entrada.ExclusividadeItemPedidoDuravelServico(
+                    fabricaConexao, bancoHabilitado, registrarDiagnostico),
+                local: new Servicos.Entrada.EvidenciaRecebimentoLocalServico(
+                    fabricaConexao, bancoHabilitado, registrarDiagnostico),
+                historico: new Servicos.Entrada.HistoricoMaterialDocumentSapAtestadoServico(
+                    new Servicos.IntegracaoSap.HistoricoMaterialDocumentSapServico(
+                        Servicos.IntegracaoSap.LeitorConfiguracaoSap.Carregar()),
+                    Servicos.Entrada.AtestacaoAbrangenciaRecebimento.Carregar(),
+                    registrarDiagnostico),
+                registrarDiagnostico: registrarDiagnostico);
+        }
+        catch (Exception ex)
+        {
+            // Falhar na composição não pode virar liberação: cai nos defaults fail-closed.
+            registrarDiagnostico("P5: fontes operacionais indisponíveis (" + ex.GetType().Name
+                + "); mantido o bloqueio.");
+            return new Servicos.Entrada.ProvedorEvidenciaRecebimentoItemPedido(
+                registrarDiagnostico: registrarDiagnostico);
+        }
+    }
 
     /// <summary>
     /// GATE R3B: desfecho da compensação da reserva num abort pré-POST. Nunca declara liberação fictícia:
