@@ -24,6 +24,15 @@
     "senha": "DEFINIR_SENHA_OU_USAR_VARIAVEL_AMBIENTE",
     "timeout_segundos": 30,
     "escrita_habilitada": false,
+    "_capabilities_perfil_q": "As quatro flags abaixo sao as capabilities operacionais do Q. ATENCAO: sob \"ambiente\": { \"perfil\": \"Q\" } o DefaultsPerfilQ as liga por perfil (valorArquivo || padraoPerfil), portanto false NESTE ARQUIVO nao as desliga em Q — so uma variavel de ambiente de Process com valor false sobrepoe. Ficam false aqui para que copiar este arquivo para um ambiente SEM perfil Q nao conceda nada (fail-closed).",
+    "hu_write_habilitado": false,
+    "pa_pipeline_habilitado": false,
+    "pa_material_document_write_enabled": false,
+    "_seguranca_escritas_sempre_proibidas": "escrita_habilitada (escrita SAP generica) e pallet_write_habilitado (escrita de palete INT012) NAO fazem parte do perfil: nenhum perfil consegue liga-las e o padrao de perfil e sempre false. Permanecem false aqui e so uma variavel de ambiente de Process explicita as altera.",
+    "pallet_write_habilitado": false,
+    "_seguranca_pallet_int012": "pallet_int012_base_url (env FUGAPET_Q_SAP_PALLET_INT012_BASE_URL) e a base EXCLUSIVA do CPI/INT012 do palete. NUNCA derivada de handling_unit_base_url (S/4 Handling Unit e CPI sao integracoes distintas). Vazia => gateway INT012 fail-closed (zero HTTP). pallet_int012_hosts_permitidos e a allowlist propria do CPI. A rota real do Q NAO e versionada aqui: defina-a no arquivo implantado ou por variavel de ambiente.",
+    "pallet_int012_base_url": "",
+    "pallet_int012_hosts_permitidos": [],
     "_taras_fisicas_embalagem_palete_126v": "GATE 126V: tara FISICA do material de embalagem da HU PAI do palete, usada EXCLUSIVAMENTE na composicao do payload INT012 (outbound). NAO altera o palete local, NAO e persistida e NAO vem de hu_palete. Chave logica = sap_client + centro + material_embalagem; o sap_client restringe o mapeamento ao mandante homologado (copiar este arquivo para outro ambiente NAO autoriza a composicao). unidade aceita SOMENTE KG (sem conversao automatica), peso nao negativo e no maximo 3 casas decimais. Ausencia, invalidez ou duas entradas para a mesma chave = FAIL-CLOSED: o preview do palete nao gera payload e nenhum POST ocorre. Ausencia NUNCA e interpretada como tara zero; para declarar tara zero use peso_kg 0 EXPLICITO. Nao e segredo: nao colocar credencial aqui.",
     "taras_fisicas_embalagem_palete": [
       {
