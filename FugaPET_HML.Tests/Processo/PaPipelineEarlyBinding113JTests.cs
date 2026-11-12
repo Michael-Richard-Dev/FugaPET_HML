@@ -379,14 +379,17 @@ public sealed class PaPipelineEarlyBinding113JTests
         }
     }
 
-    [Fact] // L) label parity do 113E permanece.
-    public void L_LabelParityPreservada()
+    [Fact] // L) a avaliacao do pipeline permanece; a etiqueta saiu daqui para a pesagem.
+    public void L_PipelineAvaliadoEEtiquetaNaoDuplicada()
     {
         Assert.True(ProcessoProdutoAcabadoForm.PipelineConcluidoIntegralmente(
             new ResultadoPipelineProdutoAcabado(true, EtapaPipelineProdutoAcabado.Concluido, "ok", null)));
         Assert.False(ProcessoProdutoAcabadoForm.PipelineConcluidoIntegralmente(
             new ResultadoPipelineProdutoAcabado(true, EtapaPipelineProdutoAcabado.HandlingUnit, "parcial", null)));
-        Assert.Contains("ImprimirEtiquetaCaixaAsync(caixaConfirmadaPipeline)", FonteForm(), StringComparison.Ordinal);
+        // A etiqueta passou a ser emitida na pesagem; o disparo ao fim do pipeline sairia duplicado.
+        string form = FonteForm();
+        Assert.DoesNotContain("ImprimirEtiquetaCaixaAsync(caixaConfirmadaPipeline)", form, StringComparison.Ordinal);
+        Assert.Contains("ImprimirEtiquetaCaixaPesadaAsync(resultado.Caixa)", form, StringComparison.Ordinal);
     }
 
     // ================= leitura de fonte =================

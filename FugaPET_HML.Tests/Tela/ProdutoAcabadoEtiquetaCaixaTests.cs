@@ -45,6 +45,74 @@ public sealed class ProdutoAcabadoEtiquetaCaixaTests
         Terminal = "TERM-01"
     };
 
+    /// <summary>Caixa recém-pesada: persistida, sem HU e sem confirmação SAP.</summary>
+    private static ProdutoAcabadoCaixa CaixaPesada()
+    {
+        ProdutoAcabadoCaixa caixa = CaixaConfirmada();
+        caixa.HandlingUnitExternalId = null;
+        caixa.StatusIntegracao = StatusIntegracaoCaixa.FinalizadaLocal;
+        return caixa;
+    }
+
+    // Na pesagem a etiqueta sai sem SAP: basta a caixa estar persistida.
+    [Fact]
+    public void Pesagem_CaixaPersistidaSemSapEElegivel()
+    {
+        ImpressaoProdutoAcabadoServico.ValidarCaixaPesadaElegivelParaEtiqueta(CaixaPesada());
+
+        // Em qualquer estado anterior ao envio, continua elegível — o gatilho é a pesagem, não o SAP.
+        foreach (StatusIntegracaoCaixa estado in new[]
+        {
+            StatusIntegracaoCaixa.EmPesagem,
+            StatusIntegracaoCaixa.FinalizadaLocal,
+            StatusIntegracaoCaixa.ProntaParaEnvio,
+            StatusIntegracaoCaixa.ErroSap
+        })
+        {
+            ProdutoAcabadoCaixa caixa = CaixaPesada();
+            caixa.StatusIntegracao = estado;
+            ImpressaoProdutoAcabadoServico.ValidarCaixaPesadaElegivelParaEtiqueta(caixa);
+        }
+    }
+
+    // Sem lastro no banco, não há etiqueta: caixa física sem rastreabilidade continua barrada.
+    [Fact]
+    public void Pesagem_SemIdentidadePersistidaNaoImprime()
+    {
+        ProdutoAcabadoCaixa semId = CaixaPesada();
+        semId.CodigoProdutoAcabadoCaixa = null;
+        Assert.Throws<ErroOperacionalEsperadoException>(() =>
+            ImpressaoProdutoAcabadoServico.ValidarCaixaPesadaElegivelParaEtiqueta(semId));
+
+        ProdutoAcabadoCaixa semCodigo = CaixaPesada();
+        semCodigo.CodigoCaixaLocal = "  ";
+        Assert.Throws<ErroOperacionalEsperadoException>(() =>
+            ImpressaoProdutoAcabadoServico.ValidarCaixaPesadaElegivelParaEtiqueta(semCodigo));
+    }
+
+    // A etiqueta da pesagem sai com a HU como PENDENTE — e isso precisa chegar ao ZPL.
+    [Fact]
+    public void Pesagem_HuAindaNaoExisteEVaiComoPendente()
+    {
+        DadosEtiquetaCaixaProdutoAcabado e =
+            ImpressaoProdutoAcabadoServico.CriarEtiqueta(CaixaPesada(), "SACO PET 25KG");
+        Assert.Equal(string.Empty, e.HandlingUnitSap);
+
+        // O restante da identidade da caixa continua completo na etiqueta.
+        Assert.Equal("1001951", e.OrdemProducao);
+        Assert.Equal("CX-1001951-0004", e.CodigoCaixaLocal);
+        Assert.Equal("0004", e.NumeroCaixa);
+    }
+
+    // A reimpressão continua exigindo SAP: é ela que emite a etiqueta definitiva, com HU.
+    [Fact]
+    public void Reimpressao_ContinuaExigindoConfirmacaoSap()
+    {
+        Assert.Throws<ErroOperacionalEsperadoException>(() =>
+            ImpressaoProdutoAcabadoServico.ValidarCaixaElegivelParaEtiqueta(CaixaPesada()));
+        ImpressaoProdutoAcabadoServico.ValidarCaixaElegivelParaEtiqueta(CaixaConfirmada());
+    }
+
     // A etiqueta é montada a partir da caixa PERSISTIDA (dados corretos, rastreabilidade pela caixa).
     [Fact]
     public void CriarEtiqueta_MapeiaDadosDaCaixaPersistida()
@@ -75,27 +143,108 @@ public sealed class ProdutoAcabadoEtiquetaCaixaTests
         Assert.Equal(string.Empty, e.HandlingUnitSap);
     }
 
-    // O ZPL específico da caixa é válido e contém os campos com RÓTULOS corretos + código de barras do código local.
+    // O ZPL da caixa segue o layout 8x5 (Relatorio/EtiquetaProduto8x5.rdlc), com os rotulos do modelo.
     [Fact]
-    public void Zpl_CaixaProdutoAcabado_ContemCamposCorretosEBarcode()
+    public void Zpl_CaixaProdutoAcabado_SegueOLayout8x5()
     {
         DadosEtiquetaCaixaProdutoAcabado e = ImpressaoProdutoAcabadoServico.CriarEtiqueta(CaixaConfirmada(), "SACO PET 25KG");
         string zpl = new ServicoImpressoraZebra().ConstruirZplEtiquetaCaixaProdutoAcabado(e);
 
         Assert.StartsWith("^XA", zpl, StringComparison.Ordinal);
         Assert.EndsWith("^XZ", zpl.TrimEnd(), StringComparison.Ordinal);
-        Assert.Contains("PRODUTO ACABADO - CAIXA", zpl, StringComparison.Ordinal);
-        Assert.Contains("OP: 1001951", zpl, StringComparison.Ordinal);
-        Assert.Contains("LOTE: L-TESTE", zpl, StringComparison.Ordinal);
-        Assert.Contains("CAIXA No: 0004", zpl, StringComparison.Ordinal);
-        Assert.Contains("COD. CAIXA: CX-1001951-0004", zpl, StringComparison.Ordinal);
-        Assert.Contains("HU SAP: 300014352", zpl, StringComparison.Ordinal);
-        // Código de barras Code128 do codigo_caixa_local (rastreabilidade por leitura).
-        Assert.Contains("^BCB,120,Y,N,N^FDCX-1001951-0004", zpl, StringComparison.Ordinal);
+        // Rotulos na grafia do modelo impresso.
+        foreach (string rotulo in new[]
+        {
+            "CODIGO DO PRODUTO", "PESO BRUTO", "DATA DE FABRICACAO",
+            "PESO LIQUIDO", "DATA DE VALIDADE", "Qtd. Pacotes:", "Lote:"
+        })
+            Assert.Contains(rotulo, zpl, StringComparison.Ordinal);
+
+        Assert.Contains("Lote: L-TESTE", zpl, StringComparison.Ordinal);
+        Assert.Contains("SACO PET 25KG", zpl, StringComparison.Ordinal);
+        // Codigo de barras Code128 do codigo_caixa_local, VERTICAL (orientacao B).
+        Assert.Contains("^BCB,", zpl, StringComparison.Ordinal);
+        Assert.Contains("^FDCX-1001951-0004^FS", zpl, StringComparison.Ordinal);
         Assert.DoesNotContain("^BCN", zpl, StringComparison.Ordinal);
-        // NÃO usa os rótulos do layout de produção do Semi-Acabado.
+        // NAO usa os rotulos do layout de producao do Semi-Acabado.
         Assert.DoesNotContain("SAIDA ESTUFA", zpl, StringComparison.Ordinal);
-        Assert.DoesNotContain("PACOTES", zpl, StringComparison.Ordinal);
+    }
+
+    // A etiqueta tem o tamanho do modelo: 8x5 cm a 203 dpi.
+    [Fact]
+    public void Zpl_CaixaProdutoAcabado_TemOTamanhoDoModelo8x5()
+    {
+        DadosEtiquetaCaixaProdutoAcabado e = ImpressaoProdutoAcabadoServico.CriarEtiqueta(CaixaConfirmada());
+        string zpl = new ServicoImpressoraZebra().ConstruirZplEtiquetaCaixaProdutoAcabado(e);
+        Assert.Contains("^PW639", zpl, StringComparison.Ordinal);   // 3,15 pol
+        Assert.Contains("^LL400", zpl, StringComparison.Ordinal);   // 1,97 pol
+    }
+
+    /// <summary>
+    /// O codigo de barras precisa caber DENTRO da etiqueta. Em ^BCB o desenho sobe a partir da
+    /// origem, entao o comprimento do Code128 nao pode passar do topo, e a altura das barras nao
+    /// pode passar da largura. Este teste reproduz a conta que estourou na primeira versao.
+    /// </summary>
+    [Theory]
+    [InlineData("CX-1001951-0004")]
+    [InlineData("CX-1000403-0001")]
+    [InlineData("CX-1000403-9999")]
+    public void Zpl_CodigoDeBarrasCabeDentroDaEtiqueta(string codigoLocal)
+    {
+        ProdutoAcabadoCaixa caixa = CaixaConfirmada();
+        caixa.CodigoCaixaLocal = codigoLocal;
+        string zpl = new ServicoImpressoraZebra().ConstruirZplEtiquetaCaixaProdutoAcabado(
+            ImpressaoProdutoAcabadoServico.CriarEtiqueta(caixa));
+
+        int largura = int.Parse(Entre(zpl, "^PW", "\n"));
+        int altura = int.Parse(Entre(zpl, "^LL", "\n"));
+
+        // ^FO x,y ... ^BY m ^BCB, alturaBarras
+        int fo = zpl.LastIndexOf("^FO", zpl.IndexOf("^BCB", StringComparison.Ordinal), StringComparison.Ordinal);
+        string cabecalho = zpl[fo..zpl.IndexOf("^FD", fo, StringComparison.Ordinal)];
+        string[] origem = Entre(cabecalho, "^FO", "^BY").Split(',');
+        int x = int.Parse(origem[0]), y = int.Parse(origem[1]);
+        int modulo = int.Parse(Entre(cabecalho, "^BY", "^BC"));
+        int alturaBarras = int.Parse(Entre(cabecalho, "^BCB,", ",").Trim(','));
+
+        // Code128 subset B: inicio + N simbolos + verificador + parada.
+        int modulos = (11 * (codigoLocal.Length + 2)) + 13;
+        int comprimento = modulos * modulo;
+
+        Assert.True(y - comprimento >= 0,
+            $"a barra sobe {comprimento} dots a partir de y={y} e passa do topo da etiqueta");
+        Assert.True(y <= altura, $"a origem y={y} esta fora da etiqueta de {altura} dots");
+        Assert.True(x + alturaBarras <= largura,
+            $"as barras ocupam ate x={x + alturaBarras} numa etiqueta de {largura} dots");
+    }
+
+    private static string Entre(string texto, string inicio, string fim)
+    {
+        int i = texto.IndexOf(inicio, StringComparison.Ordinal) + inicio.Length;
+        int f = texto.IndexOf(fim, i, StringComparison.Ordinal);
+        return f < 0 ? texto[i..] : texto[i..f];
+    }
+
+    // O EAN do produto nao existe no sistema: nenhuma barra e emitida no lugar dele.
+    [Fact]
+    public void Zpl_SemEanCadastrado_NaoInventaCodigoDeBarras()
+    {
+        DadosEtiquetaCaixaProdutoAcabado e = ImpressaoProdutoAcabadoServico.CriarEtiqueta(CaixaConfirmada());
+        string zpl = new ServicoImpressoraZebra().ConstruirZplEtiquetaCaixaProdutoAcabado(e);
+
+        Assert.Contains("EAN DO PRODUTO", zpl, StringComparison.Ordinal);
+        Assert.Contains("NAO CADASTRADO", zpl, StringComparison.Ordinal);
+        // Uma unica barra na etiqueta: a do codigo local da caixa.
+        Assert.Equal(1, zpl.Split("^BCB,").Length - 1);
+    }
+
+    // Fabricacao e validade nao tem origem no Produto Acabado: saem declaradas.
+    [Fact]
+    public void Zpl_DatasSemOrigemSaemDeclaradas()
+    {
+        DadosEtiquetaCaixaProdutoAcabado e = ImpressaoProdutoAcabadoServico.CriarEtiqueta(CaixaConfirmada());
+        string zpl = new ServicoImpressoraZebra().ConstruirZplEtiquetaCaixaProdutoAcabado(e);
+        Assert.Equal(2, zpl.Split("NAO INFORMADA").Length - 1);
     }
 
     [Fact]
@@ -105,7 +254,7 @@ public sealed class ProdutoAcabadoEtiquetaCaixaTests
         caixa.HandlingUnitExternalId = null;
         DadosEtiquetaCaixaProdutoAcabado e = ImpressaoProdutoAcabadoServico.CriarEtiqueta(caixa);
         string zpl = new ServicoImpressoraZebra().ConstruirZplEtiquetaCaixaProdutoAcabado(e);
-        Assert.Contains("HU SAP: PENDENTE", zpl, StringComparison.Ordinal);
+        Assert.Contains("HU: PENDENTE", zpl, StringComparison.Ordinal);
     }
 
     // Rastreabilidade: reimpressão de caixa SEM identidade persistida é bloqueada (nunca imprime "no escuro").
@@ -357,22 +506,34 @@ public sealed class ProdutoAcabadoEtiquetaCaixaTests
         Assert.DoesNotContain("CriarHandlingUnitCaixaAsync", servico, StringComparison.Ordinal);
     }
 
-    // Form: impressão é chamada APÓS a confirmação e é ISOLADA (try/catch) — falha não altera a HU/integração.
+    // Form: a etiqueta sai a cada PESAGEM, logo após a caixa ser persistida, e a impressão é ISOLADA
+    // (try/catch) — falha não altera a caixa nem a integração.
     [Fact]
-    public void Form_ImpressaoIsolada_NaoAfetaHu()
+    public void Form_ImpressaoNaPesagem_IsoladaENaoAfetaHu()
     {
         string form = LerFonte("Tela", "Processo", "ProcessoProdutoAcabadoForm.cs");
-        int inicio = form.IndexOf("private async Task ImprimirEtiquetaCaixaAsync(", StringComparison.Ordinal);
-        int fim = form.IndexOf("private async Task ReimprimirEtiquetaCaixaAsync(", StringComparison.Ordinal);
-        Assert.True(inicio >= 0 && fim > inicio);
-        string metodo = form[inicio..fim];
+        int inicio = form.IndexOf("private async Task ImprimirEtiquetaCaixaPesadaAsync(", StringComparison.Ordinal);
+        Assert.True(inicio >= 0);
+        int fim = form.IndexOf("private async Task ", inicio + 20, StringComparison.Ordinal);
+        string metodo = fim > inicio ? form[inicio..fim] : form[inicio..];
         // O corpo captura qualquer exceção e NÃO chama nada de SAP.
         Assert.Contains("catch (Exception ex)", metodo, StringComparison.Ordinal);
-        Assert.Contains("_impressaoProdutoAcabadoServico.ImprimirCaixaAsync(", metodo, StringComparison.Ordinal);
+        Assert.Contains("_impressaoProdutoAcabadoServico.ImprimirCaixaPesadaAsync(", metodo, StringComparison.Ordinal);
         Assert.DoesNotContain("EnviarCaixaHandlingUnitAsync", metodo, StringComparison.Ordinal);
         Assert.DoesNotContain("AutorizarEnvioCaixaAsync", metodo, StringComparison.Ordinal);
-        // A impressão só é disparada no ramo Confirmado, depois de persistir a confirmação.
-        Assert.Contains("await ImprimirEtiquetaCaixaAsync(confirmada);", form, StringComparison.Ordinal);
+        // Disparada no registro da caixa, depois da persistência — nao na confirmação SAP.
+        Assert.Contains("await ImprimirEtiquetaCaixaPesadaAsync(resultado.Caixa);", form, StringComparison.Ordinal);
+    }
+
+    // A etiqueta nao e emitida duas vezes para a mesma caixa: o antigo disparo pos-confirmacao saiu.
+    [Fact]
+    public void Form_NaoImprimeSegundaEtiquetaAposConfirmacaoSap()
+    {
+        string form = LerFonte("Tela", "Processo", "ProcessoProdutoAcabadoForm.cs");
+        Assert.DoesNotContain("await ImprimirEtiquetaCaixaAsync(confirmada);", form, StringComparison.Ordinal);
+        Assert.DoesNotContain("ImprimirEtiquetaCaixaAsync(caixaConfirmadaPipeline)", form, StringComparison.Ordinal);
+        // A reimpressao manual continua existindo, para obter a etiqueta ja com a HU.
+        Assert.Contains("ReimprimirEtiquetaCaixaAsync(", form, StringComparison.Ordinal);
     }
 
     // Form: reimpressão é ação EXPLÍCITA (duplo clique + confirmação) e NÃO chama SAP.
