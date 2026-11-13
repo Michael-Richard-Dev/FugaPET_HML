@@ -118,7 +118,9 @@ public sealed class EntradaProdutoController
         Impressao = new ImpressaoEntradaServico(ImpressoraEtiqueta);
         AutorizacaoCentroDeposito = autorizacaoCentroDeposito ?? throw new ArgumentNullException(nameof(autorizacaoCentroDeposito));
         Tara = taraController ?? throw new ArgumentNullException(nameof(taraController));
-        _ehAmbienteHomologacao = ehAmbienteHomologacao ?? AmbienteIntegracaoSap.EhHomologacao;
+        // A regra do envio de peso deixou de ser so o nome do banco: e homologacao OU
+        // liberacao explicita do ambiente (FUGAPET_Q_SAP_ENVIO_PESO_LIBERADO), fail-closed.
+        _ehAmbienteHomologacao = ehAmbienteHomologacao ?? AmbienteIntegracaoSap.EnvioPesoPermitido;
         _carregarItensParaEnvio = carregarItensParaEnvio
             ?? ((codigoLancamento, cancellationToken) =>
                 EntradaProduto.ListarItensParaEnvioSapAsync(codigoLancamento, cancellationToken));
@@ -297,7 +299,7 @@ public sealed class EntradaProdutoController
         string? motivoBloqueio = codigoLancamento is not long id || id <= 0
             ? "Finalize e grave o lançamento local antes do envio."
             : !ambienteHomologacao
-                ? "O ambiente atual não é homologação."
+                ? "Envio de peso não liberado neste ambiente."
                 : !usuarioTemPermissao
                     ? "Usuário sem permissão ENVIAR_SAP."
                     : !integracao.AmbienteOperacional
@@ -1339,7 +1341,8 @@ public sealed class EntradaProdutoController
     /// Demais ... comportamento LEGADO (quantidade = peso liquido), SEM campos customizados.
     /// </summary>
     internal static MaterialDocumentSapItemRequest MontarItemMaterialDocument(
-        string numeroPedido, EntradaProdutoItemEnvioSap item, bool comLote, ResultadoAlocacao101 alocacao)
+        string numeroPedido, EntradaProdutoItemEnvioSap item, bool comLote, ResultadoAlocacao101 alocacao,
+        int linha = 1)
         => new()
         {
             Material = item.Material!.Trim(),
@@ -1347,6 +1350,9 @@ public sealed class EntradaProdutoController
             StorageLocation = item.Deposito!.Trim(),
             GoodsMovementType = "101",
             GoodsMovementRefDocType = "B", // referencia = Pedido de Compra (exigido pelo SAP no 101)
+            // Line-ID exigido pelo SAP ao postar via contexto de negocio MaterialDocumentItem
+            // (MM_IM_ODATA_API_MDOC/027). Sequencial dentro da requisicao, a partir de 1.
+            MaterialDocumentLine = linha.ToString(CultureInfo.InvariantCulture),
             QuantityInEntryUnit = alocacao.QuantidadePadrao,
             EntryUnit = alocacao.UnidadePadrao,
             Zz1PesoEntradaMmi = alocacao.PesoLiquidoCustomizado,
