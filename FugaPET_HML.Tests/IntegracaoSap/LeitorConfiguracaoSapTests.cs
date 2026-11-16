@@ -250,8 +250,8 @@ public sealed class LeitorConfiguracaoSapTests : IDisposable
 
         Dictionary<string, string> ambiente = new()
         {
-            ["FUGAPET_SAP_PACKAGING_USERNAME"] = "pkg-user",
-            ["FUGAPET_SAP_PACKAGING_PASSWORD"] = "pkg-pass"
+            ["FUGAPET_Q_SAP_PACKAGING_USERNAME"] = "pkg-user",
+            ["FUGAPET_Q_SAP_PACKAGING_PASSWORD"] = "pkg-pass"
         };
 
         ConfiguracaoSap configuracao = LeitorConfiguracaoSap.Carregar(

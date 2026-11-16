@@ -74,8 +74,8 @@ public sealed class PublicacaoHmlConfiguracaoSapTests
 
         // API de embalagem (Integration Suite): URL/host próprios + variáveis específicas + GET de validação 200.
         Assert.Contains("packaging_base_url", checklist, StringComparison.Ordinal);
-        Assert.Contains("FUGAPET_SAP_PACKAGING_USERNAME", checklist, StringComparison.Ordinal);
-        Assert.Contains("FUGAPET_SAP_PACKAGING_PASSWORD", checklist, StringComparison.Ordinal);
+        Assert.Contains("FUGAPET_Q_SAP_PACKAGING_USERNAME", checklist, StringComparison.Ordinal);
+        Assert.Contains("FUGAPET_Q_SAP_PACKAGING_PASSWORD", checklist, StringComparison.Ordinal);
         Assert.Contains("GetPackagingSet", checklist, StringComparison.Ordinal);
     }
 

@@ -22,9 +22,9 @@ PROPRIAS (nunca as SAP standard) e allowlist propria.
 
 - [ ] `packaging_base_url` configurada com a rota exata consultavel do Integration Suite (`.../ZAPI_PACKAGING_SRV/GetPackagingSet`)
 - [ ] host do Integration Suite (ex.: `*.cfapps.br10.hana.ondemand.com`) presente em `packaging_hosts_permitidos`
-- [ ] variavel de ambiente `FUGAPET_SAP_PACKAGING_USERNAME` definida (usuario proprio da embalagem)
-- [ ] variavel de ambiente `FUGAPET_SAP_PACKAGING_PASSWORD` definida (senha propria da embalagem)
-- [ ] `FUGAPET_SAP_PACKAGING_CLIENT` definido SOMENTE quando o endpoint exigir mandante
+- [ ] variavel de ambiente `FUGAPET_Q_SAP_PACKAGING_USERNAME` definida (usuario proprio da embalagem)
+- [ ] variavel de ambiente `FUGAPET_Q_SAP_PACKAGING_PASSWORD` definida (senha propria da embalagem)
+- [ ] `FUGAPET_Q_SAP_PACKAGING_CLIENT` definido SOMENTE quando o endpoint exigir mandante
 - [ ] GET seguro de validacao: `GetPackagingSet?$filter=Material eq '4000108'` retorna HTTP 200
 - [ ] a resposta do GET de validacao contem `PkgInstructionItems` (ou `_PkgInstructionItems`) com um item `P` e um item `I`/`M`
 - [ ] nunca imprimir usuario/senha/Authorization/cookie/token em log ou tela
@@ -34,4 +34,4 @@ Observa??es:
 - N?o commitar `configuracao.sap.json` com senha real.
 - O publish inclui `configuracao.sap.exemplo.json`.
 - Se existir `configuracao.sap.json` local e seguro na pasta do projeto no momento do publish, ele ? copiado para a pasta publicada por MSBuild, mas continua ignorado pelo Git.
-- As credenciais da API de embalagem NUNCA vao no JSON: apenas nas variaveis de ambiente `FUGAPET_SAP_PACKAGING_USERNAME` / `FUGAPET_SAP_PACKAGING_PASSWORD`.
+- As credenciais da API de embalagem NUNCA vao no JSON: apenas nas variaveis de ambiente `FUGAPET_Q_SAP_PACKAGING_USERNAME` / `FUGAPET_Q_SAP_PACKAGING_PASSWORD`.

@@ -271,6 +271,37 @@ public sealed class AmbienteQIsolationTests : IDisposable
             Usuario = usuario
         };
 
+
+    [Fact]
+    public void Sap_PackagingDestaLinha_IgnoraAVariavelCompartilhada()
+    {
+        // A norma de embalagem (INT012) usa credenciais PROPRIAS, e ate 16/11/2026 as TRES linhas
+        // liam FUGAPET_SAP_PACKAGING_* -- o mesmo nome. Com DEV110 e esta linha na mesma estacao,
+        // gravar a credencial de um apagava a do outro em silencio: a tela apenas deixava de trazer
+        // a norma, sem dizer por que. O restante das variaveis ja era namespaçado; a embalagem
+        // ficou de fora, e este teste existe para que nao volte a ficar.
+        GravarSap(Url(HostQ, "API_MATERIAL_DOCUMENT_SRV"), HostQ, sapClient: "110");
+        Dictionary<string, string> ambiente = new()
+        {
+            ["FUGAPET_SAP_PACKAGING_BASE_URL"] = "https://dev.invalido/packaging",
+            ["FUGAPET_SAP_PACKAGING_USERNAME"] = "usuario-do-dev",
+            ["FUGAPET_SAP_PACKAGING_PASSWORD"] = "senha-do-dev",
+            ["FUGAPET_SAP_PACKAGING_ALLOWED_HOSTS"] = "dev.invalido",
+            ["FUGAPET_Q_SAP_PACKAGING_BASE_URL"] = "https://proprio.invalido/packaging",
+            ["FUGAPET_Q_SAP_PACKAGING_USERNAME"] = "usuario-proprio",
+            ["FUGAPET_Q_SAP_PACKAGING_PASSWORD"] = "senha-propria",
+            ["FUGAPET_Q_SAP_PACKAGING_ALLOWED_HOSTS"] = "proprio.invalido"
+        };
+
+        ConfiguracaoSap configuracao =
+            LeitorConfiguracaoSap.Carregar(_sapArquivo, nome => ambiente.GetValueOrDefault(nome));
+
+        Assert.Equal("https://proprio.invalido/packaging", configuracao.PackagingBaseUrl);
+        Assert.Equal("usuario-proprio", configuracao.PackagingUsuario);
+        Assert.Equal("senha-propria", configuracao.PackagingSenha);
+        Assert.Contains("proprio.invalido", configuracao.PackagingHostsPermitidos);
+        Assert.DoesNotContain("dev.invalido", configuracao.PackagingHostsPermitidos);
+    }
     private void GravarSap(string materialDocumentUrl, string host, string sapClient)
     {
         string json = JsonSerializer.Serialize(new

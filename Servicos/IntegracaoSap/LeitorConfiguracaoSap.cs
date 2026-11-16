@@ -18,11 +18,11 @@ public static class LeitorConfiguracaoSap
     private const string VariavelAmbienteProductionOrderBaseUrl = "FUGAPET_Q_SAP_PRODUCTION_ORDER_BASE_URL";
     private const string VariavelAmbienteProductionOrderConfirmationBaseUrl = "FUGAPET_Q_SAP_PRODUCTION_ORDER_CONFIRMATION_BASE_URL";
     private const string VariavelAmbienteProductBaseUrl = "FUGAPET_Q_SAP_PRODUCT_BASE_URL";
-    private const string VariavelAmbientePackagingBaseUrl = "FUGAPET_SAP_PACKAGING_BASE_URL";
-    private const string VariavelAmbientePackagingUsuario = "FUGAPET_SAP_PACKAGING_USERNAME";
-    private const string VariavelAmbientePackagingSenha = "FUGAPET_SAP_PACKAGING_PASSWORD";
-    private const string VariavelAmbientePackagingHostsPermitidos = "FUGAPET_SAP_PACKAGING_ALLOWED_HOSTS";
-    private const string VariavelAmbientePackagingSapClient = "FUGAPET_SAP_PACKAGING_CLIENT";
+    private const string VariavelAmbientePackagingBaseUrl = "FUGAPET_Q_SAP_PACKAGING_BASE_URL";
+    private const string VariavelAmbientePackagingUsuario = "FUGAPET_Q_SAP_PACKAGING_USERNAME";
+    private const string VariavelAmbientePackagingSenha = "FUGAPET_Q_SAP_PACKAGING_PASSWORD";
+    private const string VariavelAmbientePackagingHostsPermitidos = "FUGAPET_Q_SAP_PACKAGING_ALLOWED_HOSTS";
+    private const string VariavelAmbientePackagingSapClient = "FUGAPET_Q_SAP_PACKAGING_CLIENT";
     private const string VariavelAmbienteUsuario = "FUGAPET_Q_SAP_USERNAME";
     private const string VariavelAmbienteSenha = "FUGAPET_Q_SAP_PASSWORD";
     private const string VariavelAmbienteSapClient = "FUGAPET_Q_SAP_CLIENT";

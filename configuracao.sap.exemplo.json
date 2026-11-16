@@ -44,7 +44,7 @@
       }
     ],
     "_seguranca": "Nao versionar senha real. Em producao/HML, prefira FUGAPET_SAP_USERNAME e FUGAPET_SAP_PASSWORD.",
-    "_seguranca_packaging": "A API de embalagem (Integration Suite) usa credenciais PROPRIAS, NUNCA as standard. Defina SOMENTE por variavel de ambiente: FUGAPET_SAP_PACKAGING_USERNAME e FUGAPET_SAP_PACKAGING_PASSWORD. O host do Integration Suite deve estar em packaging_hosts_permitidos. Endpoint = rota exata consultavel (.../GetPackagingSet); a consulta e por $filter=Material eq '...'. Nunca colocar usuario nem senha nem cabecalho de credencial aqui."
+    "_seguranca_packaging": "A API de embalagem (Integration Suite) usa credenciais PROPRIAS, NUNCA as standard. Defina SOMENTE por variavel de ambiente: FUGAPET_Q_SAP_PACKAGING_USERNAME e FUGAPET_Q_SAP_PACKAGING_PASSWORD. O host do Integration Suite deve estar em packaging_hosts_permitidos. Endpoint = rota exata consultavel (.../GetPackagingSet); a consulta e por $filter=Material eq '...'. Nunca colocar usuario nem senha nem cabecalho de credencial aqui."
   }
 }
 

@@ -91,7 +91,7 @@ testes de etiqueta está em `192.168.200.97`.
 |---|---|
 | `FUGAPET_Q_SAP_USERNAME` / `FUGAPET_Q_SAP_PASSWORD` | S/4 de Q |
 | `FUGAPET_SAP_USERNAME` / `FUGAPET_SAP_PASSWORD` | S/4 (nomes genéricos) |
-| `FUGAPET_SAP_PACKAGING_USERNAME` / `FUGAPET_SAP_PACKAGING_PASSWORD` | norma de embalagem (CPI) — credenciais próprias, nunca as do S/4 |
+| `FUGAPET_Q_SAP_PACKAGING_USERNAME` / `FUGAPET_Q_SAP_PACKAGING_PASSWORD` | norma de embalagem (CPI) — credenciais próprias, nunca as do S/4 |
 | `FUGAPET_SAP_PALLET_INT012_USERNAME` / `FUGAPET_SAP_PALLET_INT012_PASSWORD` | CPI/INT012 do palete — sem fallback para as do S/4 |
 
 A instalação atual em `C:\FugaPET_QAS110` traz `usuario` e `senha` dentro de
