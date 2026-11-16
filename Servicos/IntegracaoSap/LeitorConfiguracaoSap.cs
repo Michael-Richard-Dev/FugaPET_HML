@@ -35,8 +35,8 @@ public static class LeitorConfiguracaoSap
     private const string VariavelAmbientePaPipelineHabilitado = "FUGAPET_Q_SAP_PA_PIPELINE_ENABLED";
     private const string VariavelAmbientePalletInt012BaseUrl = "FUGAPET_Q_SAP_PALLET_INT012_BASE_URL";
     private const string VariavelAmbientePalletInt012HostsPermitidos = "FUGAPET_Q_SAP_PALLET_INT012_ALLOWED_HOSTS";
-    private const string VariavelAmbientePalletInt012Usuario = "FUGAPET_Q_SAP_PALLET_INT012_USERNAME";
-    private const string VariavelAmbientePalletInt012Senha = "FUGAPET_Q_SAP_PALLET_INT012_PASSWORD";
+    private const string VariavelAmbientePalletInt012Usuario = "FUGAPET_SAP_PALLET_INT012_USERNAME";
+    private const string VariavelAmbientePalletInt012Senha = "FUGAPET_SAP_PALLET_INT012_PASSWORD";
     // GATE Q PACKAGING-05: habilitação da capability de norma de embalagem — Q-namespaced, alvo Process.
     internal const string VariavelAmbientePackagingHabilitado = "FUGAPET_Q_SAP_PACKAGING_ENABLED";
 

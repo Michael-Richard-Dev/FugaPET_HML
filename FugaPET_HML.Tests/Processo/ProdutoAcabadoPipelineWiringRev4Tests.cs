@@ -543,8 +543,8 @@ public sealed class ProdutoAcabadoPipelineWiringRev4Tests
             Dictionary<string, string> ambiente = new()
             {
                 ["FUGAPET_Q_SAP_PALLET_WRITE_ENABLED"] = "true",
-                ["FUGAPET_Q_SAP_PALLET_INT012_USERNAME"] = "usuario-cpi-fake",
-                ["FUGAPET_Q_SAP_PALLET_INT012_PASSWORD"] = "senha-cpi-fake",
+                ["FUGAPET_SAP_PALLET_INT012_USERNAME"] = "usuario-cpi-fake",
+                ["FUGAPET_SAP_PALLET_INT012_PASSWORD"] = "senha-cpi-fake",
                 ["FUGAPET_Q_SAP_USERNAME"] = "usuario-sap-fake",
                 ["FUGAPET_Q_SAP_PASSWORD"] = "senha-sap-fake"
             };
