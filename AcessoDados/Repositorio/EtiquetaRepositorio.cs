@@ -105,6 +105,18 @@ public class EtiquetaRepositorio : RepositorioBase
 
     public virtual async Task<int> ExcluirAsync(long codigoEtiqueta, CancellationToken cancellationToken = default)
     {
+        // A guarda olha o vinculo REAL: produto_etiqueta_vinculo, gravado pela tela de Vinculo de
+        // Produto (incremento 065). Sem ela, dava para inativar uma etiqueta com produtos apontando
+        // para ela, e a tela de vinculo passaria a exibir uma etiqueta que nao vale mais.
+        //
+        // A tabela ANTIGA produto_etiqueta saiu daqui em 18/11/2026, por decisao do usuario, e por
+        // tres fatos somados:
+        //   1. esta VAZIA e nenhum codigo do sistema escreve nela — so lia;
+        //   2. no QAS110 e no QAS130 o papel de aplicacao nem tem privilegio nela: a consulta
+        //      respondia "permission denied for table produto_etiqueta". Ou seja, inativar etiqueta
+        //      JA falhava nesses dois ambientes, e so nao doia porque nao ha etiqueta cadastrada la;
+        //   3. no DEV passava despercebido porque ali a aplicacao conecta como postgres.
+        // A tabela continua no banco, intocada; o que saiu foi a dependencia do codigo nela.
         const string sql = """
             UPDATE etiqueta
                SET situacao_etiqueta = false,
@@ -113,9 +125,9 @@ public class EtiquetaRepositorio : RepositorioBase
                AND situacao_etiqueta = true
                AND NOT EXISTS (
                    SELECT 1
-                     FROM produto_etiqueta pe
-                    WHERE pe.codigo_etiqueta = @codigo_etiqueta
-                      AND pe.situacao_produto_etiqueta = true
+                     FROM produto_etiqueta_vinculo pv
+                    WHERE pv.codigo_etiqueta = @codigo_etiqueta
+                      AND pv.situacao = true
                );
             """;
 
@@ -205,11 +217,14 @@ public class EtiquetaRepositorio : RepositorioBase
         long codigoEtiqueta,
         CancellationToken cancellationToken = default)
     {
+        // Conta a MESMA tabela que o UPDATE de ExcluirAsync consulta. Se contasse outra coisa, a tela
+        // diria "pode inativar" e o banco recusaria em silencio, sem rowcount e sem mensagem.
+        // Sobre a saida da tabela antiga, ver o comentario em ExcluirAsync.
         const string sql = """
             SELECT count(*)
-              FROM produto_etiqueta
+              FROM produto_etiqueta_vinculo
              WHERE codigo_etiqueta = @codigo_etiqueta
-               AND situacao_produto_etiqueta = true;
+               AND situacao = true;
             """;
 
         await using NpgsqlConnection conexao = await CriarConexaoAbertaAsync(cancellationToken);
