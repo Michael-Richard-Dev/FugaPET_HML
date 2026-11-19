@@ -3,6 +3,7 @@ using FugaPET_HML.Controle.Processo;
 using FugaPET_HML.Modelo.Cadastro;
 using FugaPET_HML.Modelo.IntegracaoSap;
 using FugaPET_HML.Modelo.Processo;
+using FugaPET_HML.Servicos.Processo;
 using FugaPET_HML.Servicos.Operacao;
 using FugaPET_HML.Servicos.Seguranca;
 using FugaPET_HML.Servicos.Terminal;
@@ -75,6 +76,15 @@ public partial class ProcessoProdutoAcabadoForm : Form
     // §6: NÃO existe fallback de material de embalagem inventado. A única origem confirmada é a norma SAP
     // (MaterialCaixa). Sem origem real ⇒ vazio e o preview bloqueia a finalização (mensagem clara).
     private Button? _enviarCaixaSapButton; // "ENVIAR CAIXA SAP" — habilitado dinamicamente pelo gate HU + estado
+
+    // Processo de pesagem da OP carregada, vindo do vínculo produto × etiqueta (incremento 065).
+    // NULO = produto sem vínculo, e aí a tela se comporta como sempre se comportou: cadastro faltando
+    // não pode parar produção.
+    private ProcessoPesagemProduto? _processoPesagemOp;
+
+    // Guarda do lote. Separada de _envioCaixaSapEmAndamento porque o lote CHAMA o envio individual, e
+    // uma flag só faria a primeira chamada de dentro do laço voltar sem enviar nada.
+    private bool _envioLoteEmAndamento;
     private ToolTip? _enviarCaixaSapTooltip; // REV4-§11: tooltip dinâmico/neutro (nunca hardcoda DEV/HML)
 
     public ProcessoProdutoAcabadoForm()
@@ -621,7 +631,19 @@ public partial class ProcessoProdutoAcabadoForm : Form
 
         // §4/§6: handler async real — delega ao Controller/Service/Gateway. Só executa POST quando o gateway
         // está autorizado (flag HU) e a caixa persistida é elegível; a Form nunca faz HTTP diretamente.
-        _enviarCaixaSapButton.Click += async (_, _) => await SolicitarEnvioCaixaSapAsync();
+        // O botao e UM so; o processo do produto decide o que ele faz. Dois botoes conviveriam na tela
+        // sugerindo que existem dois caminhos abertos ao mesmo tempo, e nao existem: ou a OP e caixa a
+        // caixa, ou e envio unico.
+        _enviarCaixaSapButton.Click += async (_, _) =>
+        {
+            if (_processoPesagemOp == ProcessoPesagemProduto.EnvioUnico)
+            {
+                await SolicitarEnvioLoteSapAsync();
+                return;
+            }
+
+            await SolicitarEnvioCaixaSapAsync();
+        };
 
         sidePanel.Controls.Add(_enviarCaixaSapButton);
         _enviarCaixaSapButton.BringToFront();
@@ -660,6 +682,24 @@ public partial class ProcessoProdutoAcabadoForm : Form
         bool habilitado =
             _controller.EnvioHuAutorizado && elegivelEnvio
             && !_envioCaixaSapEmAndamento && !bloqueadaPorEstadoIndeterminado && !bloqueadaPorPipeline045;
+
+        // ENVIO_UNICO: o botão olha para o CONJUNTO, não para a última caixa. Enquanto houver pendente,
+        // ele fica disponível — é esse o processo: pesa tudo, envia tudo no fim.
+        if (_processoPesagemOp == ProcessoPesagemProduto.EnvioUnico)
+        {
+            int pendentes = _caixasPesadas.Count(ExecutorEnvioLoteCaixas.Elegivel);
+            habilitado = _controller.EnvioHuAutorizado && pendentes > 0
+                && !_envioLoteEmAndamento && !_envioCaixaSapEmAndamento;
+            temCaixaHu = _caixasPesadas.Count > 0;
+            _enviarCaixaSapButton.Text = pendentes > 0
+                ? $"ENVIAR TODAS AO SAP ({pendentes})"
+                : "ENVIAR TODAS AO SAP";
+        }
+        else
+        {
+            _enviarCaixaSapButton.Text = "ENVIAR CAIXA SAP";
+        }
+
         _enviarCaixaSapButton.Visible = temCaixaHu;
         _enviarCaixaSapButton.Enabled = habilitado;
         // REGRA 3: a APARÊNCIA reflete (não define) a elegibilidade. Habilitado ⇒ verde positivo do FugaPET;
@@ -715,7 +755,8 @@ public partial class ProcessoProdutoAcabadoForm : Form
     /// proteção contra duplo clique, autorização local quando AGUARDANDO_AUTORIZACAO_SAP, delegação ao
     /// Controller/Service e atualização visual pelo SNAPSHOT persistido retornado (nunca estado simulado).
     /// </summary>
-    private async Task SolicitarEnvioCaixaSapAsync()
+    private async Task SolicitarEnvioCaixaSapAsync(
+        ProdutoAcabadoCaixa? caixaAlvo = null, bool pedirConfirmacao = true)
     {
         if (_envioCaixaSapEmAndamento || _enviarCaixaSapButton is null)
         {
@@ -726,7 +767,7 @@ public partial class ProcessoProdutoAcabadoForm : Form
         // HU isolada fica PROIBIDA neste modo — nunca cai no caminho HU-only abaixo.
         if (_controller.PipelinePaGateHabilitado)
         {
-            await SolicitarEnvioCaixaPipelineAsync();
+            await SolicitarEnvioCaixaPipelineAsync(caixaAlvo, pedirConfirmacao);
             return;
         }
 
@@ -736,7 +777,8 @@ public partial class ProcessoProdutoAcabadoForm : Form
             return;
         }
 
-        ProdutoAcabadoCaixa? caixa = _caixasPesadas.LastOrDefault();
+        // Sem alvo explícito, continua sendo a última pesada — o comportamento de sempre.
+        ProdutoAcabadoCaixa? caixa = caixaAlvo ?? _caixasPesadas.LastOrDefault();
         if (caixa?.CodigoProdutoAcabadoCaixa is not long codigo
             || caixa.StatusIntegracao is not (StatusIntegracaoCaixa.AguardandoAutorizacaoSap or StatusIntegracaoCaixa.ProntaParaEnvio))
         {
@@ -781,12 +823,18 @@ public partial class ProcessoProdutoAcabadoForm : Form
             return;
         }
 
-        DialogResult confirmacao = MessageBox.Show(
-            $"Confirmar envio da caixa {caixa.CodigoCaixaLocal} ao SAP (POST HandlingUnit)?",
-            "Produto Acabado", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
-        if (confirmacao != DialogResult.Yes)
+        // No lote a confirmação já foi dada UMA vez, para o conjunto. Repeti-la por caixa transformaria
+        // um comando em doze perguntas, e o operador passaria a clicar "Sim" sem ler — que é o oposto
+        // de uma confirmação consciente.
+        if (pedirConfirmacao)
         {
-            return;
+            DialogResult confirmacao = MessageBox.Show(
+                $"Confirmar envio da caixa {caixa.CodigoCaixaLocal} ao SAP (POST HandlingUnit)?",
+                "Produto Acabado", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
+            if (confirmacao != DialogResult.Yes)
+            {
+                return;
+            }
         }
 
         string terminal = _contextoTerminal?.NomeTerminal ?? string.Empty;
@@ -830,11 +878,17 @@ public partial class ProcessoProdutoAcabadoForm : Form
                     : confirmada.CodigoCaixaLocal;
                 _codigoCaixaDestacada = confirmada.CodigoProdutoAcabadoCaixa; // reselecionar após recarregar a grid
                 statusLabel.Text = $"Caixa {confirmada.CodigoCaixaLocal} confirmada no SAP (HU {confirmada.HandlingUnitExternalId}).";
-                MessageBox.Show(
-                    "Caixa enviada ao SAP com sucesso.\r\n"
-                    + $"Caixa: {numeroCaixaFmt}\r\n"
-                    + $"HU SAP: {confirmada.HandlingUnitExternalId}",
-                    "Produto Acabado", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                // No lote, o aviso de sucesso é do CONJUNTO, dado uma vez no fim. Um pop-up por caixa
+                // obrigaria o operador a dispensar doze janelas para enviar doze caixas.
+                if (pedirConfirmacao)
+                {
+                    MessageBox.Show(
+                        "Caixa enviada ao SAP com sucesso.\r\n"
+                        + $"Caixa: {numeroCaixaFmt}\r\n"
+                        + $"HU SAP: {confirmada.HandlingUnitExternalId}",
+                        "Produto Acabado", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
 
                 // A etiqueta desta caixa já saiu na pesagem. Não se imprime de novo aqui: isso geraria duas
                 // etiquetas para a mesma caixa física, e duas etiquetas na mesma caixa é erro de operação.
@@ -889,12 +943,138 @@ public partial class ProcessoProdutoAcabadoForm : Form
     }
 
     /// <summary>
+    /// Processo ENVIO_UNICO: percorre as caixas pendentes da OP e envia uma a uma, cada qual com a sua
+    /// Handling Unit — exatamente o que o botão individual faz, só que sem exigir um clique por caixa.
+    /// <para>
+    /// O laço, a regra de parada e o relato vivem em <see cref="ExecutorEnvioLoteCaixas"/>, que é
+    /// testável sem tela. Aqui fica só o que é de tela: confirmar uma vez, delegar o envio de cada
+    /// caixa ao caminho já existente e contar o que aconteceu.
+    /// </para>
+    /// </summary>
+    private async Task SolicitarEnvioLoteSapAsync()
+    {
+        if (_envioLoteEmAndamento || _envioCaixaSapEmAndamento || _enviarCaixaSapButton is null)
+        {
+            return;
+        }
+
+        List<ProdutoAcabadoCaixa> candidatas = [.. _caixasPesadas];
+        int pendentes = candidatas.Count(ExecutorEnvioLoteCaixas.Elegivel);
+        if (pendentes == 0)
+        {
+            statusLabel.Text = "Nenhuma caixa pendente de envio ao SAP.";
+            return;
+        }
+
+        // UMA confirmação, honesta sobre o custo: o operador precisa saber que são N POSTs, e não um.
+        DialogResult confirmacao = MessageBox.Show(
+            $"Enviar {pendentes} caixa(s) ao SAP?\r\n\r\n"
+            + $"Serão {pendentes} POSTs, um por caixa, cada uma com a sua HU.\r\n"
+            + "O envio para na primeira caixa que não confirmar.",
+            "Produto Acabado", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
+        if (confirmacao != DialogResult.Yes)
+        {
+            return;
+        }
+
+        _envioLoteEmAndamento = true;
+        AtualizarEstadoEnvioCaixaSap();
+        try
+        {
+            ResultadoEnvioLoteCaixas resultado = await new ExecutorEnvioLoteCaixas().ExecutarAsync(
+                candidatas, EnviarUmaCaixaDoLoteAsync);
+
+            string relato = MontarRelatoDoLote(resultado);
+            statusLabel.Text = relato;
+            MessageBox.Show(relato, "Produto Acabado", MessageBoxButtons.OK,
+                resultado.Interrompeu ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+        }
+        finally
+        {
+            _envioLoteEmAndamento = false;
+            AtualizarGridCaixas();
+            AtualizarResumoOperacional();
+            AtualizarEstadoEnvioCaixaSap();
+            AtualizarBotoesOperacao();
+            AtualizarSaldoPendente();
+        }
+    }
+
+    /// <summary>
+    /// Envia UMA caixa pelo caminho de sempre e devolve o status PERSISTIDO dela.
+    /// <para>
+    /// O lote não acredita no que o envio diz ter feito: relê a caixa do banco e é esse status que
+    /// decide se continua. É a mesma disciplina do envio individual — a autoridade é o snapshot
+    /// persistido, nunca o estado presumido —, e tem a vantagem de funcionar igual nos dois caminhos
+    /// de envio (HU isolada e 261→101→HU) sem o laço precisar saber qual deles rodou.
+    /// </para>
+    /// <para>
+    /// Nulo = nem o estado final foi possível ler. O executor trata isso como parada, que é o
+    /// tratamento certo: nada pior do que seguir postando depois de perder a conta.
+    /// </para>
+    /// </summary>
+    private async Task<StatusIntegracaoCaixa?> EnviarUmaCaixaDoLoteAsync(
+        ProdutoAcabadoCaixa caixa, CancellationToken cancellationToken)
+    {
+        if (caixa.CodigoProdutoAcabadoCaixa is not long codigo)
+        {
+            return null;
+        }
+
+        await SolicitarEnvioCaixaSapAsync(caixa, pedirConfirmacao: false);
+
+        try
+        {
+            ProdutoAcabadoCaixa? snapshot = await _controller.ObterCaixaPorCodigoAsync(codigo, cancellationToken);
+            return snapshot?.StatusIntegracao;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                $"[ProdutoAcabado] Falha ao reler a caixa {caixa.CodigoCaixaLocal} durante o lote: {ex.GetType().Name}");
+            return null;
+        }
+    }
+
+    /// <summary>Relato do lote em números, nomeando a caixa que parou e o que não foi tentado.</summary>
+    internal static string MontarRelatoDoLote(ResultadoEnvioLoteCaixas resultado)
+    {
+        ArgumentNullException.ThrowIfNull(resultado);
+
+        List<string> partes = [$"{resultado.Enviadas.Count} caixa(s) enviada(s) ao SAP."];
+
+        if (resultado.Interrompeu && resultado.ParouEm is not null)
+        {
+            string estado = resultado.StatusDoParado is StatusIntegracaoCaixa status
+                ? MapeadorStatusHuCaixa.ParaTextoBanco(status)
+                : "ESTADO INDETERMINADO";
+
+            partes.Add($"Parou na caixa {resultado.ParouEm.CodigoCaixaLocal}: {estado}.");
+            partes.Add($"{resultado.NaoTentadas.Count} caixa(s) não foram tentadas.");
+            partes.Add("Resolva essa caixa e acione o envio de novo: as já confirmadas são puladas.");
+        }
+
+        if (resultado.Puladas.Count > 0)
+        {
+            partes.Add($"{resultado.Puladas.Count} já estavam confirmadas.");
+        }
+
+        if (resultado.ForaDoLote.Count > 0)
+        {
+            partes.Add($"{resultado.ForaDoLote.Count} fora do lote, para tratamento individual.");
+        }
+
+        return string.Join(" ", partes);
+    }
+
+    /// <summary>
     /// REV4-§3/§6/§11: caminho do NOVO pipeline (261→101→HU). Fail-closed: pipeline indisponível
     /// (DEPENDENCIA_GAIA) OU commands incompletos (DEPENDENCIA_ARES) ⇒ nenhum POST; UI informa o estado.
     /// A View NÃO monta payload SAP — apenas entrega a origem (OP + caixa + correlação local); o builder de
     /// domínio converte/valida. NUNCA envia HU isolada aqui.
     /// </summary>
-    private async Task SolicitarEnvioCaixaPipelineAsync()
+    private async Task SolicitarEnvioCaixaPipelineAsync(
+        ProdutoAcabadoCaixa? caixaAlvo = null, bool pedirConfirmacao = true)
     {
         if (!_controller.PipelinePaDisponivel)
         {
@@ -903,7 +1083,7 @@ public partial class ProcessoProdutoAcabadoForm : Form
             return;
         }
 
-        ProdutoAcabadoCaixa? caixa = _caixasPesadas.LastOrDefault();
+        ProdutoAcabadoCaixa? caixa = caixaAlvo ?? _caixasPesadas.LastOrDefault();
         if (caixa?.CodigoProdutoAcabadoCaixa is not long codigo)
         {
             statusLabel.Text = "Nenhuma caixa elegível para o pipeline SAP.";
@@ -973,8 +1153,14 @@ public partial class ProcessoProdutoAcabadoForm : Form
         {
             ResultadoPipelineProdutoAcabado resultado = await _controller.EnviarCaixaPipelineAsync(origem, usuario, terminal);
             AtualizarEstadosPipeline(resultado);
-            ExibirResultadoOperacionalPipeline(resultado);
             pipelineConcluido = PipelineConcluidoIntegralmente(resultado);
+
+            // No lote, só avisa quando NÃO concluiu: aí o aviso é o motivo da parada, e o operador
+            // precisa vê-lo. Caixa confirmada não interrompe ninguém para dar boa notícia.
+            if (pedirConfirmacao || !pipelineConcluido)
+            {
+                ExibirResultadoOperacionalPipeline(resultado);
+            }
         }
         catch (Exception ex)
         {
@@ -1055,11 +1241,13 @@ public partial class ProcessoProdutoAcabadoForm : Form
             ? MensagemVinculo045NaoComprovavel
             : MensagemCaixaVinculadaAoPipeline045;
 
+    /// <remarks>
+    /// Delega ao executor do lote para que exista UMA definição de "caixa enviável". Duplicá-la aqui
+    /// deixaria o lote e o envio individual livres para divergir, e o dia em que divergissem um dos
+    /// dois estaria postando o que o outro recusa.
+    /// </remarks>
     internal static bool CaixaElegivelParaPipeline(ProdutoAcabadoCaixa? caixa)
-        => caixa?.CodigoProdutoAcabadoCaixa is long
-            && caixa.StatusIntegracao
-                is StatusIntegracaoCaixa.AguardandoAutorizacaoSap
-                or StatusIntegracaoCaixa.ProntaParaEnvio;
+        => ExecutorEnvioLoteCaixas.Elegivel(caixa);
 
     /// <summary>GATE 113E: motivo objetivo da inelegibilidade, nomeando o estado persistido.</summary>
     internal static string MensagemCaixaInelegivelParaPipeline(ProdutoAcabadoCaixa? caixa)
@@ -1330,6 +1518,12 @@ public partial class ProcessoProdutoAcabadoForm : Form
             _ordemAtual = resultado.Ordem;
             _ultimaOpConsultada = _ordemAtual.NumeroOrdem; // Tarefa 21.6.3 (Ajuste 1): não reconsultar a mesma OP no Leave
             _normaEmbalagem = resultado.NormaEmbalagem;
+
+            // O processo de pesagem é do PRODUTO, e vale para a OP inteira. Resolvido aqui, uma vez, em
+            // vez de a cada clique: trocar de processo no meio de uma OP seria mudar a regra com caixas
+            // já pesadas sob a anterior. Sem vínculo ⇒ null ⇒ caixa a caixa, como sempre foi.
+            _processoPesagemOp = await _controller.ObterProcessoPesagemAsync(
+                _ordemAtual.Centro, _ordemAtual.MaterialProduzido, CancellationToken.None);
             _caixasPesadas.Clear();
             // GATE 046-E §12: BANCO autoritativo — ao carregar a OP, recarrega os paletes locais persistidos.
             bool paletesRecarregados = await RecarregarPaletesPersistidosAsync();
@@ -1667,7 +1861,7 @@ public partial class ProcessoProdutoAcabadoForm : Form
         }
 
         // §4: com caixa ATIVA, não reiniciar a leitura — exige confirmar/cancelar a caixa atual antes.
-        if (PrimeiraEntregaHu && ExisteCaixaAtiva())
+        if (PrimeiraEntregaHu && ExisteCaixaQueImpedeSeguir())
         {
             AvisarCaixaAtivaPendente();
             return;
@@ -1776,13 +1970,11 @@ public partial class ProcessoProdutoAcabadoForm : Form
             return false;
         }
 
-        // §7: UMA CAIXA POR VEZ. Cache local espelha o banco (a caixa ativa também é recuperada na abertura
-        // via ObterCaixaAtivaPorTerminalAsync). Exige confirmar/cancelar a caixa atual antes da próxima.
-        if (PrimeiraEntregaHu && ExisteCaixaAtiva())
+        // §7: UMA CAIXA POR VEZ na balança. No caixa a caixa isso também exige integrar a anterior; no
+        // envio único, não — acumular pendente é o processo. A diferença mora em ExisteCaixaQueImpedeSeguir.
+        if (PrimeiraEntregaHu && ExisteCaixaQueImpedeSeguir())
         {
-            MessageBox.Show(
-                "Já existe uma caixa em andamento. Confirme o envio ou cancele a caixa atual antes de pesar outra.",
-                "Produto Acabado", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(MensagemDoBloqueio(), "Produto Acabado", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return false;
         }
 
@@ -1827,7 +2019,11 @@ public partial class ProcessoProdutoAcabadoForm : Form
                 {
                     etapaRegistro = etapa;
                     Servicos.Diagnostico.RegistroCaixaDiag120E.Registrar(etapa);
-                });
+                },
+                // 068: a caixa nasce carimbada com o processo da OP. Sem isto a coluna fica sempre nula
+                // e o índice do banco continua tratando toda caixa como caixa a caixa — ou seja, o envio
+                // único travaria na segunda caixa, que foi o defeito encontrado em 19/11/2026.
+                processoPesagem: _processoPesagemOp);
         }
         catch (Exception ex)
         {
@@ -2005,6 +2201,33 @@ public partial class ProcessoProdutoAcabadoForm : Form
             c.StatusIntegracao != StatusIntegracaoCaixa.ConfirmadaSap
             && c.StatusIntegracao != StatusIntegracaoCaixa.Cancelada);
 
+    /// <summary>
+    /// Existe caixa que IMPEDE seguir (pesar a próxima, trocar a OP, fechar a tela)?
+    /// <para>
+    /// <see cref="ExisteCaixaAtiva"/> junta duas regras que só pareciam uma enquanto existia um processo
+    /// só: <b>uma caixa por vez na balança</b>, que é física e vale sempre, e <b>não deixe caixa
+    /// finalizada sem integrar</b>, que é do caixa a caixa. O envio único existe justamente para
+    /// acumular caixas finalizadas e sem integrar — sob a regra antiga, a segunda caixa já era barrada,
+    /// e o processo ficava impossível de operar.
+    /// </para>
+    /// <para>
+    /// No envio único seguem impedindo apenas os estados que EXIGEM DECISÃO HUMANA: caixa aberta na
+    /// balança, envio em curso, resultado indeterminado, bloqueada e erro. Empilhar caixas sobre um
+    /// desses esconderia o problema em vez de resolvê-lo.
+    /// </para>
+    /// <para>
+    /// As pendentes acumuladas não se perdem ao fechar a tela: elas estão persistidas e voltam pela
+    /// recuperação na abertura. É o que permite liberar o fechamento sem criar uma armadilha — guarda
+    /// sem caminho de saída já prendeu a operação antes.
+    /// </para>
+    /// </summary>
+    /// <remarks>
+    /// A regra mora em <see cref="RegraBloqueioPesagemProdutoAcabado"/>, fora da tela, para poder ser
+    /// provada sem WinForms — foi a ausência dessa prova que deixou o travamento passar.
+    /// </remarks>
+    private bool ExisteCaixaQueImpedeSeguir()
+        => RegraBloqueioPesagemProdutoAcabado.ImpedeSeguir(_processoPesagemOp, _caixasPesadas);
+
     /// <summary>§3: oculta um controle de palete localizado por Name (o título é criado localmente).</summary>
     private void OcultarControlePaletePorNome(string nome)
     {
@@ -2039,7 +2262,7 @@ public partial class ProcessoProdutoAcabadoForm : Form
     private bool ValidarPodePesar()
     {
         // §4: bloqueio preventivo — com caixa ativa pendente não abre pesagem (F9/F12/manual/balança).
-        if (PrimeiraEntregaHu && ExisteCaixaAtiva())
+        if (PrimeiraEntregaHu && ExisteCaixaQueImpedeSeguir())
         {
             AvisarCaixaAtivaPendente();
             return false;
@@ -2786,7 +3009,7 @@ public partial class ProcessoProdutoAcabadoForm : Form
         bool livre = !_operacaoEmAndamento;
         // §4: com caixa ATIVA (finalizada aguardando integração) a leitura NÃO pode reiniciar — apenas parar
         // uma leitura já em andamento. Bloqueio preventivo, não só dentro de RegistrarCaixaProdutoAcabado.
-        bool caixaAtiva = ExisteCaixaAtiva();
+        bool caixaAtiva = ExisteCaixaQueImpedeSeguir();
         bool podeAlternarLeitura = livre && _ordemAtual is not null && QuantidadePorCaixaValida() && !caixaAtiva;
         iniciarLeituraButton.PrimaryText = _leituraIniciada ? "PARAR LEITURA" : "INICIAR LEITURA";
         iniciarLeituraButton.IconGlyph = _leituraIniciada ? "\uE71A" : "\uE768";
@@ -2897,6 +3120,9 @@ public partial class ProcessoProdutoAcabadoForm : Form
         _ordemAtual = null;
         _ultimaOpConsultada = string.Empty; // Tarefa 21.6.3 (Ajuste 1): limpar libera nova consulta no Leave
         _normaEmbalagem = null;
+        // Sem OP não há processo: deixar o modo anterior aqui faria a próxima OP herdar a regra da
+        // antiga até a consulta terminar, e o botão ofereceria envio em lote para quem não é lote.
+        _processoPesagemOp = null;
         _taraCaixaSelecionada = null;
         _caixasPesadas.Clear();
         _paletesMontados.Clear();
@@ -2954,7 +3180,7 @@ public partial class ProcessoProdutoAcabadoForm : Form
     private bool PodeFecharTela()
     {
         // §5: caixa ativa (só em memória nesta fase) NÃO pode ser descartada ao fechar/Escape.
-        if (PrimeiraEntregaHu && ExisteCaixaAtiva())
+        if (PrimeiraEntregaHu && ExisteCaixaQueImpedeSeguir())
         {
             AvisarCaixaAtivaPendente();
             return false;
@@ -2980,7 +3206,7 @@ public partial class ProcessoProdutoAcabadoForm : Form
     /// </summary>
     private bool PodeTrocarOuLimparOp()
     {
-        if (PrimeiraEntregaHu && ExisteCaixaAtiva())
+        if (PrimeiraEntregaHu && ExisteCaixaQueImpedeSeguir())
         {
             AvisarCaixaAtivaPendente();
             return false;
@@ -2992,10 +3218,41 @@ public partial class ProcessoProdutoAcabadoForm : Form
     /// <summary>§5: aviso central de caixa ativa pendente (usado em pesagem, troca de OP e fechamento).</summary>
     private void AvisarCaixaAtivaPendente()
     {
-        const string mensagem =
-            "Existe uma caixa finalizada aguardando integração. Confirme ou cancele a caixa antes de trocar a OP ou fechar a tela.";
+        string mensagem = MensagemDoBloqueio();
         statusLabel.Text = mensagem;
         MessageBox.Show(mensagem, "Produto Acabado", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+    }
+
+    /// <summary>
+    /// Diz qual caixa está bloqueando e por quê.
+    /// <para>
+    /// No envio único a mensagem antiga mentiria: acumular caixa finalizada é o processo, então o que
+    /// barra nunca é "aguardando integração" — é uma caixa aberta, um envio em curso ou um resultado
+    /// que precisa de decisão. Mandar "confirme ou cancele" diante de uma caixa em ERRO_SAP manda o
+    /// operador fazer o que não resolve.
+    /// </para>
+    /// </summary>
+    private string MensagemDoBloqueio()
+    {
+        if (_processoPesagemOp != ProcessoPesagemProduto.EnvioUnico)
+        {
+            return "Existe uma caixa finalizada aguardando integração. Confirme ou cancele a caixa antes de "
+                 + "trocar a OP ou fechar a tela.";
+        }
+
+        ProdutoAcabadoCaixa? bloqueando =
+            RegraBloqueioPesagemProdutoAcabado.PrimeiraQueImpede(_processoPesagemOp, _caixasPesadas);
+
+        if (bloqueando is null)
+        {
+            return "Existe uma caixa que impede seguir.";
+        }
+
+        string estado = MapeadorStatusHuCaixa.ParaTextoBanco(bloqueando.StatusIntegracao);
+        return bloqueando.StatusIntegracao == StatusIntegracaoCaixa.EmPesagem
+            ? $"A caixa {bloqueando.CodigoCaixaLocal} está aberta na balança. Finalize ou cancele essa caixa antes de seguir."
+            : $"A caixa {bloqueando.CodigoCaixaLocal} está em {estado} e precisa ser resolvida antes de seguir. "
+              + "As demais caixas pesadas continuam pendentes de envio e não se perdem.";
     }
 
     private bool SolicitarPesoManual(decimal taraKg, out decimal pesoKg)
@@ -3146,7 +3403,7 @@ public partial class ProcessoProdutoAcabadoForm : Form
     private async void ProcessoProdutoAcabadoForm_KeyDown(object? sender, KeyEventArgs e)
     {
         // §4: bloqueio preventivo de F5/F9/F12 com caixa ativa pendente (Delete=cancelar e Escape seguem).
-        if (PrimeiraEntregaHu && ExisteCaixaAtiva()
+        if (PrimeiraEntregaHu && ExisteCaixaQueImpedeSeguir()
             && e.KeyCode is Keys.F5 or Keys.F9 or Keys.F12 && !_leituraIniciada)
         {
             e.SuppressKeyPress = true;

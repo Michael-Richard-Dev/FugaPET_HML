@@ -4,6 +4,7 @@ using FugaPET_HML.Controle.Cadastro;
 using FugaPET_HML.Servicos.Auditoria;
 using FugaPET_HML.Servicos.Cadastro;
 using FugaPET_HML.Servicos.IntegracaoSap;
+using FugaPET_HML.Servicos.Processo;
 using FugaPET_HML.Servicos.Seguranca;
 
 namespace FugaPET_HML.Controle;
@@ -113,6 +114,16 @@ public static class FabricaControladoresCadastro
             sincronizacao,
             CriarAuditoriaServico());
         return new VinculoProdutoEtiquetaController(servico);
+    }
+
+    /// <summary>
+    /// Servico que a PESAGEM usa para descobrir o processo do produto. Mora aqui, e nao numa fabrica
+    /// de processo, porque le a tabela do cadastro e reusa a mesma fabrica de conexao.
+    /// </summary>
+    public static ProcessoPesagemProdutoServico CriarProcessoPesagemProdutoServico()
+    {
+        VinculoProdutoEtiquetaRepositorio repositorio = new(FabricaConexao.Value);
+        return new ProcessoPesagemProdutoServico(repositorio);
     }
 
     public static CampoEtiquetaController CriarCampoEtiquetaController()
