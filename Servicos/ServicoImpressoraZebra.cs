@@ -230,10 +230,13 @@ public sealed class ServicoImpressoraZebra
         zpl.Append("^XA\n^CI28\n")
            .Append($"^PW{largura}\n^LL{altura}\n^FWN\n^LH0,0\n");
 
-        // --- Faixa superior: aviso do EAN a esquerda, lote a direita ---
-        // O EAN do produto nao existe no sistema. Nao se imprime barra sem origem: um EAN errado
-        // e lido pelo cliente como outro produto. Fica o aviso no lugar reservado.
-        zpl.Append($"^FO{colEsqX + P(0.02)},{P(0.06)}^A0N,18,18^FB{colEsqW},2,0,L^FDEAN DO PRODUTO\\&NAO CADASTRADO^FS\n");
+        // --- Faixa superior: EAN do produto a esquerda, lote a direita ---
+        //
+        // Ate 23/11/2026 este espaco so trazia o aviso "EAN DO PRODUTO NAO CADASTRADO", porque o EAN nao
+        // tinha origem no sistema. O usuario apontou a origem (MM02, aba "EANs adicionais", linha da unidade
+        // CX) e ela virou A_ProductUnitsOfMeasureEAN. O aviso CONTINUA para quem nao tem a linha cadastrada:
+        // a regra de nunca imprimir barra sem origem nao mudou, so deixou de valer para todo mundo.
+        zpl.Append(BlocoEanCaixa(etiqueta.EanCaixa, colEsqX + P(0.02), P(0.06), colEsqW, P(0.19)));
 
         zpl.Append($"^FO{colDirX},{P(0.05)}^GB{colDirW},{P(0.19)},2^FS\n")
            .Append($"^FO{colDirX},{P(0.08)}^A0N,22,22^FB{colDirW},1,0,C^FDLote: {Z(etiqueta.Lote)}^FS\n");
@@ -566,7 +569,17 @@ public sealed class ServicoImpressoraZebra
     {
         ArgumentNullException.ThrowIfNull(etiqueta);
 
-        string codigoBarras = string.IsNullOrWhiteSpace(etiqueta.CodigoBarras) ? "SEM-CODIGO" : etiqueta.CodigoBarras;
+        // A BARRA CARREGA A HU DO PALETE, nao o codigo local (pedido do usuario em 23/11/2026).
+        //
+        // Ate aqui a barra levava o sequencial local com prefixo "20" (palete 8 => 2000000008), que
+        // nao identifica nada fora deste sistema. A expedicao e o cliente leem HU; o codigo local so
+        // serve dentro do FugaPET.
+        //
+        // Sem HU NAO SE IMPRIME BARRA, pela mesma razao da etiqueta da caixa: uma barra que devolve
+        // um numero que o SAP nao conhece e pior que nenhuma, porque quem bipa confia nela. A
+        // elegibilidade agora exige palete CONFIRMADO no SAP, entao na pratica a HU sempre existe
+        // aqui — este ramo e a rede de seguranca, nao o caminho normal.
+        string codigoBarras = NormalizarHandlingUnit(etiqueta.HandlingUnitSap);
         // A descricao e a linha mais visivel do modelo. Vazia, o material ocupa o lugar — melhor um
         // codigo legivel do que um espaco em branco no meio da etiqueta.
         string titulo = string.IsNullOrWhiteSpace(etiqueta.DescricaoMaterial)
@@ -608,8 +621,12 @@ public sealed class ServicoImpressoraZebra
            // 16/11/2026: moldura vazia com o numero em letra miuda. A etiqueta de CAIXA, que sempre
            // funcionou, usa ^BCB sem ^FB. Como ZPL nao centraliza codigo de barras, a posicao e
            // calculada a partir da largura estimada do Code128.
-           .Append($"^FO{CentralizarBarras(codigoBarras, ModuloBarrasPalete, Margem + 140, Util - 280)},"
-                 + $"{TopoMoldura + 26}^BY{ModuloBarrasPalete}^BCN,120,Y,N,N^FD{Z(codigoBarras)}^FS\n")
+           .Append(codigoBarras.Length > 0
+               ? $"^FO{CentralizarBarras(codigoBarras, ModuloBarrasPalete, Margem + 140, Util - 280)},"
+                 + $"{TopoMoldura + 26}^BY{ModuloBarrasPalete}^BCN,120,Y,N,N^FD{Z(codigoBarras)}^FS\n"
+               // Rede de seguranca: moldura com o aviso, nunca uma barra inventada.
+               : $"^FO{Margem + 140},{TopoMoldura + 80}^A0N,30,30^FB{Util - 280},1,0,C"
+                 + "^FDPALETE SEM HU DO SAP^FS\n")
            // Totais, com os mesmos rotulos do modelo.
            .Append($"^FO{Margem},{topoTotais}^A0N,32,32^FDQt Cx./Sacos: {Z(etiqueta.QuantidadeCaixas)}"
                  + $"    Qt Pct/PC: {Z(etiqueta.QuantidadeProdutos)}"
@@ -677,6 +694,163 @@ public sealed class ServicoImpressoraZebra
     /// </para>
     /// </summary>
     internal const int AlturaBarrasCaixa = 104;
+
+    /// <summary>
+    /// Bloco do EAN do produto na faixa superior esquerda da etiqueta da caixa: a barra quando ha EAN, o
+    /// aviso quando nao ha. Pedido do usuario em 23/11/2026.
+    /// <para>
+    /// O ESPACO E BAIXO: cerca de 40 pontos, uns 5 mm a 203 dpi, contra os ~22 mm que a GS1 recomenda para
+    /// EAN-13. Nao da para crescer sem reorganizar a grade inteira, entao o que se faz aqui e compensar pela
+    /// LARGURA do modulo — barra mais grossa perdoa altura menor na leitura. A largura disponivel sobra
+    /// (~296 pontos para 95 modulos), e por isso o modulo pode ser 2 ou 3 em vez de 1.
+    /// </para>
+    /// </summary>
+    internal static string BlocoEanCaixa(string? ean, int x, int y, int largura, int altura)
+    {
+        string dados = (ean ?? string.Empty).Trim();
+        if (dados.Length == 0)
+        {
+            return $"^FO{x},{y}^A0N,18,18^FB{largura},2,0,L^FDEAN DO PRODUTO\\&NAO CADASTRADO^FS\n";
+        }
+
+        // OS DIGITOS SAO DESENHADOS AQUI, NAO PELA IMPRESSORA.
+        //
+        // O caminho obvio seria ligar a linha de interpretacao do proprio comando (o 'Y' de ^BEN,h,Y,N) e
+        // deixar a Zebra escrever os numeros sob a barra. Mas aí a ALTURA dessa linha e decidida pelo
+        // firmware, com uma fonte que este codigo nao escolhe — e o bloco inteiro tem 39 pontos, com a
+        // moldura da descricao comecando logo abaixo. Uma fonte um pouco maior que o previsto e os digitos
+        // invadem a moldura, e isso so apareceria na etiqueta impressa.
+        //
+        // Desenhando aqui, a barra e o texto ficam dentro de 'altura' por construcao.
+        int alturaBarra = altura - AlturaLinhaInterpretacaoEan;
+        if (alturaBarra < AlturaMinimaBarraEan)
+        {
+            alturaBarra = AlturaMinimaBarraEan;
+        }
+
+        int modulo = EscolherModuloEan(dados, largura);
+        int larguraBarra = LarguraEstimadaEanDots(dados, modulo);
+        int yDigitos = y + alturaBarra;
+
+        string barra = EhEan13Valido(dados)
+
+            // ^BE recebe 12 DIGITOS e a impressora calcula o 13o (o verificador). Mandar os 13 faz
+            // firmwares diferentes agirem de forma diferente — uns recusam, outros truncam.
+            //
+            // E por isso que o verificador e conferido ANTES, em EhEan13Valido: se o EAN gravado no SAP
+            // tiver verificador errado, a impressora calcularia o CERTO e a barra sairia codificando um
+            // numero DIFERENTE do que esta escrito ao lado. Uma barra que discorda do numero impresso e
+            // pior que barra nenhuma — quem confere a olho aprova, e o leitor do cliente le outra coisa.
+            ? $"^FO{x},{y}^BY{modulo}^BEN,{alturaBarra},N,N^FD{dados[..12]}^FS\n"
+
+            // Nao e EAN-13 valido (GTIN-14, EAN-8, verificador que nao fecha, algo com letra): vai em
+            // Code128, que aceita o valor COMO ESTA. O que a barra devolve e exatamente o que o SAP tem,
+            // sem a impressora reescrever nada.
+            : $"^FO{x},{y}^BY{modulo}^BCN,{alturaBarra},N,N,N^FD{SanitizarParaZpl(dados)}^FS\n";
+
+        // Os digitos COMPLETOS (13, com o verificador) centralizados sob a barra: e o numero que o conferente
+        // compara com o SAP, e a barra codifica exatamente ele.
+        string digitos =
+            $"^FO{x},{yDigitos}^A0N,{FonteDigitosEan},{FonteDigitosEan}^FB{larguraBarra},1,0,C^FD{SanitizarParaZpl(dados)}^FS\n";
+
+        return barra + digitos;
+    }
+
+    /// <summary>Altura da fonte dos digitos sob a barra do EAN, em pontos.</summary>
+    internal const int FonteDigitosEan = 12;
+
+    /// <summary>
+    /// A Handling Unit como as pessoas e o SAP a chamam, sem os zeros a esquerda do armazenamento.
+    /// <para>
+    /// O PALETE guarda a HU PREENCHIDA com zeros ate 20 caracteres — <c>00000000000300016060</c> —,
+    /// que e a representacao interna do campo. A CAIXA guarda a mesma coisa ja limpa
+    /// (<c>300015994</c>). Verificado no banco do DEV110 em 23/11/2026; a diferenca e real e nao
+    /// adianta supor que os dois sao iguais.
+    /// </para>
+    /// <para>
+    /// Imprimir a forma preenchida teria dois defeitos: o leitor devolveria um numero que ninguem
+    /// reconhece ao conferir contra o SAP, e os 11 zeros a mais custariam cerca de um terco da
+    /// largura da barra sem carregar informacao nenhuma.
+    /// </para>
+    /// <para>
+    /// So retira zeros a ESQUERDA, e nunca devolve vazio quando havia digito: uma HU hipotetica toda
+    /// de zeros vira "0", nao string vazia, para nao ser confundida com "nao tem HU".
+    /// </para>
+    /// </summary>
+    internal static string NormalizarHandlingUnit(string? handlingUnit)
+    {
+        string bruto = (handlingUnit ?? string.Empty).Trim();
+        if (bruto.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        string semZeros = bruto.TrimStart('0');
+        return semZeros.Length > 0 ? semZeros : "0";
+    }
+
+    /// <summary>
+    /// Altura reservada para os digitos impressos sob a barra do EAN, em pontos. Maior que
+    /// <see cref="FonteDigitosEan"/> para o texto nao encostar na moldura de baixo.
+    /// </summary>
+    internal const int AlturaLinhaInterpretacaoEan = 14;
+
+    /// <summary>Piso da barra do EAN. Abaixo disso nao vale a pena imprimir: nenhum leitor pega.</summary>
+    internal const int AlturaMinimaBarraEan = 20;
+
+    /// <summary>
+    /// Maior modulo que faz o EAN caber na largura disponivel, reservando a zona de silencio das duas
+    /// pontas. Limitado a 3: acima disso a barra fica larga sem ganho de leitura.
+    /// </summary>
+    internal static int EscolherModuloEan(string dados, int larguraDisponivel)
+    {
+        int util = larguraDisponivel - (2 * ZonaSilencioEan);
+        for (int modulo = 3; modulo >= 2; modulo--)
+        {
+            if (LarguraEstimadaEanDots(dados, modulo) <= util)
+            {
+                return modulo;
+            }
+        }
+
+        return 1;
+    }
+
+    /// <summary>Zona de silencio em cada ponta da barra do EAN, em pontos.</summary>
+    internal const int ZonaSilencioEan = 10;
+
+    /// <summary>
+    /// Largura estimada da barra do EAN. EAN-13 tem 95 modulos FIXOS, qualquer que seja o numero — e a
+    /// vantagem dele aqui. Fora do EAN-13 cai na conta conservadora do Code128, a mesma da barra da HU.
+    /// </summary>
+    internal static int LarguraEstimadaEanDots(string dados, int larguraModulo)
+        => EhEan13Valido(dados)
+            ? 95 * larguraModulo
+            : EstimarLarguraCode128Dots(dados, larguraModulo);
+
+    /// <summary>
+    /// EAN-13 de verdade: 13 digitos E digito verificador que fecha (pesos 1 e 3 alternados, da esquerda
+    /// para a direita). Verificar e o que impede a impressora de "corrigir" um EAN errado e fazer a barra
+    /// codificar um numero diferente do impresso.
+    /// </summary>
+    internal static bool EhEan13Valido(string? ean)
+    {
+        string dados = (ean ?? string.Empty).Trim();
+        if (dados.Length != 13 || !dados.All(char.IsAsciiDigit))
+        {
+            return false;
+        }
+
+        int soma = 0;
+        for (int i = 0; i < 12; i++)
+        {
+            int digito = dados[i] - '0';
+            soma += (i % 2 == 0) ? digito : digito * 3;
+        }
+
+        int verificador = (10 - (soma % 10)) % 10;
+        return verificador == dados[12] - '0';
+    }
 
     /// <summary>
     /// Folga MINIMA em cada ponta da barra, em pontos. Cobre a zona de silencio que o Code128 pede
