@@ -1,7 +1,12 @@
-namespace FugaPET_HML.Modelo.Cadastro;
+﻿namespace FugaPET_HML.Modelo.Cadastro;
 
 public sealed class CampoEtiquetaCadastro
 {
+    public const int TamanhoMinimoNome = 2;
+    public const int TamanhoMaximoNome = 80;
+    public const int TamanhoMaximoDescricao = 255;
+    public const int TamanhoMaximoFormatoSaida = 100;
+
     public long CodigoCampoEtiqueta { get; set; }
     public long CodigoEtiqueta { get; set; }
     public string NomeCampo { get; set; } = string.Empty;
