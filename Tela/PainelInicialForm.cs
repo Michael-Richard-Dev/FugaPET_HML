@@ -111,6 +111,7 @@ public partial class PainelInicialForm : Form
             // item de 2 linhas ("Processo de Produção") e separa os módulos. Larguras/rotulos já vêm do Designer.
             ReempilharSidebar();
             AjustarRodapeSidebar();
+            AjustarMarcaCentral();
         };
 
         // Sidebar 2.0x SEM cortar: os rótulos ficam em AutoSize (crescem com a fonte e nunca cortam). A largura
@@ -193,12 +194,154 @@ public partial class PainelInicialForm : Form
         sidebarUserStatusLabel.SetBounds(74, 44, larguraTexto, 22);
         sidebarUserChevronLabel.Visible = false;   // seta ">" removida
 
-        if (_preCarregamentoStatusLabel is not null)
+        PosicionarStatusPreCarregamentoPedidos();
+    }
+
+    /// <summary>
+    /// Deixa a marca central como a do FugaPEC: GRANDE e sem moldura (pedido do usuario em
+    /// 24/11/2026, comparando as duas telas — "a do FugaPEC esta muito mais vistosa").
+    /// <para>
+    /// O que a fazia pequena aqui eram tres coisas, nenhuma delas o logo (que continua o do FugaPET):
+    /// o <c>Padding(62, 18, 62, 18)</c> que o Designer poe no PictureBox e que, numa caixa de
+    /// 388x112, deixava so 264x76 para a imagem; a caixa pequena; e o cartao branco arredondado
+    /// desenhado sobre o fundo cinza, que vira uma moldura em volta de um logo ja miudo.
+    /// </para>
+    /// <para>
+    /// A estrutura do FugaPEC (Tela/PainelInicialForm.cs daquele projeto) resolve assim: area de
+    /// conteudo BRANCA, cartao branco sem raio e sem borda — some contra o fundo em vez de ser
+    /// removido, entao o layout da celula continua o mesmo — e o PictureBox sem padding, do tamanho
+    /// do painel, em Zoom (que preserva a proporcao do logo).
+    /// </para>
+    /// <para>
+    /// Uma diferenca proposital: la o tamanho e 520x184 cravado. Aqui ele acompanha o DPI e cede a
+    /// largura disponivel da celula, porque pixel cravado e exatamente o que quebra a tela em outra
+    /// maquina. A 100% o resultado e o mesmo 520x184.
+    /// </para>
+    /// </summary>
+    private static int Arredondar(float valor) => (int)Math.Round(valor, MidpointRounding.AwayFromZero);
+
+    private void AjustarMarcaCentral()
+    {
+        // Fundo branco na area de conteudo: e ELE que faz o cartao sumir. Pintar o cartao de cinza
+        // deixaria o logo (que tem fundo branco proprio) com um retangulo claro em volta.
+        contentScrollPanel.BackColor = Color.White;
+        contentLayout.BackColor = Color.White;
+
+        contentBrandHeaderPanel.FillColor = Color.White;
+        contentBrandHeaderPanel.BorderColor = Color.White;
+        contentBrandHeaderPanel.BorderRadius = 0;
+
+        contentBrandHeaderPanel.Size = CalcularTamanhoDaMarca(
+            fatorDpi: DeviceDpi / 96f,
+            larguraDisponivel: Math.Max(120, contentLayout.ClientSize.Width - contentLayout.Padding.Horizontal));
+
+        // "S/A" era um rotulo BRANCO sobre o cartao branco — invisivel hoje e invisivel depois.
+        // Escondido de proposito, como no FugaPEC, para nao reaparecer se alguem escurecer o fundo.
+        logoSaLabel.Visible = false;
+
+        contentBrandPictureBox.BackColor = Color.White;
+        contentBrandPictureBox.Padding = Padding.Empty;
+        contentBrandPictureBox.Location = Point.Empty;
+        contentBrandPictureBox.Size = contentBrandHeaderPanel.Size;
+        contentBrandPictureBox.SizeMode = PictureBoxSizeMode.Zoom;
+
+        // O painel tem Anchor=None: quem o centraliza na celula e o TableLayoutPanel, no passe de
+        // layout. Como este ajuste roda DEPOIS do PerformLayout da escala de fonte, sem pedir o
+        // passe a marca cresceria ancorada no canto antigo e ficaria fora do centro.
+        contentLayout.PerformLayout();
+    }
+
+    /// <summary>O desenho da marca central no FugaPEC, em pontos de 96 DPI.</summary>
+    private const int LarguraMarcaBase = 520;
+
+    /// <summary>A altura que acompanha <see cref="LarguraMarcaBase"/> na proporcao do FugaPEC.</summary>
+    private const int AlturaMarcaBase = 184;
+
+    /// <summary>
+    /// O tamanho da marca central, isolado do Form para teste direto (InternalsVisibleTo).
+    /// <para>
+    /// Duas garantias: acompanha o DPI (o desenho do FugaPEC vale a 96 DPI e cresce junto com a tela)
+    /// e nunca passa da largura disponivel — em janela estreita a marca CEDE mantendo a proporcao,
+    /// em vez de ser cortada pela celula.
+    /// </para>
+    /// </summary>
+    internal static Size CalcularTamanhoDaMarca(float fatorDpi, int larguraDisponivel)
+    {
+        int largura = Math.Max(1, Arredondar(LarguraMarcaBase * fatorDpi));
+        int altura = Math.Max(1, Arredondar(AlturaMarcaBase * fatorDpi));
+
+        if (largura > larguraDisponivel)
         {
-            _preCarregamentoStatusLabel.Left = 18;
-            _preCarregamentoStatusLabel.Top = sidebarUserPanel.Top - 24;
-            _preCarregamentoStatusLabel.Width = Math.Max(40, sidebarPanel.ClientSize.Width - 36);
+            altura = Math.Max(1, Arredondar(altura * (larguraDisponivel / (float)largura)));
+            largura = Math.Max(1, larguraDisponivel);
         }
+
+        return new Size(largura, altura);
+    }
+
+    /// <summary>
+    /// Coloca o aviso de pre-carregamento ACIMA do bloco do usuario, com a altura que o texto
+    /// realmente ocupa na fonte e na largura que ele tem AGORA.
+    /// <para>
+    /// POR QUE EXISTE: o aviso era posicionado por <c>sidebarUserPanel.Top - 24</c> — um numero de
+    /// pixels cravado, que supunha o rotulo de 18px e uma linha so. Depois do Shown a sidebar leva
+    /// escala de fonte 2.0x e AdaptarAlturasParaFonte, entao o rotulo fica mais alto e a frase passa
+    /// a ocupar DUAS linhas: a segunda descia por cima do nome do usuario, que aparecia cortado ao
+    /// meio. Pixel cravado nao acompanha a fonte; medida acompanha.
+    /// </para>
+    /// <para>
+    /// A altura e limitada pelo espaco que existe entre o ultimo item do menu e o bloco do usuario.
+    /// Com AutoEllipsis, texto que nao couber termina em reticencias em vez de invadir o vizinho —
+    /// uma frase longa nunca empurra o layout.
+    /// </para>
+    /// </summary>
+    private void PosicionarStatusPreCarregamentoPedidos()
+    {
+        if (_preCarregamentoStatusLabel is null)
+        {
+            return;
+        }
+
+        Label aviso = _preCarregamentoStatusLabel;
+        aviso.Left = 18;
+        aviso.Width = Math.Max(40, sidebarPanel.ClientSize.Width - 36);
+
+        int folga = Math.Max(6, (int)Math.Round(6 * (DeviceDpi / 96f), MidpointRounding.AwayFromZero));
+
+        int necessario = string.IsNullOrEmpty(aviso.Text)
+            ? 1
+            : TextRenderer.MeasureText(
+                aviso.Text,
+                aviso.Font,
+                new Size(aviso.Width, int.MaxValue),
+                TextFormatFlags.WordBreak | TextFormatFlags.NoPadding).Height;
+
+        (int topo, int altura) = CalcularCaixaDoAviso(
+            topoDoBlocoDoUsuario: sidebarUserPanel.Top,
+            limiteSuperior: menuItemSeguranca.Bottom,
+            folga: folga,
+            alturaNecessaria: necessario);
+
+        aviso.Height = altura;
+        aviso.Top = topo;
+    }
+
+    /// <summary>
+    /// A conta da caixa do aviso, isolada do Form para teste direto (InternalsVisibleTo).
+    /// <para>
+    /// Duas garantias, e e por elas que o teste cobra — nao pela formula: a caixa NUNCA encosta no
+    /// bloco do usuario (foi o que cobriu o nome "admin") e NUNCA sobe para dentro do ultimo item do
+    /// menu. Quando nao ha espaco para o texto inteiro, a caixa encolhe e o AutoEllipsis corta com
+    /// reticencias; invadir o vizinho nunca e opcao.
+    /// </para>
+    /// </summary>
+    internal static (int Topo, int Altura) CalcularCaixaDoAviso(
+        int topoDoBlocoDoUsuario, int limiteSuperior, int folga, int alturaNecessaria)
+    {
+        int disponivel = Math.Max(1, topoDoBlocoDoUsuario - folga - limiteSuperior);
+        int altura = Math.Clamp(alturaNecessaria, 1, disponivel);
+
+        return (topoDoBlocoDoUsuario - folga - altura, altura);
     }
 
     /// <summary>Dispara o pre-carregamento dos pedidos da Entrada sem bloquear a UI (fire-and-forget).</summary>
@@ -270,12 +413,14 @@ public partial class PainelInicialForm : Form
             Font = new Font("Segoe UI", 7.5f, FontStyle.Regular),
             Anchor = AnchorStyles.Bottom | AnchorStyles.Left,
             Size = new Size(Math.Max(40, sidebarPanel.ClientSize.Width - 36), 18),
-            TextAlign = ContentAlignment.MiddleLeft,
+            // TopLeft, nao MiddleLeft: a caixa agora tem a altura do texto, e quando a frase ocupa
+            // duas linhas e o centro vertical que empurra a segunda para fora da caixa.
+            TextAlign = ContentAlignment.TopLeft,
             Visible = false
         };
         sidebarPanel.Controls.Add(_preCarregamentoStatusLabel);
-        _preCarregamentoStatusLabel.Location = new Point(18, sidebarUserPanel.Top - 24);
         _preCarregamentoStatusLabel.BringToFront();
+        PosicionarStatusPreCarregamentoPedidos();
     }
 
     private void AtualizarStatusPreCarregamentoPedidos(string texto)
@@ -301,6 +446,11 @@ public partial class PainelInicialForm : Form
 
         _preCarregamentoStatusLabel.Visible = !string.IsNullOrEmpty(texto);
         _preCarregamentoStatusLabel.Text = texto;
+
+        // A geometria depende do TEXTO: "Sincronizando pedidos de entrada..." cabe numa linha e
+        // "Pedidos de entrada atualizados as HH:mm" nao. Posicionar so na montagem da tela deixava a
+        // frase maior, que chega depois, sobrando por baixo e cobrindo o nome do usuario.
+        PosicionarStatusPreCarregamentoPedidos();
     }
 
     private async Task AtualizarStatusIndustrialAsync()
