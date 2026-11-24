@@ -12,6 +12,7 @@ namespace FugaPET_HML.Tests.Cadastro;
 /// sem vazar o detalhe tecnico. Usa um repositorio fake que lanca e um spy de auditoria.
 /// (Substitui o antigo teste "contratual" que apenas lia o codigo-fonte.)
 /// </summary>
+[Xunit.Collection(FugaPET_HML.Tests.Configuracao.ColecaoConfiguracaoDeAmbiente.Nome)]
 public sealed class MapeamentoCampoEtiquetaServicoTests : IDisposable
 {
     public MapeamentoCampoEtiquetaServicoTests()

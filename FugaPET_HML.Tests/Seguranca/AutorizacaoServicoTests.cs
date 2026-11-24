@@ -2,6 +2,7 @@ using FugaPET_HML.Servicos.Seguranca;
 
 namespace FugaPET_HML.Tests.Seguranca;
 
+[Xunit.Collection(FugaPET_HML.Tests.Configuracao.ColecaoConfiguracaoDeAmbiente.Nome)]
 public sealed class AutorizacaoServicoTests : IDisposable
 {
     public AutorizacaoServicoTests()

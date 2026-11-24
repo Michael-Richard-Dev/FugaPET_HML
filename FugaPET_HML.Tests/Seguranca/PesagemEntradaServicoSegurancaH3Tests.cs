@@ -15,6 +15,7 @@ namespace FugaPET_HML.Tests.Seguranca;
 /// H3 (LEGADO) - PesagemEntradaServico como portao de seguranca. Valida as regras que disparam ANTES
 /// de qualquer acesso ao banco (autenticacao, permissao, peso, origem). Sem dependencia de DB.
 /// </summary>
+[Xunit.Collection(FugaPET_HML.Tests.Configuracao.ColecaoConfiguracaoDeAmbiente.Nome)]
 public sealed class PesagemEntradaServicoSegurancaH3Tests : IDisposable
 {
     public PesagemEntradaServicoSegurancaH3Tests()

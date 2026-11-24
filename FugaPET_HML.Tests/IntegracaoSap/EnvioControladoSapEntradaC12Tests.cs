@@ -17,6 +17,7 @@ namespace FugaPET_HML.Tests.IntegracaoSap;
 /// (HOMOLOGACAO + permissao + escrita + Material Document configurado + dados obrigatorios) sao
 /// reaplicadas antes do POST.
 /// </summary>
+[Xunit.Collection(FugaPET_HML.Tests.Configuracao.ColecaoConfiguracaoDeAmbiente.Nome)]
 public sealed class EnvioControladoSapEntradaC12Tests : IDisposable
 {
     public EnvioControladoSapEntradaC12Tests()

@@ -7,6 +7,7 @@ namespace FugaPET_HML.Tests.Seguranca;
 /// (PROCESSO_PRODUCAO / ENTRADA_PRODUTO / PESO_MANUAL), nunca por nome/codigo de perfil.
 /// Perfis com nomes "administrativos" NAO podem ganhar acesso sem a permissao real.
 /// </summary>
+[Xunit.Collection(FugaPET_HML.Tests.Configuracao.ColecaoConfiguracaoDeAmbiente.Nome)]
 public sealed class PermissoesEntradaProdutoH2Tests : IDisposable
 {
     public PermissoesEntradaProdutoH2Tests()

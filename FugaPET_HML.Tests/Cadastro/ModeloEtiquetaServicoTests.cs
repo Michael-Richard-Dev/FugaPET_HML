@@ -11,6 +11,7 @@ namespace FugaPET_HML.Tests.Cadastro;
 /// (nome+versão, ativo OU inativo), situação que muda só por Inativar/Reativar, e inativação bloqueada por
 /// etiqueta ativa vinculada.
 /// </summary>
+[Xunit.Collection(FugaPET_HML.Tests.Configuracao.ColecaoConfiguracaoDeAmbiente.Nome)]
 public sealed class ModeloEtiquetaServicoTests : IDisposable
 {
     public ModeloEtiquetaServicoTests()
