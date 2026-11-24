@@ -19,6 +19,7 @@ public partial class CadastroForm : UserControl
         CriarCartaoVinculoProdutoEtiqueta();
         CriarCartaoToleranciaRecebimento();
         CriarCartaoToleranciaProducao();
+        AplicarAparenciaDosCartoes();
         if (System.ComponentModel.LicenseManager.UsageMode != System.ComponentModel.LicenseUsageMode.Designtime)
         {
             AplicarFiltroPermissoes();
@@ -26,6 +27,21 @@ public partial class CadastroForm : UserControl
         WireCardClickEvents();
     }
 
+    /// <summary>
+    /// A cor e o layout dos cartoes vem do helper compartilhado — ver
+    /// <see cref="Comum.CartoesDeModulo"/>. Antes esta tela resolvia os dois por conta propria e a
+    /// de Processo de Producao resolvia de outro jeito; o usuario pediu a mesma correcao duas
+    /// vezes, uma para cada tela. Duas copias sao duas chances de divergir.
+    /// </summary>
+    private void AplicarAparenciaDosCartoes()
+    {
+        IReadOnlyList<Control> cartoes = Comum.CartoesDeModulo.Localizar(modulesFlowLayoutPanel);
+
+        Comum.CartoesDeModulo.AplicarPaleta(cartoes);
+        Comum.CartoesDeModulo.AjustarTextos(cartoes);
+    }
+
+    /// <summary>
     /// <summary>
     /// Cartao do Vinculo de Produto e Etiqueta, montado EM TEMPO DE EXECUCAO a partir do cartao de
     /// Etiqueta que ja existe.
@@ -42,7 +58,6 @@ public partial class CadastroForm : UserControl
             titulo: "Vínculo de Produto",
             descricao: "Produto acabado, etiqueta e processo de pesagem.",
             atalho: "F8",
-            corDoIcone: Color.FromArgb(254, 240, 221),
             aoClicar: OnVinculoProdutoEtiquetaClick);
 
     /// <summary>
@@ -55,9 +70,6 @@ public partial class CadastroForm : UserControl
             titulo: "Tolerância de Recebimento",
             descricao: "Quanto a pesagem pode divergir do pedido, por material.",
             atalho: "F9",
-            // Verde-agua: distingue do laranja-claro do Vinculo, para os dois cartoes clonados nao
-            // virarem um par indistinguivel no meio da grade.
-            corDoIcone: Color.FromArgb(222, 247, 236),
             aoClicar: OnToleranciaRecebimentoClick);
 
     /// <summary>
@@ -75,8 +87,6 @@ public partial class CadastroForm : UserControl
             titulo: "Tolerância de Produção",
             descricao: "Quanto a pesagem pode divergir da OP, por produto e processo.",
             atalho: "F10",
-            // Azul-claro: terceiro tom, para os cartoes clonados continuarem distinguiveis entre si.
-            corDoIcone: Color.FromArgb(219, 234, 254),
             aoClicar: OnToleranciaProducaoClick);
 
     /// <summary>
@@ -89,7 +99,7 @@ public partial class CadastroForm : UserControl
     /// </para>
     /// </summary>
     private Control CriarCartaoClonado(
-        string nome, string titulo, string descricao, string atalho, Color corDoIcone, EventHandler aoClicar)
+        string nome, string titulo, string descricao, string atalho, EventHandler aoClicar)
     {
         Controls.RoundedPanel cartao = new()
         {
@@ -108,8 +118,9 @@ public partial class CadastroForm : UserControl
             BackColor = etiquetaIconPanel.BackColor,
             BorderRadius = etiquetaIconPanel.BorderRadius,
             Cursor = Cursors.Hand,
-            // Cor propria para o cartao nao virar copia visual do de Etiqueta: sao coisas diferentes.
-            FillColor = corDoIcone,
+            // Mesmo ladrilho de todos: o helper repinta depois, mas nascer ja certo evita o
+            // piscar do rosa herdado do cartao de Etiqueta.
+            FillColor = Comum.CartoesDeModulo.LadrilhoDoIcone,
             Location = etiquetaIconPanel.Location,
             Size = etiquetaIconPanel.Size,
         };
