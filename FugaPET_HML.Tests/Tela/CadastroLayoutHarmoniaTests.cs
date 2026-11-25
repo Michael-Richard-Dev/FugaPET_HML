@@ -153,6 +153,184 @@ public sealed class CadastroLayoutHarmoniaTests
 
     // ------------------------------------------------- apoio
 
+    // ------------------------------------------------- Balanca (desenho proprio)
+
+    /// <summary>
+    /// A tela de Balanca nao tem os mesmos controles das outras duas, entao tem guardas proprias.
+    /// Aqui: OS TRES CABECALHOS DA LISTA no mesmo topo e com a mesma altura. "Setor / Conexao"
+    /// ocupa duas linhas de verdade; os outros dois precisam acompanhar, senao cada titulo aparece
+    /// numa altura e o da Situacao fica cortado, como no print do usuario.
+    /// </summary>
+    [Fact]
+    public void Balanca_OsTresCabecalhos_FicamAlinhados()
+        => ComATela("BalancaForm", c =>
+        {
+            Label[] cabecalhos =
+            [
+                (Label)c["listaNomeHeaderLabel"],
+                (Label)c["listaDetalhesHeaderLabel"],
+                (Label)c["listaSituacaoHeaderLabel"],
+            ];
+
+            Assert.Single(cabecalhos.Select(h => h.Top).Distinct());
+            Assert.Single(cabecalhos.Select(h => h.Height).Distinct());
+            Assert.Single(cabecalhos.Select(h => h.TextAlign.ToString()[..3]).Distinct());
+        });
+
+    /// <summary>
+    /// E A FAIXA QUE OS HOSPEDA CABE NELES. Dar altura ao rotulo nao adianta se o painel continua
+    /// com os 28px do Designer: foi assim que "Identificacao" e "Situacao" sumiram mesmo ja
+    /// alinhados.
+    /// </summary>
+    [Fact]
+    public void Balanca_AFaixaDoCabecalho_CabeOsRotulos()
+        => ComATela("BalancaForm", c =>
+        {
+            Control faixa = c["listaHeaderPanel"];
+
+            foreach (string nome in new[]
+                     { "listaNomeHeaderLabel", "listaDetalhesHeaderLabel", "listaSituacaoHeaderLabel" })
+            {
+                Label cabecalho = (Label)c[nome];
+                Assert.True(
+                    cabecalho.Bottom <= faixa.Height,
+                    $"'{cabecalho.Text}' termina em {cabecalho.Bottom} e a faixa tem {faixa.Height}px");
+            }
+        });
+
+    /// <summary>
+    /// NO RESUMO, A LEGENDA NAO INVADE O VALOR. O Designer poe a legenda em Y com 18px e o valor em
+    /// Y+20; quando a adaptacao de fonte cresce a legenda para 36px, ela passa POR CIMA do valor —
+    /// 16px de sobreposicao em cada uma das quatro linhas.
+    /// </summary>
+    [Fact]
+    public void Balanca_NoResumo_ALegendaNaoInvadeOValor()
+        => ComATela("BalancaForm", c =>
+        {
+            (string Legenda, string Valor)[] linhas =
+            [
+                ("resumoNomeLabel", "resumoNomeValueLabel"),
+                ("resumoSetorLabel", "resumoSetorValueLabel"),
+                ("resumoConexaoLabel", "resumoConexaoValueLabel"),
+                ("resumoSituacaoLabel", "resumoSituacaoValueLabel"),
+            ];
+
+            foreach ((string legenda, string valor) in linhas)
+            {
+                Label l = (Label)c[legenda];
+                Label v = (Label)c[valor];
+
+                Assert.True(
+                    l.Bottom <= v.Top,
+                    $"'{l.Text}' termina em {l.Bottom} e o valor comeca em {v.Top} — sobrepostos");
+            }
+        });
+
+    /// <summary>
+    /// Os divisores do resumo atravessam o cartao. Vinham com a largura do Designer e paravam no
+    /// meio da linha quando o cartao estica.
+    /// </summary>
+    [Fact]
+    public void Balanca_OsDivisores_AtravessamOCartao()
+        => ComATela("BalancaForm", c =>
+        {
+            Control cartao = c["resumoCard"];
+
+            foreach (string nome in new[]
+                     { "resumoDivisorTitulo", "resumoDivisorNome", "resumoDivisorSetor", "resumoDivisorConexao" })
+            {
+                Control divisor = c[nome];
+                Assert.True(
+                    divisor.Width >= cartao.ClientSize.Width - (divisor.Left * 2) - 2,
+                    $"{nome} tem {divisor.Width}px num cartao de {cartao.ClientSize.Width}px");
+            }
+        });
+
+    /// <summary>
+    /// A FONTE DO BALANCA ACOMPANHA A DAS OUTRAS DUAS TELAS (relatado em 25/11/2026: "ver sobre a
+    /// fonte, nao esta padrao das outras duas telas").
+    /// <para>
+    /// O Balanca mirava em <c>base * Escala</c>, com Escala = 2,0 — e como o segundo fator nunca
+    /// passa de 1, o resultado era SEMPRE o dobro: 17pt onde Setor e Cargo mostram 12,1pt, e 18pt
+    /// na busca contra 12pt. Era por isso que "Balancas Cadastradas" quebrava em duas linhas.
+    /// </para>
+    /// <para>
+    /// A tolerancia de 1,5pt existe porque as telas chegam ao tamanho por caminhos diferentes
+    /// (Clamp por controle contra escala do cartao); o que nao pode e a diferenca de 5pt que o
+    /// usuario viu.
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData("balancasTitleLabel", "profilesTitleLabel")]
+    [InlineData("searchTextBox", "searchTextBox")]
+    [InlineData("listaNomeHeaderLabel", "profilesHeaderProfileLabel")]
+    [InlineData("resumoTitleLabel", "summaryTitleLabel")]
+    public void Balanca_TemAMesmaFonteDasOutrasTelas(string noBalanca, string noSetor)
+    {
+        float tamanhoBalanca = 0;
+        float tamanhoSetor = 0;
+
+        ComATela("BalancaForm", c => tamanhoBalanca = c[noBalanca].Font.Size);
+        ComATela("SetorForm", c => tamanhoSetor = c[noSetor].Font.Size);
+
+        Assert.True(
+            Math.Abs(tamanhoBalanca - tamanhoSetor) <= 1.5f,
+            $"'{noBalanca}' do Balanca esta em {tamanhoBalanca:0.00}pt e o equivalente do Setor "
+            + $"('{noSetor}') em {tamanhoSetor:0.00}pt");
+    }
+
+    /// <summary>
+    /// O RODAPE "Exibindo N de N" FICA DENTRO DO CARTAO, E A LISTA PARA ANTES DELE.
+    /// <para>
+    /// MEDIDO em 25/11/2026: o rodape vinha do Anchor Bottom do Designer e parava em Y=1436 num
+    /// cartao de 950 — 486px fora da tela, invisivel. E como a altura da lista era calculada A
+    /// PARTIR DELE (<c>quantidadeBalancasLabel.Top - folga</c>), a lista tambem transbordava o
+    /// cartao. Nas outras telas de cadastro esse rodape aparece; nesta, nao.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Balanca_ORodapeDaLista_FicaDentroDoCartao()
+        => ComATela("BalancaForm", c =>
+        {
+            Control cartao = c["balancasCard"];
+            Control rodape = c["quantidadeBalancasLabel"];
+            Control lista = c["balancasFlowPanel"];
+
+            Assert.True(
+                rodape.Bottom <= cartao.ClientSize.Height,
+                $"o rodape da lista termina em {rodape.Bottom} e o cartao so vai ate "
+                + $"{cartao.ClientSize.Height} — fora da tela, como estava antes da correcao");
+
+            Assert.True(
+                lista.Bottom <= rodape.Top,
+                $"a lista termina em {lista.Bottom} e o rodape comeca em {rodape.Top} — "
+                + "a lista passa por cima do rodape");
+        });
+
+    /// <summary>
+    /// A DATA DO CADASTRO SEGUE O PADRAO DO SETOR E DO CARGO: alinhada a COLUNA DOS VALORES e no
+    /// mesmo corpo do resto do resumo.
+    /// <para>
+    /// MEDIDO em 25/11/2026: estava centralizada no cartao e cravada em 9pt enquanto todo o resumo
+    /// ia a 12,1pt — era a linha que o usuario apontou como "fora do tamanho padrao das outras
+    /// telas".
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Balanca_ADataDoCadastro_SegueOPadraoDoResumo()
+        => ComATela("BalancaForm", c =>
+        {
+            Label data = (Label)c["resumoDataLabel"];
+            Label legenda = (Label)c["resumoNomeLabel"];
+
+            Assert.Equal(legenda.Left, data.Left);
+            Assert.Equal(ContentAlignment.MiddleLeft, data.TextAlign);
+            Assert.True(
+                Math.Abs(data.Font.Size - legenda.Font.Size) <= 0.5f,
+                $"a data esta em {data.Font.Size:0.00}pt e as legendas do resumo em "
+                + $"{legenda.Font.Size:0.00}pt");
+        });
+
     private static int Ocorrencias(string texto, string agulha)
         => texto.Split(agulha).Length - 1;
 
@@ -166,10 +344,15 @@ public sealed class CadastroLayoutHarmoniaTests
                 Type tipo = typeof(FugaPET_HML.Tela.Cadastro.SetorForm).Assembly
                     .GetType("FugaPET_HML.Tela.Cadastro." + nomeDaTela)
                     ?? throw new InvalidOperationException("tela " + nomeDaTela + " nao encontrada");
-                // Os dois construtores recebem controller e auditoria OPCIONAIS; CreateInstance sem
-                // argumentos nao preenche opcionais e falharia por "no parameterless constructor".
-                // Passar nulos faz a tela montar as proprias dependencias, como em producao.
-                using Form tela = (Form)Activator.CreateInstance(tipo, [null, null])!;
+                // Os construtores recebem dependencias OPCIONAIS, e cada tela tem um numero
+                // diferente delas (Balanca tem tres, Setor e Cargo tem duas). CreateInstance sem
+                // argumentos falha por "no parameterless constructor", e um numero fixo de nulos
+                // falha na tela que tem outro numero — por isso a contagem sai do PROPRIO
+                // construtor. Nulo faz a tela montar as proprias dependencias, como em producao.
+                ConstructorInfo construtor = tipo.GetConstructors().Single();
+                object?[] nulos = [.. construtor.GetParameters().Select(_ => (object?)null)];
+
+                using Form tela = (Form)construtor.Invoke(nulos);
                 tela.StartPosition = FormStartPosition.Manual;
                 tela.Location = new Point(-5000, -5000);
                 tela.Size = new Size(1920, 1080);

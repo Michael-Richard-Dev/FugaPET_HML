@@ -55,6 +55,10 @@ public partial class BalancaForm : Form
         // tipografico com a tela de Recebimento foi feito DENTRO daquele motor.
         IdentidadeVisualFugaPet.AplicarNoCabecalho(companyLogoPictureBox, headerDividerLabel);
 
+        // O rodape da lista passa a ser posicionado por AjustarLayout; o Anchor do Designer e quem o
+        // jogava para fora do cartao.
+        quantidadeBalancasLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+
         ConfigurarRodape();
         ConfigurarEventos();
         ConfigurarCombos();
@@ -700,6 +704,10 @@ public partial class BalancaForm : Form
         parametrosSeriaisSectionLabel.Text = manual ? "OPERAÇÃO MANUAL" : "PARÂMETROS SERIAIS";
         identificacaoLocalTextBox.Enabled = usb || serial || tcp;
         manualWarningLabel.Visible = manual;
+
+        // A troca de tipo muda o que fica VISIVEL, entao a pilha tem de ser refeita aqui tambem —
+        // nao so no Resize. Sem isto o vao do painel escondido so sumiria ao redimensionar a janela.
+        ReempilharDados();
     }
 
     private void AjustarLayout()
@@ -708,10 +716,224 @@ public partial class BalancaForm : Form
         AjustarBotoesLayout();
 
         // GATE 127A: com a fonte no corpo das telas principais, caixas dimensionadas para a fonte
-        // antiga cortariam o texto. A adaptacao so CRESCE (monotonica), entao reexecutar a cada
-        // Resize converge em vez de oscilar.
+        // antiga cortariam o texto.
+        //
+        // A adaptacao so CRESCE. O comentario antigo dizia que, por ser monotonica, reexecutar a
+        // cada Resize "converge" — e e justamente o nunca-encolher que estraga a tela: a altura
+        // medida numa janela menor fica gravada em MinimumSize e nao volta mais. Limpar o minimo
+        // antes faz cada passe medir a largura ATUAL em vez de herdar a de antes.
+        LegibilidadeRecebimentoMercadoria.LimparAlturaMinimaDosRotulos(contentLayout);
         LegibilidadeRecebimentoMercadoria.AdaptarAlturasParaFonte(contentLayout);
+
+        AlinharCabecalhosDaLista();
+        ReempilharResumo();
+        ReempilharDados();
     }
+
+    /// <summary>
+    /// Reempilha as secoes do cartao de Dados, PULANDO o que esta escondido.
+    /// <para>
+    /// POR QUE (apontado pelo usuario em 25/11/2026): com a conexao SERIAL o painel de TCP/IP some,
+    /// mas a linha dele na conexaoTable continua com os 62px fixos e nada abaixo sobe — ficava um
+    /// vao enorme entre "Tipo de Conexao" e "Porta Serial". O mesmo vale para a secao de parametros
+    /// seriais, que some em USB e deixa o buraco dela.
+    /// </para>
+    /// <para>
+    /// Aqui a linha de um painel escondido vai a ZERO e cada secao comeca onde a anterior terminou.
+    /// Os respiros sao os do desenho original (2px entre o titulo da secao e o conteudo, 10px entre
+    /// uma secao e a proxima), nao numeros novos.
+    /// </para>
+    /// </summary>
+    private void ReempilharDados()
+    {
+        const int respiroDaSecao = 2;
+        const int respiroEntreSecoes = 10;
+
+        // A linha do painel escondido vai a zero; a do visivel volta a altura dele. Sem isso a
+        // tabela guarda o espaco de um painel que ninguem ve.
+        ColapsarLinhaSeEscondida(1, tcpPanel);
+        ColapsarLinhaSeEscondida(2, portaSerialPanel);
+
+        conexaoTable.Height = AlturaDasLinhas(conexaoTable);
+
+        // A tabela dos parametros seriais declara DUAS linhas de 62px mas foi desenhada com 186 de
+        // altura — espaco de tres. A sobra era distribuida entre as linhas e esticava a de baixo:
+        // "Stop Bits", "Flow Control" e "Protocolo" ficavam com caixas quase tres vezes mais altas
+        // que "Baud Rate", "Data Bits" e "Paridade", logo acima delas.
+        // Quem manda e o PAINEL: a tabela tem Dock=Fill e segue a altura dele. Ajustar a tabela
+        // direto nao gruda — foi o que eu tentei primeiro e nada mudou na tela.
+        serialPanel.Height = AlturaDasLinhas(serialTable)
+            + (serialPanel.Height - serialPanel.ClientSize.Height)
+            + serialPanel.Padding.Vertical;
+
+        int y = identificacaoSectionLabel.Top;
+
+        foreach (Control[] secao in new[]
+                 {
+                     new Control[] { identificacaoSectionLabel, identificacaoTable },
+                     [conexaoSectionLabel, conexaoTable],
+                     [parametrosSeriaisSectionLabel, serialPanel, manualWarningLabel],
+                     [observacaoSectionLabel, observacaoInputPanel],
+                 })
+        {
+            Control[] visiveis = [.. secao.Where(c => c.Visible)];
+            if (visiveis.Length == 0)
+            {
+                continue;
+            }
+
+            foreach (Control parte in visiveis)
+            {
+                parte.Top = y;
+                y = parte.Bottom + respiroDaSecao;
+            }
+
+            y += respiroEntreSecoes - respiroDaSecao;
+        }
+    }
+
+    /// <summary>
+    /// A altura ORIGINAL de cada linha da tabela de conexao, guardada antes de qualquer colapso.
+    /// <para>
+    /// Sem isto a altura da linha sairia da altura ATUAL do painel — e o painel preenche a celula,
+    /// entao os dois se puxam para baixo a cada passe: na primeira tentativa a linha e o painel
+    /// chegaram a 1px. A altura de projeto e fixa; so a visibilidade muda.
+    /// </para>
+    /// </summary>
+    private float[]? _alturasOriginaisDaConexao;
+
+    /// <summary>A soma das alturas declaradas das linhas — o tamanho que a tabela deveria ter.</summary>
+    private static int AlturaDasLinhas(TableLayoutPanel tabela)
+        => (int)tabela.RowStyles.Cast<RowStyle>().Sum(linha => linha.Height);
+
+    /// <summary>Zera a altura da linha quando o painel dela esta escondido, e a devolve quando volta.</summary>
+    private void ColapsarLinhaSeEscondida(int linha, Control painel)
+    {
+        _alturasOriginaisDaConexao ??= [.. conexaoTable.RowStyles.Cast<RowStyle>().Select(l => l.Height)];
+
+        conexaoTable.RowStyles[linha].Height = painel.Visible ? _alturasOriginaisDaConexao[linha] : 0;
+    }
+
+    /// <summary>
+    /// Poe os tres cabecalhos da lista na MESMA LINHA e com a MESMA ALTURA.
+    /// <para>
+    /// POR QUE (medido em 25/11/2026): "Nome" ficava com 33px, "Setor / Identificacao" com 56 — que
+    /// ele precisa mesmo, sao duas linhas — e "Situacao" com 56 para um texto de 28. Alturas
+    /// diferentes com texto centralizado colocam cada titulo numa altura, e o da Situacao aparecia
+    /// cortado no print do usuario.
+    /// </para>
+    /// <para>
+    /// A altura comum e a MAIOR necessidade real entre os tres, nao um numero escolhido: assim o
+    /// cabecalho de duas linhas cabe e os outros dois se alinham a ele.
+    /// </para>
+    /// </summary>
+    private void AlinharCabecalhosDaLista()
+    {
+        Label[] cabecalhos = [listaNomeHeaderLabel, listaDetalhesHeaderLabel, listaSituacaoHeaderLabel];
+
+        int topo = cabecalhos.Min(c => c.Top);
+        int altura = cabecalhos.Max(AlturaDoTexto);
+
+        foreach (Label cabecalho in cabecalhos)
+        {
+            cabecalho.Top = topo;
+            cabecalho.Height = altura;
+
+            // Todos ancorados no TOPO da faixa. Com alturas iguais mas alinhamentos verticais
+            // diferentes, "Nome" aparecia na primeira linha e "Situacao" no meio — centralizado
+            // contra um vizinho de duas linhas. O horizontal de cada um e preservado.
+            cabecalho.TextAlign = cabecalho.TextAlign switch
+            {
+                ContentAlignment.MiddleCenter or ContentAlignment.BottomCenter => ContentAlignment.TopCenter,
+                ContentAlignment.MiddleRight or ContentAlignment.BottomRight => ContentAlignment.TopRight,
+                _ => ContentAlignment.TopLeft,
+            };
+        }
+
+        // O PAI PRECISA CABER OS FILHOS. Dar altura ao rotulo nao adianta se a faixa que o hospeda
+        // continua com os 28px do Designer: o texto e cortado pelo painel, e foi assim que
+        // "Identificacao" e "Situacao" sumiram no print mesmo depois de alinhados.
+        listaHeaderPanel.Height = Math.Max(listaHeaderPanel.Height, topo + altura + topo);
+        balancasFlowPanel.Top = listaHeaderPanel.Bottom + 2;
+    }
+
+    /// <summary>
+    /// Reempilha o cartao de resumo a partir da ALTURA REAL de cada texto.
+    /// <para>
+    /// POR QUE (medido em 25/11/2026): o Designer poe a legenda em Y com 18px de altura e o valor em
+    /// Y+20. Quando a adaptacao de fonte cresce a legenda para 36px, ela termina em Y+36 e passa POR
+    /// CIMA do valor — 16px de sobreposicao em cada uma das quatro linhas do resumo. Era a
+    /// "quebra de informacoes" do relato.
+    /// </para>
+    /// <para>
+    /// Aqui nada e posicao cravada: cada linha ocupa o que seus dois textos medem, o divisor vem
+    /// depois dela, e a proxima comeca abaixo do divisor.
+    /// </para>
+    /// </summary>
+    private void ReempilharResumo()
+    {
+        const int folga = 10;
+
+        int margem = resumoDivisorTitulo.Left;
+        // A largura do divisor sai do CARTAO, nao do desenho do Designer: o cartao e mais largo em
+        // 1920x1080 e os tracos ficavam curtos, parando no meio da linha.
+        int larguraDivisor = Math.Max(120, resumoCard.ClientSize.Width - (margem * 2));
+        int y = resumoTitleIconLabel.Top;
+
+        int alturaTitulo = Math.Max(resumoTitleIconLabel.Height, AlturaDoTexto(resumoTitleLabel));
+        resumoTitleIconLabel.Top = y + ((alturaTitulo - resumoTitleIconLabel.Height) / 2);
+        resumoTitleLabel.SetBounds(resumoTitleLabel.Left, y, resumoTitleLabel.Width, alturaTitulo);
+        y += alturaTitulo + folga;
+
+        resumoDivisorTitulo.SetBounds(margem, y, larguraDivisor, 1);
+        y += folga;
+
+        (Label Icone, Label Legenda, Label Valor, Control Divisor)[] linhas =
+        [
+            (resumoNomeIconLabel, resumoNomeLabel, resumoNomeValueLabel, resumoDivisorNome),
+            (resumoSetorIconLabel, resumoSetorLabel, resumoSetorValueLabel, resumoDivisorSetor),
+            (resumoConexaoIconLabel, resumoConexaoLabel, resumoConexaoValueLabel, resumoDivisorConexao),
+            (resumoSituacaoIconLabel, resumoSituacaoLabel, resumoSituacaoValueLabel, resumoDivisorRodape),
+        ];
+
+        foreach ((Label icone, Label legenda, Label valor, Control divisor) in linhas)
+        {
+            int alturaLegenda = AlturaDoTexto(legenda);
+            int alturaValor = AlturaDoTexto(valor);
+            int alturaLinha = Math.Max(icone.Height, alturaLegenda + 2 + alturaValor);
+
+            icone.Top = y + ((alturaLinha - icone.Height) / 2);
+
+            int topoDoTexto = y + ((alturaLinha - (alturaLegenda + 2 + alturaValor)) / 2);
+            legenda.SetBounds(legenda.Left, topoDoTexto, legenda.Width, alturaLegenda);
+            valor.SetBounds(valor.Left, legenda.Bottom + 2, valor.Width, alturaValor);
+
+            y += alturaLinha + folga;
+            divisor.SetBounds(margem, y, larguraDivisor, 1);
+            y += folga;
+        }
+
+        // Alinhada com a COLUNA DOS VALORES, como no Setor e no Cargo — centralizada ela destoava
+        // de todo o resto do cartao.
+        resumoDataLabel.TextAlign = ContentAlignment.MiddleLeft;
+        int esquerdaDaData = resumoNomeLabel.Left;
+        // Largura ANTES de medir: medir na largura antiga devolve a altura de outra quebra de linha.
+        resumoDataLabel.Width = Math.Max(140, resumoCard.ClientSize.Width - esquerdaDaData - margem);
+        resumoDataLabel.SetBounds(esquerdaDaData, y, resumoDataLabel.Width, AlturaDoTexto(resumoDataLabel));
+    }
+
+    /// <summary>
+    /// A altura que o texto do rotulo ocupa na LARGURA QUE ELE TEM, na fonte atual. Sem NoPadding:
+    /// o Label pinta com padding, e medir sem ele devolve uma linha a menos.
+    /// </summary>
+    private static int AlturaDoTexto(Label rotulo)
+        => Math.Max(
+            16,
+            TextRenderer.MeasureText(
+                string.IsNullOrEmpty(rotulo.Text) ? "Xg" : rotulo.Text,
+                rotulo.Font,
+                new Size(Math.Max(40, rotulo.Width), int.MaxValue),
+                TextFormatFlags.WordBreak).Height);
 
     // Mesma logica de escala de fonte do SetorForm/CargoForm (Math.Clamp por tipo de controle),
     // para que os tamanhos de fonte fiquem iguais aos dessas telas em qualquer tamanho de janela.
@@ -766,6 +988,9 @@ public partial class BalancaForm : Form
             DefinirFonte(legenda, 8.5f, csResumo, 8.5f, FontStyle.Regular);
         foreach (Label valor in new[] { resumoNomeValueLabel, resumoSetorValueLabel, resumoConexaoValueLabel, resumoSituacaoValueLabel })
             DefinirFonte(valor, 8.5f, csResumo, 8.5f, FontStyle.Bold);
+        // A data do cadastro acompanha as legendas: nas telas de Setor e Cargo ela tem o mesmo
+        // corpo do resto do resumo. Ficar em 9pt fixo era o que a fazia parecer de outra tela.
+        DefinirFonte(resumoDataLabel, 8.5f, csResumo, 8.5f, FontStyle.Regular);
         foreach (Button botao in new[] { salvarButton, salvarAlteracoesButton, alterarSituacaoButton })
             DefinirFonte(botao, 8f, csResumo, 8f, FontStyle.Bold);
     }
@@ -794,8 +1019,23 @@ public partial class BalancaForm : Form
     /// </summary>
     private static void DefinirFonte(Control controle, float tamanhoBase, float escala, float minimo, FontStyle estilo)
     {
-        float alvo = tamanhoBase * LegibilidadeRecebimentoMercadoria.Escala;
+        // O ALVO SAI DA ESCALA DO CARTAO, NAO DO FATOR GLOBAL (relatado pelo usuario em 25/11/2026:
+        // "ver sobre a fonte, nao esta padrao das outras duas telas").
+        //
+        // Antes o alvo era tamanhoBase * Escala, com Escala = 2,0 — e como o segundo fator nunca
+        // passa de 1, o resultado era SEMPRE o dobro: 17pt onde Setor e Cargo mostram 12,1pt, e
+        // 18pt na busca contra 12pt. Era por isso que "Balancas Cadastradas" quebrava em duas
+        // linhas e esta tela parecia de outro sistema.
+        //
+        // Setor e Cargo escalam pelo tamanho do CARTAO e limitam com Clamp; o efeito pratico deles
+        // e ~1,43x a base. Usar o menor entre o fator global e a escala do cartao reproduz isso sem
+        // precisar de uma tabela de tetos por controle: o cartao e o mesmo nas tres telas.
         float piso = Math.Max(minimo, tamanhoBase);
+
+        // O teto nunca pode ficar ABAIXO do piso: antes de a tela ser esticada a escala do cartao e
+        // menor que 1, o alvo cai para a base e um minimo maior que ela fazia o Clamp estourar com
+        // "'9' cannot be greater than 8,5" ja no construtor.
+        float alvo = Math.Max(piso, tamanhoBase * Math.Min(LegibilidadeRecebimentoMercadoria.Escala, Math.Max(escala, 1f)));
         float tamanho = Math.Clamp(alvo * Math.Min(escala, 1f), piso, alvo);
         if (Math.Abs(controle.Font.Size - tamanho) < 0.05f && controle.Font.Style == estilo)
         {
@@ -880,6 +1120,16 @@ public partial class BalancaForm : Form
         searchPanel.Height = Math.Max(34, (int)Math.Round(34 * escalaY));
         listaHeaderPanel.Top = searchPanel.Bottom + (int)Math.Round(16 * escalaY);
         balancasFlowPanel.Top = listaHeaderPanel.Bottom + (int)Math.Round(2 * escalaY);
+        // O rodape "Exibindo N de N" vem do FUNDO DO CARTAO, nao do Anchor do Designer.
+        // MEDIDO em 25/11/2026: ancorado, ele parava em Y=1436 num cartao de 950 — 486px fora da
+        // tela, invisivel. E como a altura da lista saia DELE, a lista tambem transbordava o cartao.
+        quantidadeBalancasLabel.Width = larguraConteudo;
+        int alturaRodape = Math.Max(22, AlturaDoTexto(quantidadeBalancasLabel));
+        quantidadeBalancasLabel.SetBounds(
+            lado,
+            Math.Max(0, balancasCard.ClientSize.Height - alturaRodape - (int)Math.Round(14 * escalaY)),
+            larguraConteudo,
+            alturaRodape);
         int limiteInferiorLista = quantidadeBalancasLabel.Top - (int)Math.Round(6 * escalaY);
         balancasFlowPanel.Height = Math.Max(120, limiteInferiorLista - balancasFlowPanel.Top);
 
